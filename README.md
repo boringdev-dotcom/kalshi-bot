@@ -56,7 +56,7 @@ KALSHI_WS_URL=wss://demo-api.kalshi.co/trade-api/ws/v2
 ```
 
 **Note:** 
-- For production, change `KALSHI_WS_URL` to `wss://api.kalshi.com/trade-api/ws/v2`
+- For production, change `KALSHI_WS_URL` to `wss://api.elections.kalshi.com/trade-api/ws/v2`
 - When adding your private key to `.env`, you can either:
   - Use `\n` for newlines in a single line: `KALSHI_PRIVATE_KEY_PEM=-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----`
   - Or use actual newlines if your `.env` file supports multi-line values

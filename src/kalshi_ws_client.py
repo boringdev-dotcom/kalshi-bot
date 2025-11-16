@@ -4,6 +4,8 @@ import base64
 import json
 import logging
 import time
+from collections import defaultdict
+from datetime import datetime, timedelta
 import websockets
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -135,15 +137,71 @@ async def stream_orders(
     Connect to Kalshi WebSocket and stream order events.
     
     Automatically reconnects on connection loss with exponential backoff.
+    Deduplicates multiple fill events for the same order_id.
     
     Args:
         ws_url: WebSocket URL (e.g., wss://demo-api.kalshi.co/trade-api/ws/v2)
         key_id: Kalshi API key ID
         private_key_pem: RSA private key in PEM format (as string)
-        on_created: Async callback function called when an order is created
+        on_created: Async callback function called when an order is created/filled
         reconnect_delay: Initial reconnect delay in seconds
         max_reconnect_delay: Maximum reconnect delay in seconds
     """
+    # Track fills per order_id to aggregate partial fills
+    order_fills = defaultdict(list)  # order_id -> list of fill events
+    fill_timeouts = {}  # order_id -> asyncio.Task for timeout
+    
+    async def process_order_fill(fill_data: dict, order_id: str):
+        """Process a fill event, aggregating partial fills."""
+        # Add this fill to the list for this order
+        order_fills[order_id].append(fill_data)
+        
+        # Cancel any existing timeout for this order
+        if order_id in fill_timeouts:
+            fill_timeouts[order_id].cancel()
+        
+        # Wait a short time (500ms) to see if more fills come in for the same order
+        async def send_aggregated_notification():
+            await asyncio.sleep(0.5)  # Wait for potential additional fills
+            
+            if order_id in order_fills:
+                fills = order_fills[order_id]
+                # Aggregate all fills for this order
+                total_count = sum(f.get('count', 0) for f in fills)
+                latest_fill = fills[-1]  # Use the latest fill for most info
+                
+                # Calculate total amount across all fills (important for sell orders with different prices)
+                total_amount_cents = 0
+                for fill in fills:
+                    fill_price_cents = fill.get('yes_price') or fill.get('no_price') or 0
+                    fill_count = fill.get('count', 0)
+                    total_amount_cents += fill_price_cents * fill_count
+                
+                # Create aggregated fill data
+                aggregated = latest_fill.copy()
+                aggregated['count'] = total_count
+                aggregated['fill_count'] = len(fills)  # Number of partial fills
+                aggregated['is_partial'] = len(fills) > 1
+                
+                # Store total amount for accurate calculation
+                aggregated['total_amount_cents'] = total_amount_cents
+                # Calculate average price for display
+                if total_count > 0:
+                    avg_price_cents = total_amount_cents // total_count
+                    aggregated['yes_price'] = avg_price_cents
+                    aggregated['yes_price_dollars'] = f"{avg_price_cents / 100:.4f}"
+                
+                # Send notification
+                await on_created(aggregated, ws_url)
+                
+                # Clean up
+                del order_fills[order_id]
+                if order_id in fill_timeouts:
+                    del fill_timeouts[order_id]
+        
+        # Schedule the aggregated notification
+        fill_timeouts[order_id] = asyncio.create_task(send_aggregated_notification())
+    
     delay = reconnect_delay
     
     while True:
@@ -207,9 +265,10 @@ async def stream_orders(
                         
                         # Handle fill events (order fills)
                         if event_type == "fill":
-                            logger.info(f"Order filled: {event_data.get('order_id')}")
-                            # For now, treat fills as order events (user placed an order that got filled)
-                            await on_created(event_data)
+                            order_id = event_data.get('order_id')
+                            logger.info(f"Order fill received: {order_id}, count: {event_data.get('count')}")
+                            # Process fill with aggregation to handle partial fills
+                            await process_order_fill(event_data, order_id)
                         
                         # Handle order creation/update events
                         elif event_type == "order_update" or event_type == "order":

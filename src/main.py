@@ -62,9 +62,9 @@ async def main():
     api_port = int(os.getenv("API_PORT", "8000"))
     
     # Callback for when an order is created
-    async def on_order_created(order: dict) -> None:
+    async def on_order_created(order: dict, ws_url_param: str = None) -> None:
         """Handle order created event."""
-        post_order_created(webhook_url, order)
+        post_order_created(webhook_url, order, ws_url_param or ws_url)
     
     # Start API server and WebSocket client concurrently
     async def run_api_server():
