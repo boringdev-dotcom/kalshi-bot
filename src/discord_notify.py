@@ -70,14 +70,11 @@ def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> Non
         raw_side = order.get('side', '')
         side = format_side(raw_side)
         
-        # Determine what YES/NO means using ticker suffix and market API data
-        # The ticker suffix (-NGR, -COD, -TIE) indicates which market this is
-        # For example: KXFIFAGAME-25NOV16NGRCOD-NGR means Nigeria's market (YES = Nigeria wins)
-        #              KXFIFAGAME-25NOV16ITANOR-TIE means Tie market (YES = Tie happens)
+        # Determine what YES/NO means using market API data
+        # The API provides yes_sub_title and no_sub_title fields that tell us exactly what YES/NO means
         side_display = side
         if market_data and raw_side:
             market_title = market_data.get('title') or market_name or ''
-            market_subtitle = market_data.get('subtitle') or ''
             
             # Extract ticker suffix to determine which market this is
             ticker_suffix = ticker.split('-')[-1].upper() if '-' in ticker else ''
@@ -89,58 +86,46 @@ def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> Non
                     side_display = "YES - Tie"
                 elif raw_side.upper() == 'NO':
                     side_display = "NO - Tie"
-            # Try to use subtitle first (API-provided team name)
-            elif market_subtitle and ' vs ' in market_title and 'Winner' in market_title:
-                parts = market_title.split(' vs ')
-                if len(parts) >= 2:
-                    team_a = parts[0].strip()
-                    team_b = parts[1].split('Winner')[0].strip()
-                    
-                    # Check if subtitle matches one of the teams
-                    if market_subtitle.strip() == team_a:
-                        # This is team_a's market
-                        if raw_side.upper() == 'YES':
-                            side_display = f"YES - {team_a}"
-                        elif raw_side.upper() == 'NO':
-                            side_display = f"NO - {team_a} ({team_b})"
-                    elif market_subtitle.strip() == team_b:
-                        # This is team_b's market
-                        if raw_side.upper() == 'YES':
-                            side_display = f"YES - {team_b}"
-                        elif raw_side.upper() == 'NO':
-                            side_display = f"NO - {team_b} ({team_a})"
-                    else:
-                        # Subtitle doesn't match exactly, use subtitle directly
-                        if raw_side.upper() == 'YES':
-                            side_display = f"YES - {market_subtitle}"
-                        elif raw_side.upper() == 'NO':
-                            side_display = f"NO - {market_subtitle}"
+            # Use yes_sub_title and no_sub_title from API (most accurate)
+            elif market_data.get('yes_sub_title') or market_data.get('no_sub_title'):
+                yes_sub_title = market_data.get('yes_sub_title', '')
+                no_sub_title = market_data.get('no_sub_title', '')
+                
+                if raw_side.upper() == 'YES' and yes_sub_title:
+                    side_display = f"YES - {yes_sub_title}"
+                elif raw_side.upper() == 'NO' and no_sub_title:
+                    side_display = f"NO - {no_sub_title}"
             elif ' vs ' in market_title and 'Winner' in market_title:
                 # Fallback: Parse market title and match ticker suffix to team names
-                # The ticker suffix (e.g., -NGR, -COD) indicates which team's market this is
+                # The ticker suffix (e.g., -NGR, -COD, -SAS) indicates which team's market this is
                 parts = market_title.split(' vs ')
                 if len(parts) >= 2:
                     team_a = parts[0].strip()
                     team_b = parts[1].split('Winner')[0].strip()
                     
                     # Check the ticker suffix to determine which team's market this is
+                    # The ticker often contains abbreviations: SAC=Sacramento, SAS=San Antonio Spurs
+                    # Match more precisely by checking if suffix appears as a distinct abbreviation
                     ticker_suffix = ticker.split('-')[-1].upper() if '-' in ticker else ''
                     
-                    # Try to match ticker suffix with team names (generic approach)
-                    # Extract key words from team names and check if suffix matches
-                    team_a_words = [word.upper()[:3] for word in team_a.split() if len(word) >= 3]
-                    team_b_words = [word.upper()[:3] for word in team_b.split() if len(word) >= 3]
+                    # Try to match ticker suffix more precisely
+                    # Check if suffix matches team abbreviations or key words
+                    team_a_upper = team_a.upper()
+                    team_b_upper = team_b.upper()
                     
-                    # Check if ticker suffix matches any part of team names
+                    # Check for exact abbreviation matches first (e.g., "SAS" should match "San Antonio Spurs")
+                    # Look for the suffix as a standalone word or abbreviation in team names
                     matches_team_a = (
-                        ticker_suffix in team_a.upper() or
-                        any(ticker_suffix.startswith(word) or word.startswith(ticker_suffix[:3]) 
-                            for word in team_a_words if len(ticker_suffix) >= 3)
+                        ticker_suffix == team_a_upper or  # Exact match
+                        f" {ticker_suffix} " in f" {team_a_upper} " or  # As standalone word
+                        team_a_upper.startswith(ticker_suffix) or  # Starts with suffix
+                        any(word.startswith(ticker_suffix) for word in team_a_upper.split())  # Any word starts with suffix
                     )
                     matches_team_b = (
-                        ticker_suffix in team_b.upper() or
-                        any(ticker_suffix.startswith(word) or word.startswith(ticker_suffix[:3]) 
-                            for word in team_b_words if len(ticker_suffix) >= 3)
+                        ticker_suffix == team_b_upper or  # Exact match
+                        f" {ticker_suffix} " in f" {team_b_upper} " or  # As standalone word
+                        team_b_upper.startswith(ticker_suffix) or  # Starts with suffix
+                        any(word.startswith(ticker_suffix) for word in team_b_upper.split())  # Any word starts with suffix
                     )
                     
                     # Determine which team's market this is
@@ -157,11 +142,29 @@ def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> Non
                         elif raw_side.upper() == 'NO':
                             side_display = f"NO - {team_b} ({team_a})"
                     else:
-                        # Fallback: assume first team (original behavior)
-                        if raw_side.upper() == 'YES':
-                            side_display = f"YES - {team_a}"
-                        elif raw_side.upper() == 'NO':
-                            side_display = f"NO - {team_a}"
+                        # If both match or neither matches, prefer more specific match
+                        # Check if one team name contains the suffix more prominently
+                        team_a_score = sum(1 for word in team_a_upper.split() if ticker_suffix in word or word.startswith(ticker_suffix))
+                        team_b_score = sum(1 for word in team_b_upper.split() if ticker_suffix in word or word.startswith(ticker_suffix))
+                        
+                        if team_b_score > team_a_score:
+                            # team_b matches better
+                            if raw_side.upper() == 'YES':
+                                side_display = f"YES - {team_b}"
+                            elif raw_side.upper() == 'NO':
+                                side_display = f"NO - {team_b} ({team_a})"
+                        elif team_a_score > team_b_score:
+                            # team_a matches better
+                            if raw_side.upper() == 'YES':
+                                side_display = f"YES - {team_a}"
+                            elif raw_side.upper() == 'NO':
+                                side_display = f"NO - {team_a} ({team_b})"
+                        else:
+                            # Fallback: assume first team (original behavior)
+                            if raw_side.upper() == 'YES':
+                                side_display = f"YES - {team_a}"
+                            elif raw_side.upper() == 'NO':
+                                side_display = f"NO - {team_a}"
             elif 'Will ' in market_title or '?' in market_title:
                 # Pattern: "Will X happen?" -> YES = X happens, NO = X doesn't happen
                 # Extract the main subject
