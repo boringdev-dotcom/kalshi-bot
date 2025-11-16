@@ -1,0 +1,12 @@
+[project]
+name = "kalshi-bot"
+version = "0.1.0"
+description = "Kalshi → Discord (webhook) notifier"
+requires-python = ">=3.11"
+dependencies = [
+  "websockets>=12.0",
+  "requests>=2.31",
+  "python-dotenv>=1.0",
+  "cryptography>=41.0",
+]
+
