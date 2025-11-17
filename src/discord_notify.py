@@ -1,47 +1,53 @@
 """Discord webhook notifier for Kalshi order events."""
 import logging
-import os
-import requests
 from datetime import datetime
-from dotenv import load_dotenv
+from typing import Optional, Tuple, Dict, Any
 
+import requests
+
+from .config import Settings
 from .kalshi_api import get_market_name_cached, get_market_data
 
 logger = logging.getLogger(__name__)
 
 
-def format_price(price_cents: int) -> str:
+def format_price(price_cents: Optional[int]) -> str:
     """Convert price from cents to dollars with proper formatting."""
     if price_cents is None:
         return "N/A"
     return f"${price_cents / 100:.2f}"
 
 
-def format_side(side: str) -> str:
+def format_side(side: Optional[str]) -> str:
     """Format side to be more readable."""
     if not side:
         return "N/A"
     return side.upper()
 
 
-def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> None:
+def create_order_embed(
+    order: Dict[str, Any], 
+    ws_url: Optional[str] = None
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
-    Send a Discord notification when a new Kalshi order event occurs.
+    Create Discord embed and content for an order notification.
     
     Args:
-        webhook_url: Discord webhook URL
         order: Order data dictionary from Kalshi WebSocket (could be fill, order creation, etc.)
+        ws_url: WebSocket URL to determine API base URL (demo vs production)
+    
+    Returns:
+        Tuple of (embed_dict, content_string) or (None, None) on error
     """
     try:
         # Extract order details with fallbacks for different event formats
         ticker = order.get('market_ticker') or order.get('ticker', 'N/A')
         
         # Fetch human-readable market name from API
-        # Load credentials from environment if not passed
-        key_id = os.getenv("KALSHI_API_KEY_ID")
-        private_key_pem = os.getenv("KALSHI_PRIVATE_KEY_PEM")
-        if private_key_pem:
-            private_key_pem = private_key_pem.replace("\\n", "\n")
+        # Use Settings to get properly normalized credentials
+        settings = Settings()
+        key_id = settings.kalshi_api_key_id
+        private_key_pem = settings.kalshi_private_key_pem
         
         # Fetch market details (name and payout info) from API
         # Use cached name first to avoid blocking, then try to fetch full data
@@ -50,29 +56,41 @@ def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> Non
             # Try cached name first (fast)
             market_name = get_market_name_cached(ticker, key_id, private_key_pem, ws_url)
             
+            # If we got the ticker back (cache miss and API failed), log it
+            if market_name == ticker:
+                logger.debug(f"Market name fetch failed for {ticker}, using ticker as fallback")
+            
             # Try to fetch full market data (may timeout, but that's OK)
             try:
                 market_data = get_market_data(ticker, key_id, private_key_pem, ws_url)
                 if market_data:
                     # Update name from full data if available
-                    market_name = market_data.get('title') or market_data.get('subtitle') or market_name
+                    fetched_name = market_data.get('title') or market_data.get('subtitle')
+                    if fetched_name:
+                        market_name = fetched_name
+                        logger.debug(f"Successfully fetched market name for {ticker}: {market_name}")
             except Exception as e:
                 logger.debug(f"Could not fetch market data for {ticker}: {e}")
                 # Continue without market_data - we have the name from cache
         else:
             market_name = ticker
+            if not key_id or not private_key_pem:
+                logger.warning(f"Missing Kalshi API credentials, using ticker as market name: {ticker}")
         
         action = order.get('action', '').capitalize() if order.get('action') else ''
         is_sell = action.lower() == "sell"
         
-        # Always use 'side' to determine what YES/NO means
-        # The ticker suffix (-NGR, -COD) indicates which team's market this is
+        # Determine side display text (what YES/NO actually means)
+        # Strategy (in order of preference):
+        # 1. Use API yes_sub_title/no_sub_title (most accurate, provided by Kalshi)
+        # 2. Parse market title for team names vs. ticker suffix (for sports markets)
+        # 3. Parse "Will X happen?" pattern (for prediction markets)
+        # 4. Fallback to plain YES/NO
+        
         raw_side = order.get('side', '')
         side = format_side(raw_side)
+        side_display = side  # Default fallback
         
-        # Determine what YES/NO means using market API data
-        # The API provides yes_sub_title and no_sub_title fields that tell us exactly what YES/NO means
-        side_display = side
         if market_data and raw_side:
             market_title = market_data.get('title') or market_name or ''
             
@@ -185,12 +203,17 @@ def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> Non
         if price_cents:
             price_per_contract = price_cents / 100
             price = format_price(price_cents)
+            # Calculate percentage odds (price in cents = percentage)
+            odds_percentage = price_cents
         elif price_dollars:
             price_per_contract = float(price_dollars)
             price = f"${price_per_contract:.2f}"
+            # Calculate percentage odds (convert dollars to percentage)
+            odds_percentage = int(float(price_dollars) * 100)
         else:
             price_per_contract = None
             price = "N/A"
+            odds_percentage = None
         
         # Calculate total dollar amount
         # For BUY: this is what you paid
@@ -328,6 +351,14 @@ def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> Non
             },
         ]
         
+        # Add odds percentage if available
+        if odds_percentage is not None:
+            fields.append({
+                "name": "🎯 Odds",
+                "value": f"**{odds_percentage}%**",
+                "inline": True
+            })
+        
         # Add time field
         fields.append({
             "name": "🕐 Time",
@@ -346,9 +377,35 @@ def post_order_created(webhook_url: str, order: dict, ws_url: str = None) -> Non
             "timestamp": datetime.utcnow().isoformat()
         }
         
+        content = f"**Order Filled:** [{market_name}]({order_link})"
+        
+        return embed, content
+    except Exception as e:
+        logger.error(f"Unexpected error creating Discord notification: {e}", exc_info=True)
+        return None, None
+
+
+def post_order_created(
+    webhook_url: str, 
+    order: Dict[str, Any], 
+    ws_url: Optional[str] = None
+) -> None:
+    """
+    Send a Discord notification via webhook when a new Kalshi order event occurs.
+    
+    Args:
+        webhook_url: Discord webhook URL
+        order: Order data dictionary from Kalshi WebSocket (could be fill, order creation, etc.)
+        ws_url: WebSocket URL to determine API base URL (demo vs production)
+    """
+    try:
+        embed, content = create_order_embed(order, ws_url)
+        if not embed:
+            return
+        
         payload = {
             "embeds": [embed],
-            "content": f"**Order Filled:** [{market_name}]({order_link})"
+            "content": content
         }
         
         response = requests.post(
