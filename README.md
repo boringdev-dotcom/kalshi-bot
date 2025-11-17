@@ -99,7 +99,7 @@ source .venv/bin/activate
 
 ## Running
 
-### Option 1: CLI (Recommended)
+### Option 1: CLI 
 
 After installing dependencies, use the CLI:
 
@@ -112,7 +112,7 @@ uv run kalshi-bot run-api    # API server only (health check)
 uv run kalshi-bot run-worker # WebSocket worker only
 ```
 
-### Option 2: Python Module
+### Option 2: Python Module (Recommended)
 
 ```bash
 # Run the main entry point (API + Worker)
