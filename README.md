@@ -2,8 +2,11 @@
 
 A production-ready Discord bot that monitors your Kalshi orders via WebSocket and sends rich notifications to Discord when orders are filled. Supports both Discord bot (with real-time odds updates) and webhook modes.
 
+**NEW: Soccer Research Bot** - An AI-powered betting research assistant using LLM Council (multiple AI models working together) to analyze La Liga and Premier League matches on Kalshi.
+
 ## Features
 
+### Order Monitoring Bot
 - **Real-time order monitoring** via Kalshi WebSocket API
 - **Discord bot notifications** with live odds updates (or webhook fallback)
 - **Automatic reconnection** with exponential backoff
@@ -12,6 +15,14 @@ A production-ready Discord bot that monitors your Kalshi orders via WebSocket an
 - **Production-ready architecture** with centralized configuration and type safety
 - **Flexible deployment** - run API server and worker together or separately
 - Uses `uv` for fast dependency management
+
+### Soccer Research Bot (NEW)
+- **LLM Council Analysis** - Multiple AI models (GPT-4o, Claude Sonnet 4, Gemini 3 Pro, Grok 3) analyze matches independently
+- **Web Search Research** - Perplexity Sonar Pro gathers real-time data on team form, injuries, and stats
+- **Peer Review** - Models review and rank each other's analysis for better accuracy
+- **Chairman Synthesis** - Final recommendation compiled by designated chairman model
+- **Scheduled & On-Demand** - Daily automated posts + `/analyze` slash command
+- **La Liga & Premier League** - Focus on top European soccer leagues
 
 ## Prerequisites
 
@@ -74,6 +85,22 @@ DISCORD_CHANNEL_ID=your_channel_id_here
 
 # Kalshi WebSocket URL (defaults to demo environment)
 KALSHI_WS_URL=wss://demo-api.kalshi.co/trade-api/ws/v2
+
+# ========================================
+# Soccer Research Bot Configuration
+# ========================================
+
+# OpenRouter API key (for LLM Council)
+# Get your key at https://openrouter.ai/
+OPENROUTER_API_KEY=sk-or-v1-your_openrouter_api_key_here
+
+# Research bot uses the same Discord bot/channel as order monitoring
+# (DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID above)
+
+# Schedule for daily analysis (default: 8:00 AM ET)
+RESEARCH_SCHEDULE_HOUR=8
+RESEARCH_SCHEDULE_MINUTE=0
+RESEARCH_SCHEDULE_TIMEZONE=America/New_York
 ```
 
 **Note:** 
@@ -136,8 +163,31 @@ Then run the worker separately:
 uv run kalshi-bot run-worker
 ```
 
+### Running the Soccer Research Bot
+
+```bash
+# Run the research bot (scheduled daily + Discord commands)
+uv run kalshi-research
+
+# Or run directly with Python
+uv run python -m src.research_bot
+```
+
+The research bot will:
+1. Start with an initial analysis of current soccer markets
+2. Schedule daily analysis at the configured time
+3. Listen for `/analyze` slash command in Discord (if bot token provided)
+
+**Discord Slash Commands:**
+- `/analyze` - Run analysis for all leagues
+- `/analyze league:la_liga` - Run analysis for La Liga only
+- `/analyze league:premier_league` - Run analysis for Premier League only
+- `/status` - Check bot status and next scheduled run
+
 
 ## How It Works
+
+### Order Monitoring Bot
 
 1. The bot connects to Kalshi's WebSocket API using authenticated headers
 2. Subscribes to the `fill` channel for order fill events
@@ -145,6 +195,30 @@ uv run kalshi-bot run-worker
 4. When an order is filled, sends a formatted notification to Discord
 5. If using Discord Bot: Updates odds in real-time via WebSocket when prices change
 6. Automatically reconnects if the connection is lost
+
+### Soccer Research Bot (LLM Council)
+
+The research bot uses a 4-stage analysis pipeline inspired by [LLM Council](https://github.com/karpathy/llm-council):
+
+```
+Stage 0 (Research)     → Perplexity Sonar Pro searches for match data
+                         Team form, injuries, H2H, standings
+                                    ↓
+Stage 1 (Analysis)     → 4 LLMs analyze independently
+                         GPT-4o, Claude Sonnet 4, Gemini 3 Pro, Grok 3
+                                    ↓
+Stage 2 (Review)       → Each LLM reviews others' work (anonymized)
+                         Ranks analyses, identifies flaws
+                                    ↓
+Stage 3 (Synthesis)    → Chairman (Gemini 3 Pro) compiles final recommendation
+                         Consensus view with confidence scores
+```
+
+The council approach provides:
+- **Multiple perspectives** from different AI models
+- **Self-correction** through peer review
+- **Confidence scores** based on model agreement
+- **Transparent reasoning** with full analysis available
 
 ## Notification Format
 
@@ -195,10 +269,14 @@ kalshi-bot/
 │   ├── api.py               # FastAPI application (health check)
 │   ├── config.py            # Centralized configuration (Settings)
 │   ├── kalshi_auth.py       # Shared Kalshi authentication utilities
-│   ├── kalshi_api.py        # Kalshi REST API client
+│   ├── kalshi_api.py        # Kalshi REST API client (+ soccer markets)
 │   ├── kalshi_ws_client.py  # WebSocket client (order streaming)
 │   ├── discord_bot.py       # Discord bot client (real-time updates)
-│   └── discord_notify.py    # Discord webhook/embed formatting
+│   ├── discord_notify.py    # Discord webhook/embed formatting
+│   ├── research_bot.py      # Soccer research bot (LLM Council)
+│   ├── llm_council.py       # LLM Council engine (OpenRouter)
+│   ├── prompts.py           # LLM prompts for analysis pipeline
+│   └── discord_embeds.py    # Discord embeds for research output
 ├── generate_curl.py          # Helper script for API testing
 ├── pyproject.toml           # Project metadata and dependencies
 ├── .env                     # Your environment variables (not in git)

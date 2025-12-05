@@ -1,6 +1,6 @@
 """Configuration management for Kalshi Discord bot."""
 import os
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     discord_bot_token: Optional[str] = Field(default=None, alias="DISCORD_BOT_TOKEN")
     discord_channel_id: Optional[str] = Field(default=None, alias="DISCORD_CHANNEL_ID")
     discord_webhook_url: Optional[str] = Field(default=None, alias="DISCORD_WEBHOOK_URL")
+    
+    # OpenRouter configuration for LLM Council
+    openrouter_api_key: Optional[str] = Field(default=None, alias="OPENROUTER_API_KEY")
+    
+    # Google Gemini API key (for research with Google Search grounding)
+    google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY")
+    
+    # Research bot schedule configuration
+    research_schedule_hour: int = Field(default=8, alias="RESEARCH_SCHEDULE_HOUR")
+    research_schedule_minute: int = Field(default=0, alias="RESEARCH_SCHEDULE_MINUTE")
+    research_schedule_timezone: str = Field(default="America/New_York", alias="RESEARCH_SCHEDULE_TIMEZONE")
     
     # API server configuration
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
@@ -71,6 +82,28 @@ class Settings(BaseSettings):
             missing.append("KALSHI_PRIVATE_KEY_PEM")
         
         # Require either Discord bot OR webhook
+        if not self.use_discord_bot and not self.discord_webhook_url:
+            missing.append("DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (or DISCORD_WEBHOOK_URL)")
+        
+        return missing
+    
+    def validate_research_bot_required(self) -> list[str]:
+        """
+        Validate required settings for research bot.
+        
+        Returns:
+            List of missing required environment variable names.
+        """
+        missing = []
+        
+        if not self.kalshi_api_key_id:
+            missing.append("KALSHI_API_KEY_ID")
+        if not self.kalshi_private_key_pem:
+            missing.append("KALSHI_PRIVATE_KEY_PEM")
+        if not self.openrouter_api_key:
+            missing.append("OPENROUTER_API_KEY")
+        
+        # Require either Discord bot OR webhook (same as order bot)
         if not self.use_discord_bot and not self.discord_webhook_url:
             missing.append("DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (or DISCORD_WEBHOOK_URL)")
         

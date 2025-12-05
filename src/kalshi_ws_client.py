@@ -149,20 +149,24 @@ async def stream_orders(
                 await ws.send(json.dumps(subscribe_fill))
                 logger.info("Subscribed to fill channel")
                 
+                # Track market channel subscription status
+                market_channel_subscribed = False
+                market_subscription_id = 2
+                
                 # Subscribe to market price updates if callback provided
-                # Note: Market channel may not be available in demo environment
+                # Note: Market channel may not be available in all environments
                 if on_price_update:
                     subscribe_market = {
-                        "id": 2,
+                        "id": market_subscription_id,
                         "cmd": "subscribe",
                         "params": {
                             "channels": ["market"]
                         }
                     }
                     await ws.send(json.dumps(subscribe_market))
-                    logger.info("Subscribed to market channel for price updates")
+                    logger.info("Attempting to subscribe to market channel for price updates")
                     # Note: If this fails with "Unknown channel name", market updates won't work
-                    # but fill events will still contain price information
+                    # but fill events will still contain price information and will be used instead
                 
                 # Reset reconnect delay on successful connection
                 delay = reconnect_delay
@@ -176,11 +180,34 @@ async def stream_orders(
                         
                         # Handle subscription confirmation
                         if event_type == "subscribed" or event.get("cmd") == "subscribe":
-                            logger.info("Successfully subscribed to WebSocket channels")
+                            # Check if this is a market channel subscription confirmation
+                            if event.get("id") == market_subscription_id:
+                                market_channel_subscribed = True
+                                logger.info("Market channel subscription confirmed")
+                            else:
+                                logger.info("Successfully subscribed to WebSocket channels")
                             continue
                         
                         # Handle error messages
                         if event_type == "error" or event.get("error"):
+                            error_id = event.get("id")
+                            error_msg = event.get("msg") or event.get("error", {})
+                            
+                            # Check if this is the market channel subscription error
+                            if error_id == market_subscription_id:
+                                # Market channel not available - this is expected in some environments
+                                error_code = error_msg.get("code") if isinstance(error_msg, dict) else None
+                                error_text = error_msg.get("msg") if isinstance(error_msg, dict) else str(error_msg)
+                                
+                                if error_code == 8 and "Unknown channel name" in str(error_text):
+                                    logger.warning(
+                                        "Market channel not available - price updates will use fill events only. "
+                                        "This is normal if the market channel is not supported in your environment."
+                                    )
+                                    market_channel_subscribed = False
+                                    continue
+                            
+                            # Log other errors normally
                             logger.error(f"WebSocket error: {event.get('error', event)}")
                             continue
                         

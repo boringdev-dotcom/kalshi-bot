@@ -1,13 +1,35 @@
 """Kalshi REST API client for fetching market details."""
 import logging
 import time
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import requests
 
 from .kalshi_auth import sign_request
 
 logger = logging.getLogger(__name__)
+
+# Soccer series tickers on Kalshi (use these for direct API filtering)
+# Format: KXLALIGAGAME, KXEPLGAME, etc.
+SOCCER_SERIES_TICKERS = {
+    "la_liga": "KXLALIGAGAME",
+    "premier_league": "KXEPLGAME",
+}
+
+# Ticker prefixes for searching (markets start with these)
+SOCCER_TICKER_PREFIXES = {
+    "la_liga": ["KXLALIGA", "LALIGA"],
+    "premier_league": ["KXEPL", "KXPREMIER", "EPL"],
+}
+
+# Fallback search terms if series tickers don't work
+SOCCER_SEARCH_TERMS = {
+    "la_liga": ["LA LIGA", "LALIGA", "LA-LIGA"],
+    "premier_league": ["PREMIER LEAGUE", "EPL", "ENGLISH PREMIER"],
+}
+
+# Market types we're interested in
+SOCCER_MARKET_TYPES = ["winner", "spread", "moneyline"]
 
 
 def get_market_name(ticker: str, key_id: str, private_key_pem: str, ws_url: str = None) -> Optional[str]:
@@ -134,4 +156,431 @@ def get_market_name_cached(ticker: str, key_id: str, private_key_pem: str, ws_ur
     
     # Return ticker as fallback
     return ticker
+
+
+def get_markets(
+    key_id: str, 
+    private_key_pem: str, 
+    ws_url: str = None,
+    status: str = "open",
+    limit: int = 200,
+    cursor: str = None,
+    series_ticker: str = None,
+    event_ticker: str = None,
+) -> Dict[str, Any]:
+    """
+    Fetch markets from Kalshi REST API with pagination support.
+    
+    Args:
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL (demo vs production)
+        status: Market status filter (open, closed, settled)
+        limit: Maximum number of markets to return per page
+        cursor: Pagination cursor
+        series_ticker: Filter by series ticker
+        event_ticker: Filter by event ticker
+        
+    Returns:
+        Dictionary with 'markets' list and 'cursor' for pagination
+    """
+    if ws_url and "demo" in ws_url:
+        base_url = "https://demo-api.kalshi.co"
+    else:
+        base_url = "https://api.elections.kalshi.com"
+    
+    path = "/trade-api/v2/markets"
+    
+    # Build query parameters
+    params = {"status": status, "limit": limit}
+    if cursor:
+        params["cursor"] = cursor
+    if series_ticker:
+        params["series_ticker"] = series_ticker
+    if event_ticker:
+        params["event_ticker"] = event_ticker
+    
+    # Build full URL with query params
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    full_path = f"{path}?{query_string}"
+    url = base_url + full_path
+    
+    try:
+        timestamp_ms = str(int(time.time() * 1000))
+        signature = sign_request(private_key_pem, timestamp_ms, "GET", full_path)
+        
+        headers = {
+            "KALSHI-ACCESS-KEY": key_id,
+            "KALSHI-ACCESS-SIGNATURE": signature,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch markets: {e}")
+        return {"markets": [], "cursor": None}
+
+
+def get_sports_filters(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+) -> Dict[str, Any]:
+    """
+    Fetch available sports filters from Kalshi API.
+    
+    This helps discover available sports leagues and their series tickers.
+    
+    Args:
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL
+        
+    Returns:
+        Dictionary with sports filter information
+    """
+    if ws_url and "demo" in ws_url:
+        base_url = "https://demo-api.kalshi.co"
+    else:
+        base_url = "https://api.elections.kalshi.com"
+    
+    path = "/trade-api/v2/search/filters-for-sports"
+    url = base_url + path
+    
+    try:
+        timestamp_ms = str(int(time.time() * 1000))
+        signature = sign_request(private_key_pem, timestamp_ms, "GET", path)
+        
+        headers = {
+            "KALSHI-ACCESS-KEY": key_id,
+            "KALSHI-ACCESS-SIGNATURE": signature,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch sports filters: {e}")
+        return {}
+
+
+def get_events(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+    status: str = None,
+    series_ticker: str = None,
+    limit: int = 100,
+    cursor: str = None,
+) -> Dict[str, Any]:
+    """
+    Fetch events from Kalshi REST API.
+    
+    Args:
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL
+        status: Event status filter
+        series_ticker: Filter by series ticker
+        limit: Maximum number of events to return
+        cursor: Pagination cursor
+        
+    Returns:
+        Dictionary with 'events' list and 'cursor' for pagination
+    """
+    if ws_url and "demo" in ws_url:
+        base_url = "https://demo-api.kalshi.co"
+    else:
+        base_url = "https://api.elections.kalshi.com"
+    
+    path = "/trade-api/v2/events"
+    
+    params = {"limit": limit}
+    if status:
+        params["status"] = status
+    if series_ticker:
+        params["series_ticker"] = series_ticker
+    if cursor:
+        params["cursor"] = cursor
+    
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    full_path = f"{path}?{query_string}"
+    url = base_url + full_path
+    
+    try:
+        timestamp_ms = str(int(time.time() * 1000))
+        signature = sign_request(private_key_pem, timestamp_ms, "GET", full_path)
+        
+        headers = {
+            "KALSHI-ACCESS-KEY": key_id,
+            "KALSHI-ACCESS-SIGNATURE": signature,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch events: {e}")
+        return {"events": [], "cursor": None}
+
+
+def get_soccer_markets(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+    leagues: List[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch soccer markets for specified leagues (La Liga, Premier League).
+    
+    Uses series_ticker filtering for efficient API calls when possible.
+    
+    Args:
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL
+        leagues: List of leagues to filter ("la_liga", "premier_league")
+                 If None, fetches both.
+        
+    Returns:
+        List of soccer market dictionaries with market details and odds
+    """
+    if leagues is None:
+        leagues = ["la_liga", "premier_league"]
+    
+    soccer_markets = []
+    
+    # Try to fetch using series_ticker for each league (fast path)
+    for league in leagues:
+        series_ticker = SOCCER_SERIES_TICKERS.get(league)
+        if series_ticker:
+            logger.info(f"Fetching {league} markets using series_ticker: {series_ticker}")
+            cursor = None
+            
+            while True:
+                result = get_markets(
+                    key_id=key_id,
+                    private_key_pem=private_key_pem,
+                    ws_url=ws_url,
+                    status="open",
+                    limit=100,
+                    cursor=cursor,
+                    series_ticker=series_ticker,
+                )
+                
+                markets = result.get("markets", [])
+                if not markets:
+                    break
+                
+                for market in markets:
+                    soccer_markets.append(_format_soccer_market(market, league))
+                
+                cursor = result.get("cursor")
+                if not cursor:
+                    break
+    
+    # If no markets found via series_ticker, try event-based search
+    if not soccer_markets:
+        logger.info("No markets via series_ticker, trying event search...")
+        soccer_markets = _search_soccer_markets_fallback(
+            key_id, private_key_pem, ws_url, leagues
+        )
+    
+    logger.info(f"Found {len(soccer_markets)} soccer markets for leagues: {leagues}")
+    return soccer_markets
+
+
+def _format_soccer_market(market: Dict[str, Any], league: str) -> Dict[str, Any]:
+    """Format a market dict for soccer analysis."""
+    ticker = market.get("ticker", "").upper()
+    title = market.get("title", "").upper()
+    subtitle = market.get("subtitle", "").upper()
+    combined_text = f"{ticker} {title} {subtitle}"
+    
+    # Determine market type
+    market_type = "unknown"
+    if any(t in combined_text for t in ["WINNER", "WIN", "MONEYLINE", "TO WIN"]):
+        market_type = "winner"
+    elif any(t in combined_text for t in ["SPREAD", "HANDICAP"]):
+        market_type = "spread"
+    elif "TIE" in combined_text or "DRAW" in combined_text:
+        market_type = "tie"
+    elif "OVER" in combined_text or "UNDER" in combined_text:
+        market_type = "total"
+    
+    return {
+        "ticker": market.get("ticker"),
+        "title": market.get("title"),
+        "subtitle": market.get("subtitle"),
+        "yes_bid": market.get("yes_bid"),
+        "yes_ask": market.get("yes_ask"),
+        "no_bid": market.get("no_bid"),
+        "no_ask": market.get("no_ask"),
+        "last_price": market.get("last_price"),
+        "volume": market.get("volume"),
+        "open_interest": market.get("open_interest"),
+        "close_time": market.get("close_time"),
+        "expiration_time": market.get("expiration_time"),
+        "market_type": market_type,
+        "league": league,
+        "yes_sub_title": market.get("yes_sub_title"),
+        "no_sub_title": market.get("no_sub_title"),
+        "event_ticker": market.get("event_ticker"),
+        "series_ticker": market.get("series_ticker"),
+    }
+
+
+def _search_soccer_markets_fallback(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str,
+    leagues: List[str],
+) -> List[Dict[str, Any]]:
+    """
+    Fallback: Search for soccer markets by scanning events.
+    
+    This is slower but more reliable if series_tickers change.
+    """
+    soccer_markets = []
+    
+    # Build search terms
+    search_terms = ["SOCCER", "FOOTBALL"]
+    for league in leagues:
+        if league in SOCCER_SEARCH_TERMS:
+            search_terms.extend(SOCCER_SEARCH_TERMS[league])
+    
+    # Fetch events and look for soccer
+    cursor = None
+    checked_events = set()
+    
+    while True:
+        result = get_events(
+            key_id=key_id,
+            private_key_pem=private_key_pem,
+            ws_url=ws_url,
+            status="open",
+            limit=100,
+            cursor=cursor,
+        )
+        
+        events = result.get("events", [])
+        if not events:
+            break
+        
+        for event in events:
+            event_ticker = event.get("event_ticker", "")
+            if event_ticker in checked_events:
+                continue
+            checked_events.add(event_ticker)
+            
+            title = event.get("title", "").upper()
+            category = event.get("category", "").upper()
+            combined = f"{event_ticker} {title} {category}"
+            
+            # Check if this is a soccer event
+            if any(term in combined.upper() for term in search_terms):
+                # Determine league
+                detected_league = "unknown"
+                for league_name, terms in SOCCER_SEARCH_TERMS.items():
+                    if league_name in leagues and any(t in combined for t in terms):
+                        detected_league = league_name
+                        break
+                
+                if detected_league == "unknown":
+                    continue
+                
+                # Fetch markets for this event
+                market_result = get_markets(
+                    key_id=key_id,
+                    private_key_pem=private_key_pem,
+                    ws_url=ws_url,
+                    status="open",
+                    event_ticker=event_ticker,
+                    limit=50,
+                )
+                
+                for market in market_result.get("markets", []):
+                    soccer_markets.append(_format_soccer_market(market, detected_league))
+        
+        cursor = result.get("cursor")
+        if not cursor:
+            break
+    
+    return soccer_markets
+
+
+def format_markets_for_analysis(markets: List[Dict[str, Any]]) -> str:
+    """
+    Format soccer markets into a readable string for LLM analysis.
+    
+    Args:
+        markets: List of soccer market dictionaries
+        
+    Returns:
+        Formatted string describing the markets and their odds
+    """
+    if not markets:
+        return "No soccer markets found for the specified leagues."
+    
+    # Group markets by league and then by match
+    from collections import defaultdict
+    by_league = defaultdict(list)
+    
+    for market in markets:
+        league = market.get("league", "unknown")
+        by_league[league].append(market)
+    
+    output = []
+    
+    for league, league_markets in by_league.items():
+        league_display = league.replace("_", " ").title()
+        output.append(f"\n{'='*50}")
+        output.append(f"  {league_display}")
+        output.append(f"{'='*50}\n")
+        
+        # Group by event/match
+        by_event = defaultdict(list)
+        for market in league_markets:
+            event = market.get("event_ticker") or market.get("title", "Unknown")
+            by_event[event].append(market)
+        
+        for event, event_markets in by_event.items():
+            # Get the main match title
+            main_title = event_markets[0].get("title", event)
+            output.append(f"\n📅 {main_title}")
+            output.append("-" * 40)
+            
+            for market in event_markets:
+                ticker = market.get("ticker", "N/A")
+                market_type = market.get("market_type", "unknown")
+                yes_bid = market.get("yes_bid")
+                yes_ask = market.get("yes_ask")
+                yes_sub = market.get("yes_sub_title", "YES")
+                no_sub = market.get("no_sub_title", "NO")
+                
+                # Format odds
+                if yes_bid and yes_ask:
+                    yes_mid = (yes_bid + yes_ask) / 2
+                    no_mid = 100 - yes_mid
+                    output.append(f"  [{market_type.upper()}] {ticker}")
+                    output.append(f"    {yes_sub}: {yes_mid:.0f}¢ (bid: {yes_bid}¢, ask: {yes_ask}¢)")
+                    output.append(f"    {no_sub}: {no_mid:.0f}¢")
+                else:
+                    last_price = market.get("last_price", "N/A")
+                    output.append(f"  [{market_type.upper()}] {ticker}")
+                    output.append(f"    Last Price: {last_price}¢")
+                
+                output.append("")
+    
+    return "\n".join(output)
 
