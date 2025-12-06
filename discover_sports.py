@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Discover available sports and leagues on Kalshi."""
 import json
+from collections import defaultdict
 from src.config import Settings
-from src.kalshi_api import get_markets, SOCCER_SERIES_TICKERS
+from src.kalshi_api import get_markets, get_sports_filters, SOCCER_SERIES_TICKERS
 
 def main():
     settings = Settings()
@@ -11,121 +12,236 @@ def main():
         print("❌ Missing Kalshi API credentials in .env")
         return
     
-    print("🔍 Searching for soccer markets on Kalshi...")
+    print("🔍 Discovering all soccer series tickers on Kalshi...")
     print()
     
-    # Known soccer series tickers
-    print("📋 Checking known soccer series tickers:")
-    print(f"   La Liga: {SOCCER_SERIES_TICKERS['la_liga']}")
-    print(f"   Premier League: {SOCCER_SERIES_TICKERS['premier_league']}")
-    print()
-    
-    # Try fetching La Liga markets directly
+    # First, try the sports filters API
     print("="*60)
-    print("⚽ Fetching La Liga markets (KXLALIGAGAME)...")
+    print("📡 Checking sports filters API...")
     print("="*60)
     
-    result = get_markets(
+    sports_filters = get_sports_filters(
         key_id=settings.kalshi_api_key_id,
         private_key_pem=settings.kalshi_private_key_pem,
         ws_url=settings.kalshi_ws_url,
-        status="open",
-        series_ticker="KXLALIGAGAME",
-        limit=50,
     )
     
-    la_liga_markets = result.get("markets", [])
-    print(f"\nFound {len(la_liga_markets)} La Liga markets")
+    if sports_filters:
+        print("\n📋 Sports filters response:")
+        print(json.dumps(sports_filters, indent=2))
+    else:
+        print("\n⚠️  No sports filters returned (API may not support this)")
     
-    if la_liga_markets:
-        for market in la_liga_markets[:5]:
-            print(f"\n  📊 {market.get('title')}")
-            print(f"     Ticker: {market.get('ticker')}")
-            print(f"     Yes: {market.get('yes_bid')}¢ / {market.get('yes_ask')}¢")
-            print(f"     Subtitle: {market.get('subtitle')}")
-    
-    # Try fetching Premier League markets
     print()
+    
+    # Scan all markets to discover soccer-related series tickers
     print("="*60)
-    print("⚽ Fetching Premier League markets (KXEPLGAME)...")
+    print("📡 Scanning all open markets for soccer series tickers...")
     print("="*60)
     
-    result = get_markets(
-        key_id=settings.kalshi_api_key_id,
-        private_key_pem=settings.kalshi_private_key_pem,
-        ws_url=settings.kalshi_ws_url,
-        status="open",
-        series_ticker="KXEPLGAME",
-        limit=50,
-    )
+    cursor = None
+    soccer_markets = []
+    all_series = set()
+    all_sports_series = set()  # Any sports-related series
+    series_to_markets = defaultdict(list)
+    sample_markets = []  # Keep some samples to understand naming
+    pages = 0
+    total_scanned = 0
     
-    epl_markets = result.get("markets", [])
-    print(f"\nFound {len(epl_markets)} Premier League markets")
+    # Soccer-related prefixes to look for in tickers and series
+    soccer_prefixes = ["KXLALIGA", "KXEPL", "KXPREMIER", "LALIGA", "EPL", "SOCCER", "FUTBOL", "MLS", "CHAMPIONS", "BUNDESLIGA", "SERIE"]
+    soccer_terms = ["LA LIGA", "PREMIER LEAGUE", "LALIGA", "EPL", "SOCCER", "FUTBOL", "FOOTBALL", "MLS", "CHAMPIONS LEAGUE", "BUNDESLIGA", "SERIE A", "VS", "SPREAD", "ARSENAL", "MANCHESTER", "LIVERPOOL", "CHELSEA", "REAL MADRID", "BARCELONA"]
     
-    if epl_markets:
-        for market in epl_markets[:5]:
-            print(f"\n  📊 {market.get('title')}")
-            print(f"     Ticker: {market.get('ticker')}")
-            print(f"     Yes: {market.get('yes_bid')}¢ / {market.get('yes_ask')}¢")
-            print(f"     Subtitle: {market.get('subtitle')}")
+    # Broader sports terms to help discover naming patterns
+    sports_prefixes = ["KX", "GAME", "SPREAD", "NFL", "NBA", "NHL", "MLB", "UFC", "BOXING", "TENNIS", "GOLF", "SPORT"]
     
-    # If no markets found via series, search by ticker prefix
-    if not la_liga_markets and not epl_markets:
-        print()
-        print("="*60)
-        print("🔍 No markets via series_ticker, scanning all markets...")
-        print("="*60)
+    while pages < 20:  # Scan up to 20 pages
+        result = get_markets(
+            key_id=settings.kalshi_api_key_id,
+            private_key_pem=settings.kalshi_private_key_pem,
+            ws_url=settings.kalshi_ws_url,
+            status="open",
+            limit=200,
+            cursor=cursor,
+        )
         
-        # Fetch more markets and filter by ticker prefix
-        cursor = None
-        soccer_markets = []
-        pages = 0
+        markets = result.get("markets", [])
+        if not markets:
+            break
         
-        while pages < 10:  # Limit pages to avoid long waits
-            result = get_markets(
-                key_id=settings.kalshi_api_key_id,
-                private_key_pem=settings.kalshi_private_key_pem,
-                ws_url=settings.kalshi_ws_url,
-                status="open",
-                limit=200,
-                cursor=cursor,
+        total_scanned += len(markets)
+        
+        for market in markets:
+            ticker = market.get("ticker", "").upper()
+            series_ticker = market.get("series_ticker", "").upper()
+            title = market.get("title", "").upper()
+            
+            # Keep some sample markets for debugging
+            if len(sample_markets) < 50:
+                sample_markets.append(market)
+            
+            # Track any sports-looking series
+            if series_ticker and any(p in series_ticker for p in sports_prefixes):
+                all_sports_series.add(series_ticker)
+            
+            # Check if this is a soccer-related market
+            is_soccer = (
+                any(prefix in ticker for prefix in soccer_prefixes) or
+                any(prefix in series_ticker for prefix in soccer_prefixes) or
+                any(term in title for term in soccer_terms)
             )
             
-            markets = result.get("markets", [])
-            if not markets:
-                break
-            
-            for market in markets:
-                ticker = market.get("ticker", "").upper()
-                title = market.get("title", "").upper()
-                
-                # Check for soccer-related tickers
-                if any(prefix in ticker for prefix in ["KXLALIGA", "KXEPL", "KXPREMIER", "SOCCER", "FUTBOL"]):
-                    soccer_markets.append(market)
-                elif any(term in title for term in ["LA LIGA", "PREMIER LEAGUE", "LALIGA"]):
-                    soccer_markets.append(market)
-            
-            cursor = result.get("cursor")
-            if not cursor:
-                break
-            pages += 1
+            if is_soccer and series_ticker:
+                all_series.add(series_ticker)
+                soccer_markets.append(market)
+                series_to_markets[series_ticker].append(market)
         
-        print(f"\nFound {len(soccer_markets)} soccer-related markets by scanning")
+        cursor = result.get("cursor")
+        if not cursor:
+            break
+        pages += 1
+        print(f"   Scanned {total_scanned} markets...", end="\r")
+    
+    print(f"\n\n✅ Scanned {total_scanned} total markets")
+    print(f"⚽ Found {len(soccer_markets)} soccer-related markets")
+    print()
+    
+    # Display discovered series tickers
+    print("="*60)
+    print("📋 DISCOVERED SOCCER SERIES TICKERS:")
+    print("="*60)
+    
+    if all_series:
+        # Categorize by league
+        la_liga_series = sorted([s for s in all_series if "LALIGA" in s])
+        epl_series = sorted([s for s in all_series if "EPL" in s or "PREMIER" in s])
+        other_series = sorted([s for s in all_series if s not in la_liga_series and s not in epl_series])
         
-        if soccer_markets:
-            # Show unique series tickers found
-            series = set(m.get("series_ticker") for m in soccer_markets if m.get("series_ticker"))
-            print(f"\n📋 Series tickers found: {series}")
-            
-            for market in soccer_markets[:10]:
-                print(f"\n  📊 {market.get('title')}")
+        if la_liga_series:
+            print("\n🇪🇸 La Liga Series:")
+            for series in la_liga_series:
+                count = len(series_to_markets[series])
+                print(f"   - {series} ({count} markets)")
+        
+        if epl_series:
+            print("\n🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League Series:")
+            for series in epl_series:
+                count = len(series_to_markets[series])
+                print(f"   - {series} ({count} markets)")
+        
+        if other_series:
+            print("\n🌍 Other Soccer Series:")
+            for series in other_series:
+                count = len(series_to_markets[series])
+                print(f"   - {series} ({count} markets)")
+        
+        # Show sample markets from each series
+        print()
+        print("="*60)
+        print("📊 SAMPLE MARKETS BY SERIES:")
+        print("="*60)
+        
+        for series in sorted(all_series):
+            markets = series_to_markets[series]
+            print(f"\n{series}:")
+            for market in markets[:3]:  # Show up to 3 samples per series
+                print(f"  📈 {market.get('title')}")
+                print(f"     Ticker: {market.get('ticker')}")
+                print(f"     Subtitle: {market.get('subtitle', 'N/A')}")
+                print(f"     Yes: {market.get('yes_bid')}¢ / {market.get('yes_ask')}¢")
+        
+        # Print code snippet for updating SOCCER_SERIES_TICKERS
+        print()
+        print("="*60)
+        print("📝 SUGGESTED CODE UPDATE for kalshi_api.py:")
+        print("="*60)
+        print()
+        print("SOCCER_SERIES_TICKERS = {")
+        if la_liga_series:
+            print(f'    "la_liga": {la_liga_series},')
+        if epl_series:
+            print(f'    "premier_league": {epl_series},')
+        print("}")
+    else:
+        print("\n⚠️  No soccer series tickers found!")
+        print("   This might mean no soccer markets are currently open.")
+        
+        # Show sports-related series that were found (helps understand naming)
+        if all_sports_series:
+            print()
+            print("="*60)
+            print("🏀 OTHER SPORTS SERIES FOUND (for reference):")
+            print("="*60)
+            for series in sorted(all_sports_series)[:30]:
+                print(f"   - {series}")
+        
+        # Search sample markets for anything sports-related
+        sports_keywords = ["GAME", "SPREAD", "WINNER", "NFL", "NBA", "NHL", "MLB", "SOCCER", 
+                         "FOOTBALL", "VS", "MATCH", "TEAM", "SCORE", "GOALS", "LEAGUE"]
+        sports_found = []
+        for market in sample_markets:
+            ticker = market.get("ticker", "").upper()
+            title = market.get("title", "").upper()
+            series = market.get("series_ticker", "").upper() if market.get("series_ticker") else ""
+            combined = f"{ticker} {title} {series}"
+            if any(kw in combined for kw in sports_keywords):
+                sports_found.append(market)
+        
+        if sports_found:
+            print()
+            print("="*60)
+            print("🏈 SPORTS-RELATED MARKETS FOUND IN SAMPLES:")
+            print("="*60)
+            for market in sports_found[:20]:
+                print(f"\n  📈 {market.get('title')}")
                 print(f"     Ticker: {market.get('ticker')}")
                 print(f"     Series: {market.get('series_ticker')}")
+                print(f"     Subtitle: {market.get('subtitle', 'N/A')}")
+        
+        # Show sample markets to understand naming conventions
+        print()
+        print("="*60)
+        print("📊 SAMPLE MARKETS (to understand naming):")
+        print("="*60)
+        for market in sample_markets[:15]:
+            print(f"\n  📈 {market.get('title')}")
+            print(f"     Ticker: {market.get('ticker')}")
+            print(f"     Series: {market.get('series_ticker')}")
+            print(f"     Subtitle: {market.get('subtitle', 'N/A')}")
+    
+    # Try fetching directly from known series tickers
+    print()
+    print("="*60)
+    print("🎯 TRYING DIRECT SERIES TICKER FETCHES:")
+    print("="*60)
+    
+    known_series = [
+        "KXLALIGAGAME", "KXLALIGASPREAD", "KXLALIGA",
+        "KXEPLGAME", "KXEPLSPREAD", "KXEPL",
+        "KXNFLGAME", "KXNFLSPREAD", 
+        "KXNBAGAME", "KXNBASPREAD",
+    ]
+    
+    for series in known_series:
+        result = get_markets(
+            key_id=settings.kalshi_api_key_id,
+            private_key_pem=settings.kalshi_private_key_pem,
+            ws_url=settings.kalshi_ws_url,
+            status="open",
+            series_ticker=series,
+            limit=10,
+        )
+        markets = result.get("markets", [])
+        if markets:
+            print(f"\n✅ {series}: Found {len(markets)} markets!")
+            for m in markets[:3]:
+                print(f"    - {m.get('ticker')}: {m.get('title')}")
+        else:
+            print(f"   ❌ {series}: No markets")
     
     print()
     print("="*60)
-    total = len(la_liga_markets) + len(epl_markets)
-    print(f"✅ Total soccer markets found: {total}")
+    print(f"✅ Discovery complete!")
     print("="*60)
 
 

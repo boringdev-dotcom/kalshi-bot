@@ -71,39 +71,34 @@ async def main():
     print("="*60)
     
     match_list = list(matches.items())
-    for i, (match_id, match_data) in enumerate(match_list[:10]):  # Show first 10
+    for i, (match_id, match_data) in enumerate(match_list):
         league_emoji = "🇪🇸" if match_data["league"] == "la_liga" else "🏴󠁧󠁢󠁥󠁮󠁧󠁿"
         print(f"  {i+1}. {league_emoji} {match_data['title']} ({len(match_data['markets'])} markets)")
     
-    if len(match_list) > 10:
-        print(f"  ... and {len(match_list) - 10} more matches")
-    
     print()
     
-    # Let user choose how many matches to analyze
-    print("How many matches do you want to analyze?")
-    print("  (More matches = more comprehensive but slower & more expensive)")
-    print("  Recommended: 1-3 for testing")
+    # Let user choose which match to analyze
+    print("Which match do you want to analyze?")
     print()
     
     try:
-        num = input("Enter number (1-10, or 'all'): ").strip()
-        if num.lower() == 'all':
-            selected_matches = match_list
-        else:
-            num = min(int(num), len(match_list))
-            selected_matches = match_list[:num]
+        choice = input(f"Enter match number (1-{len(match_list)}): ").strip()
+        choice_idx = int(choice) - 1
+        if choice_idx < 0 or choice_idx >= len(match_list):
+            print(f"Invalid choice. Using match 1...")
+            choice_idx = 0
+        selected_match = match_list[choice_idx]
     except (ValueError, KeyboardInterrupt):
-        print("Using 2 matches for testing...")
-        selected_matches = match_list[:2]
+        print("Using match 1...")
+        selected_match = match_list[0]
     
-    # Build market data for selected matches
-    selected_markets = []
-    for match_id, match_data in selected_matches:
-        selected_markets.extend(match_data["markets"])
+    # Build market data for selected match
+    match_id, match_data = selected_match
+    selected_markets = match_data["markets"]
     
     print()
-    print(f"📋 Analyzing {len(selected_matches)} match(es) with {len(selected_markets)} markets")
+    print(f"📋 Analyzing: {match_data['title']}")
+    print(f"   Markets: {len(selected_markets)}")
     
     # Format markets for analysis
     markets_text = format_markets_for_analysis(selected_markets)

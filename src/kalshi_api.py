@@ -10,10 +10,21 @@ from .kalshi_auth import sign_request
 logger = logging.getLogger(__name__)
 
 # Soccer series tickers on Kalshi (use these for direct API filtering)
-# Format: KXLALIGAGAME, KXEPLGAME, etc.
+# Each league can have multiple series (e.g., GAME for winner/tie, SPREAD for spreads)
+# Run discover_sports.py to find all available series tickers
 SOCCER_SERIES_TICKERS = {
-    "la_liga": "KXLALIGAGAME",
-    "premier_league": "KXEPLGAME",
+    "la_liga": [
+        "KXLALIGAGAME",      # Winner/Tie markets
+        "KXLALIGASPREAD",    # Spread markets
+        "KXLALIGATOTAL",     # Total goals (Over/Under)
+        "KXLALIGABTTS",      # Both Teams To Score
+    ],
+    "premier_league": [
+        "KXEPLGAME",         # Winner/Tie markets  
+        "KXEPLSPREAD",       # Spread markets
+        "KXEPLTOTAL",        # Total goals (Over/Under)
+        "KXEPLBTTS",         # Both Teams To Score
+    ],
 }
 
 # Ticker prefixes for searching (markets start with these)
@@ -359,11 +370,16 @@ def get_soccer_markets(
         leagues = ["la_liga", "premier_league"]
     
     soccer_markets = []
+    seen_tickers = set()  # Avoid duplicates across series
     
     # Try to fetch using series_ticker for each league (fast path)
     for league in leagues:
-        series_ticker = SOCCER_SERIES_TICKERS.get(league)
-        if series_ticker:
+        series_tickers = SOCCER_SERIES_TICKERS.get(league, [])
+        # Handle both list and legacy string format
+        if isinstance(series_tickers, str):
+            series_tickers = [series_tickers]
+        
+        for series_ticker in series_tickers:
             logger.info(f"Fetching {league} markets using series_ticker: {series_ticker}")
             cursor = None
             
@@ -383,7 +399,10 @@ def get_soccer_markets(
                     break
                 
                 for market in markets:
-                    soccer_markets.append(_format_soccer_market(market, league))
+                    ticker = market.get("ticker")
+                    if ticker and ticker not in seen_tickers:
+                        seen_tickers.add(ticker)
+                        soccer_markets.append(_format_soccer_market(market, league))
                 
                 cursor = result.get("cursor")
                 if not cursor:
@@ -405,18 +424,30 @@ def _format_soccer_market(market: Dict[str, Any], league: str) -> Dict[str, Any]
     ticker = market.get("ticker", "").upper()
     title = market.get("title", "").upper()
     subtitle = market.get("subtitle", "").upper()
+    series_ticker = market.get("series_ticker", "").upper()
     combined_text = f"{ticker} {title} {subtitle}"
     
-    # Determine market type
+    # Determine market type based on series ticker first (most reliable)
     market_type = "unknown"
-    if any(t in combined_text for t in ["WINNER", "WIN", "MONEYLINE", "TO WIN"]):
-        market_type = "winner"
-    elif any(t in combined_text for t in ["SPREAD", "HANDICAP"]):
+    if "SPREAD" in series_ticker or "SPREAD" in ticker:
+        # Spread series - "wins by over X goals"
         market_type = "spread"
-    elif "TIE" in combined_text or "DRAW" in combined_text:
-        market_type = "tie"
-    elif "OVER" in combined_text or "UNDER" in combined_text:
+    elif "TOTAL" in series_ticker or "TOTAL" in ticker:
         market_type = "total"
+    elif "BTTS" in ticker or "BOTH TEAMS" in combined_text:
+        market_type = "btts"
+    elif "TIE" in combined_text or "DRAW" in combined_text or ticker.endswith("-TIE"):
+        market_type = "tie"
+    elif "WINS BY OVER" in combined_text or "WIN BY OVER" in combined_text:
+        # Spread pattern: "Team wins by over X.X goals"
+        market_type = "spread"
+    elif "OVER" in combined_text and "GOALS" in combined_text:
+        # Total goals pattern: "Over X.X goals scored"
+        market_type = "total"
+    elif any(t in combined_text for t in ["WINNER", "MONEYLINE", "TO WIN"]):
+        market_type = "winner"
+    elif combined_text.endswith("WINNER?") and "BY OVER" not in combined_text:
+        market_type = "winner"
     
     return {
         "ticker": market.get("ticker"),

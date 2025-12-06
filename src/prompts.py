@@ -8,11 +8,13 @@ MATCHES TO RESEARCH:
 
 For each match, search and find:
 
-1. **Team Form**: Last 5 results for each team. Search "[Team name] recent results 2024-25"
-2. **Head-to-Head**: Last 3 meetings between these teams. Search "[Team A] vs [Team B] head to head"
+1. **Team Form**: Results for each team this season. Search "[Team name] recent results 2025-26 season"
+2. **Head-to-Head**: Last 5 meetings between these teams. Search "[Team A] vs [Team B] head to head"
 3. **Injuries**: Current injuries/suspensions. Search "[Team name] injury news today"
 4. **League Table**: Current positions. Search "La Liga table" or "Premier League table"
 5. **Match Preview**: Expert opinions. Search "[Team A] vs [Team B] preview prediction"
+6. **Goal Scoring**: Expected goals for each team. Search "[Team name] expected goals"
+
 
 Be specific with actual data - scores, dates, player names. Don't say you can't access information - search for it.
 
@@ -30,7 +32,7 @@ KALSHI MARKET ODDS:
 
 For each match, provide:
 
-1. **Match Assessment**: Your analysis of likely outcomes based on the research
+1. **Match Assessment**: Your analysis of likely outcomes based on the research. 
 2. **Value Analysis**: Compare your probability estimate to Kalshi's odds - identify any value bets
 3. **Betting Recommendation**: 
    - Which side to bet (YES/NO) and for which market (Winner/Spread/Tie)
@@ -38,9 +40,9 @@ For each match, provide:
    - Clear reasoning for your pick
 4. **Risk Factors**: What could go wrong with this bet
 
-Format your response clearly with match-by-match analysis. Be specific about ticker symbols when making recommendations.
+Format your response clearly with match-by-match analysis. Be specific about ticker symbols when making recommendations. You should not only talk about the winner or loser but also talk about the spreads as well. Are both teams likely to score? Which team will win by what goals?
 
-Remember: A value bet exists when your estimated probability differs significantly from the market odds."""
+Remember: A value bet exists when your estimated probability differs significantly from the market odds. Also remember to find patterns. If you were a betting analyst, what would you look for?"""
 
 
 # Stage 2: Review prompt for council members to evaluate each other's analysis
