@@ -1,4 +1,4 @@
-"""LLM Council engine for soccer betting research using OpenRouter + Gemini."""
+"""LLM Council engine for sports betting research using OpenRouter + Gemini."""
 import asyncio
 import logging
 from dataclasses import dataclass, field
@@ -9,6 +9,7 @@ import httpx
 
 from .config import Settings
 from .prompts import (
+    # Soccer prompts
     RESEARCH_PROMPT,
     ANALYSIS_PROMPT,
     REVIEW_PROMPT,
@@ -17,6 +18,15 @@ from .prompts import (
     ANALYST_SYSTEM_PROMPT,
     REVIEWER_SYSTEM_PROMPT,
     CHAIRMAN_SYSTEM_PROMPT,
+    # Basketball prompts
+    BASKETBALL_RESEARCH_PROMPT,
+    BASKETBALL_ANALYSIS_PROMPT,
+    BASKETBALL_REVIEW_PROMPT,
+    BASKETBALL_SYNTHESIS_PROMPT,
+    BASKETBALL_RESEARCH_SYSTEM_PROMPT,
+    BASKETBALL_ANALYST_SYSTEM_PROMPT,
+    BASKETBALL_REVIEWER_SYSTEM_PROMPT,
+    BASKETBALL_CHAIRMAN_SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,7 +44,6 @@ RESEARCH_MODEL = "gemini-2.5-flash"  # Fast model with grounding support
 
 # Council models (via OpenRouter)
 COUNCIL_MODELS = [
-    "openai/gpt-5.1",
     "anthropic/claude-opus-4.5",
     "google/gemini-3-pro-preview",
     "x-ai/grok-4.1-fast",
@@ -55,7 +64,7 @@ class CouncilResult:
 
 class LLMCouncil:
     """
-    LLM Council for soccer betting research.
+    LLM Council for sports betting research (soccer and basketball).
     
     Implements a 4-stage pipeline:
     1. Research: Web search for match data (Gemini with Google Search grounding)
@@ -64,17 +73,45 @@ class LLMCouncil:
     4. Synthesis: Chairman compiles final recommendation
     """
     
-    def __init__(self, openrouter_api_key: str, google_api_key: Optional[str] = None):
+    def __init__(
+        self,
+        openrouter_api_key: str,
+        google_api_key: Optional[str] = None,
+        sport: str = "soccer",
+    ):
         """
         Initialize the LLM Council.
         
         Args:
             openrouter_api_key: OpenRouter API key for council models
             google_api_key: Google API key for Gemini with grounding (research)
+            sport: Sport type ("soccer" or "basketball")
         """
         self.openrouter_api_key = openrouter_api_key
         self.google_api_key = google_api_key
+        self.sport = sport
         self.client = httpx.AsyncClient(timeout=120.0)
+        
+        # Set sport-specific prompts
+        if sport == "basketball":
+            self.research_prompt = BASKETBALL_RESEARCH_PROMPT
+            self.analysis_prompt = BASKETBALL_ANALYSIS_PROMPT
+            self.review_prompt = BASKETBALL_REVIEW_PROMPT
+            self.synthesis_prompt = BASKETBALL_SYNTHESIS_PROMPT
+            self.research_system_prompt = BASKETBALL_RESEARCH_SYSTEM_PROMPT
+            self.analyst_system_prompt = BASKETBALL_ANALYST_SYSTEM_PROMPT
+            self.reviewer_system_prompt = BASKETBALL_REVIEWER_SYSTEM_PROMPT
+            self.chairman_system_prompt = BASKETBALL_CHAIRMAN_SYSTEM_PROMPT
+        else:
+            # Default to soccer
+            self.research_prompt = RESEARCH_PROMPT
+            self.analysis_prompt = ANALYSIS_PROMPT
+            self.review_prompt = REVIEW_PROMPT
+            self.synthesis_prompt = SYNTHESIS_PROMPT
+            self.research_system_prompt = RESEARCH_SYSTEM_PROMPT
+            self.analyst_system_prompt = ANALYST_SYSTEM_PROMPT
+            self.reviewer_system_prompt = REVIEWER_SYSTEM_PROMPT
+            self.chairman_system_prompt = CHAIRMAN_SYSTEM_PROMPT
     
     async def close(self):
         """Close the HTTP client."""
@@ -231,13 +268,13 @@ class LLMCouncil:
         Returns:
             Research findings from Google Search
         """
-        logger.info("Stage 0: Starting research with Gemini + Google Search grounding...")
+        logger.info(f"Stage 0: Starting {self.sport} research with Gemini + Google Search grounding...")
         
-        prompt = RESEARCH_PROMPT.format(matches=matches)
+        prompt = self.research_prompt.format(matches=matches)
         
         research = await self._call_gemini_with_grounding(
             prompt=prompt,
-            system_prompt=RESEARCH_SYSTEM_PROMPT,
+            system_prompt=self.research_system_prompt,
         )
         
         logger.info("Stage 0: Research complete")
@@ -258,19 +295,21 @@ class LLMCouncil:
         Returns:
             Dictionary mapping model name to analysis
         """
-        logger.info(f"Stage 1: Starting analysis with {len(COUNCIL_MODELS)} models...")
+        logger.info(f"Stage 1: Starting {self.sport} analysis with {len(COUNCIL_MODELS)} models...")
         
-        prompt = ANALYSIS_PROMPT.format(
+        prompt = self.analysis_prompt.format(
             research=research,
             market_odds=market_odds,
         )
+        
+        analyst_system_prompt = self.analyst_system_prompt
         
         async def get_analysis(model: str) -> tuple[str, str]:
             """Get analysis from a single model."""
             try:
                 analysis = await self._call_llm(
                     model=model,
-                    system_prompt=ANALYST_SYSTEM_PROMPT,
+                    system_prompt=analyst_system_prompt,
                     user_prompt=prompt,
                     temperature=0.7,
                 )
@@ -305,7 +344,7 @@ class LLMCouncil:
         Returns:
             Dictionary mapping model name to review
         """
-        logger.info(f"Stage 2: Starting reviews with {len(COUNCIL_MODELS)} models...")
+        logger.info(f"Stage 2: Starting {self.sport} reviews with {len(COUNCIL_MODELS)} models...")
         
         # Anonymize analyses for unbiased review
         anonymized_analyses = []
@@ -317,11 +356,13 @@ class LLMCouncil:
         
         analyses_text = "\n\n".join(anonymized_analyses)
         
-        prompt = REVIEW_PROMPT.format(
+        prompt = self.review_prompt.format(
             research=research,
             market_odds=market_odds,
             analyses=analyses_text,
         )
+        
+        reviewer_system_prompt = self.reviewer_system_prompt
         
         async def get_review(model: str) -> tuple[str, str]:
             """Get review from a single model."""
@@ -330,7 +371,7 @@ class LLMCouncil:
             try:
                 review = await self._call_llm(
                     model=model,
-                    system_prompt=REVIEWER_SYSTEM_PROMPT,
+                    system_prompt=reviewer_system_prompt,
                     user_prompt=prompt,
                     temperature=0.5,
                 )
@@ -367,7 +408,7 @@ class LLMCouncil:
         Returns:
             Final synthesized recommendation
         """
-        logger.info("Stage 3: Chairman synthesizing final recommendation...")
+        logger.info(f"Stage 3: Chairman synthesizing final {self.sport} recommendation...")
         
         # Format analyses with model names
         analyses_text = "\n\n".join(
@@ -381,7 +422,7 @@ class LLMCouncil:
             for model, review in reviews.items()
         )
         
-        prompt = SYNTHESIS_PROMPT.format(
+        prompt = self.synthesis_prompt.format(
             research=research,
             market_odds=market_odds,
             analyses=analyses_text,
@@ -390,7 +431,7 @@ class LLMCouncil:
         
         final_recommendation = await self._call_llm(
             model=CHAIRMAN_MODEL,
-            system_prompt=CHAIRMAN_SYSTEM_PROMPT,
+            system_prompt=self.chairman_system_prompt,
             user_prompt=prompt,
             temperature=0.4,
         )
@@ -413,7 +454,7 @@ class LLMCouncil:
         Returns:
             CouncilResult with all outputs from each stage
         """
-        logger.info("Starting LLM Council analysis pipeline...")
+        logger.info(f"Starting LLM Council {self.sport} analysis pipeline...")
         
         # Stage 0: Research
         research = await self.stage_0_research(matches)
@@ -429,7 +470,7 @@ class LLMCouncil:
             research, market_odds, analyses, reviews
         )
         
-        logger.info("LLM Council analysis pipeline complete")
+        logger.info(f"LLM Council {self.sport} analysis pipeline complete")
         
         return CouncilResult(
             research=research,
@@ -437,6 +478,7 @@ class LLMCouncil:
             reviews=reviews,
             final_recommendation=final_recommendation,
             metadata={
+                "sport": self.sport,
                 "research_model": RESEARCH_MODEL,
                 "council_models": COUNCIL_MODELS,
                 "chairman_model": CHAIRMAN_MODEL,
@@ -466,6 +508,7 @@ async def run_soccer_analysis(
     council = LLMCouncil(
         openrouter_api_key=settings.openrouter_api_key,
         google_api_key=settings.google_api_key,
+        sport="soccer",
     )
     
     try:
@@ -479,6 +522,57 @@ Based on these Kalshi soccer markets, research the following matches:
 Focus on:
 - La Liga matches
 - Premier League matches
+"""
+        
+        result = await council.run_council(
+            matches=matches_for_research,
+            market_odds=markets_text,
+        )
+        
+        return result
+        
+    finally:
+        await council.close()
+
+
+async def run_basketball_analysis(
+    settings: Settings,
+    markets_text: str,
+) -> CouncilResult:
+    """
+    Convenience function to run NBA basketball analysis.
+    
+    Args:
+        settings: Application settings with API keys
+        markets_text: Formatted market data for analysis
+        
+    Returns:
+        CouncilResult with analysis
+    """
+    if not settings.openrouter_api_key:
+        raise ValueError("OPENROUTER_API_KEY is required")
+    if not settings.google_api_key:
+        raise ValueError("GOOGLE_API_KEY is required for research (Gemini grounding)")
+    
+    council = LLMCouncil(
+        openrouter_api_key=settings.openrouter_api_key,
+        google_api_key=settings.google_api_key,
+        sport="basketball",
+    )
+    
+    try:
+        # Extract game info for research
+        # The markets_text should contain game titles that we can research
+        matches_for_research = f"""
+Based on these Kalshi NBA basketball markets, research the following games:
+
+{markets_text}
+
+Focus on:
+- NBA regular season games
+- Injury reports (CRITICAL for NBA)
+- Back-to-back scheduling
+- Recent team performance
 """
         
         result = await council.run_council(

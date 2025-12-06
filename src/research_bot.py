@@ -1,4 +1,4 @@
-"""Discord bot for soccer betting research using LLM Council."""
+"""Discord bot for sports betting research (Soccer & Basketball) using LLM Council."""
 import asyncio
 import logging
 from datetime import datetime
@@ -14,19 +14,26 @@ from apscheduler.triggers.cron import CronTrigger
 import pytz
 
 from .config import Settings
-from .kalshi_api import get_soccer_markets, format_markets_for_analysis
-from .llm_council import run_soccer_analysis, CouncilResult
+from .kalshi_api import (
+    get_soccer_markets,
+    get_basketball_markets,
+    format_markets_for_analysis,
+    format_basketball_markets_for_analysis,
+    group_markets_by_match,
+)
+from .llm_council import run_soccer_analysis, run_basketball_analysis, CouncilResult
 from .discord_embeds import (
     create_analysis_embeds,
     create_error_embed,
     create_no_markets_embed,
+    batch_embeds_by_size,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class SoccerResearchBot(discord.Client):
-    """Discord bot for soccer betting research."""
+class SportsResearchBot(discord.Client):
+    """Discord bot for sports betting research (Soccer & Basketball)."""
     
     def __init__(self, settings: Settings, *args, **kwargs):
         intents = discord.Intents.default()
@@ -154,31 +161,125 @@ class SoccerResearchBot(discord.Client):
                     markets_text=markets_text,
                 )
                 
-                # Create Discord embeds
-                embeds = create_analysis_embeds(result, markets)
+                # Create Discord embeds (without individual analyses to keep size down)
+                embeds = create_analysis_embeds(result, markets, include_details=False)
+                
+                # Batch embeds to stay under Discord's 6000 char limit per message
+                batches = batch_embeds_by_size(embeds)
                 
                 # Send results
                 if interaction:
                     # Send to interaction channel
-                    await interaction.followup.send(embeds=embeds[:10])  # Discord limit
-                    
-                    # If there are more embeds, send follow-up messages
-                    for i in range(10, len(embeds), 10):
-                        await interaction.channel.send(embeds=embeds[i:i+10])
+                    if batches:
+                        await interaction.followup.send(embeds=batches[0])
+                        for batch in batches[1:]:
+                            await interaction.channel.send(embeds=batch)
                 
                 elif self.channel:
                     # Send via bot to configured channel
-                    await self._send_to_channel(embeds=embeds)
+                    await self._send_to_channel_batched(batches)
                 
                 elif self.webhook_url:
                     # Fallback: Send via webhook
-                    await self._send_webhook(embeds=embeds)
+                    await self._send_webhook_batched(batches)
                 
                 logger.info("Analysis posted successfully")
                 return result
                 
             except Exception as e:
                 logger.error(f"Analysis failed: {e}", exc_info=True)
+                error_embed = create_error_embed(str(e))
+                
+                if interaction:
+                    await interaction.followup.send(embed=error_embed)
+                elif self.channel:
+                    await self._send_to_channel(embeds=[error_embed])
+                elif self.webhook_url:
+                    await self._send_webhook(embeds=[error_embed])
+                
+                return None
+    
+    async def run_basketball_analysis_and_post(
+        self,
+        interaction: Optional[discord.Interaction] = None,
+        leagues: Optional[list] = None,
+    ) -> Optional[CouncilResult]:
+        """
+        Run NBA basketball analysis and post results.
+        
+        Args:
+            interaction: Discord interaction if triggered by command
+            leagues: List of leagues to analyze (default: ["nba"])
+            
+        Returns:
+            CouncilResult if successful, None otherwise
+        """
+        async with self._analysis_lock:
+            try:
+                # Defer interaction if provided
+                if interaction and not interaction.response.is_done():
+                    await interaction.response.defer(thinking=True)
+                
+                # Fetch basketball markets from Kalshi
+                logger.info("Fetching NBA basketball markets from Kalshi...")
+                markets = get_basketball_markets(
+                    key_id=self.settings.kalshi_api_key_id,
+                    private_key_pem=self.settings.kalshi_private_key_pem,
+                    ws_url=self.settings.kalshi_ws_url,
+                    leagues=leagues,
+                )
+                
+                if not markets:
+                    logger.warning("No basketball markets found")
+                    embed = create_no_markets_embed(sport="basketball")
+                    
+                    if interaction:
+                        await interaction.followup.send(embed=embed)
+                    elif self.channel:
+                        await self._send_to_channel(embeds=[embed])
+                    elif self.webhook_url:
+                        await self._send_webhook(embeds=[embed])
+                    
+                    return None
+                
+                # Format markets for analysis
+                markets_text = format_basketball_markets_for_analysis(markets)
+                logger.info(f"Found {len(markets)} basketball markets")
+                
+                # Run LLM Council analysis
+                logger.info("Running LLM Council basketball analysis...")
+                result = await run_basketball_analysis(
+                    settings=self.settings,
+                    markets_text=markets_text,
+                )
+                
+                # Create Discord embeds (without individual analyses to keep size down)
+                embeds = create_analysis_embeds(result, markets, include_details=False, sport="basketball")
+                
+                # Batch embeds to stay under Discord's 6000 char limit per message
+                batches = batch_embeds_by_size(embeds)
+                
+                # Send results
+                if interaction:
+                    # Send to interaction channel
+                    if batches:
+                        await interaction.followup.send(embeds=batches[0])
+                        for batch in batches[1:]:
+                            await interaction.channel.send(embeds=batch)
+                
+                elif self.channel:
+                    # Send via bot to configured channel
+                    await self._send_to_channel_batched(batches)
+                
+                elif self.webhook_url:
+                    # Fallback: Send via webhook
+                    await self._send_webhook_batched(batches)
+                
+                logger.info("Basketball analysis posted successfully")
+                return result
+                
+            except Exception as e:
+                logger.error(f"Basketball analysis failed: {e}", exc_info=True)
                 error_embed = create_error_embed(str(e))
                 
                 if interaction:
@@ -229,48 +330,283 @@ class SoccerResearchBot(discord.Client):
                     response.raise_for_status()
                 except Exception as e:
                     logger.error(f"Failed to send webhook: {e}")
+    
+    async def _send_to_channel_batched(self, batches: list, content: str = None):
+        """Send pre-batched embeds via Discord bot to configured channel."""
+        if not self.channel:
+            logger.error("No channel configured for sending messages")
+            return
+        
+        try:
+            for i, batch in enumerate(batches):
+                msg_content = content if i == 0 else None
+                await self.channel.send(content=msg_content, embeds=batch)
+            logger.info(f"Analysis posted to channel {self.channel.name} ({len(batches)} messages)")
+        except Exception as e:
+            logger.error(f"Failed to send to channel: {e}")
+    
+    async def _send_webhook_batched(self, batches: list, content: str = None):
+        """Send pre-batched embeds via Discord webhook (fallback)."""
+        import httpx
+        
+        async with httpx.AsyncClient() as client:
+            for i, batch in enumerate(batches):
+                payload = {
+                    "embeds": [e.to_dict() for e in batch],
+                }
+                if content and i == 0:
+                    payload["content"] = content
+                
+                try:
+                    response = await client.post(
+                        self.webhook_url,
+                        json=payload,
+                        timeout=30.0,
+                    )
+                    response.raise_for_status()
+                except Exception as e:
+                    logger.error(f"Failed to send webhook: {e}")
+
+
+class GameSelectView(discord.ui.View):
+    """View with dropdown to select a game for analysis."""
+    
+    def __init__(
+        self,
+        matches: dict,
+        bot: "SportsResearchBot",
+        sport: str = "soccer",
+        timeout: float = 180.0,
+    ):
+        super().__init__(timeout=timeout)
+        self.matches = matches
+        self.bot = bot
+        self.sport = sport
+        
+        # Create the select menu
+        select = discord.ui.Select(
+            placeholder="Select a game to analyze...",
+            min_values=1,
+            max_values=1,
+            options=self._create_options(),
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    def _create_options(self) -> list:
+        """Create select options from matches."""
+        options = []
+        
+        for match_id, match_data in list(self.matches.items())[:25]:  # Discord limit: 25 options
+            title = match_data.get("title", "Unknown Match")
+            league = match_data.get("league", "unknown")
+            num_markets = len(match_data.get("markets", []))
+            
+            # League emoji (supports both soccer and basketball)
+            league_emoji = {
+                "la_liga": "🇪🇸",
+                "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+                "mls": "🇺🇸",
+                "nba": "🏀",
+            }.get(league, "🏀" if self.sport == "basketball" else "⚽")
+            
+            # Truncate title if too long (Discord limit: 100 chars for label)
+            label = f"{league_emoji} {title}"
+            if len(label) > 100:
+                label = label[:97] + "..."
+            
+            # Description (Discord limit: 100 chars)
+            league_display = league.upper() if league == "nba" else league.replace('_', ' ').title()
+            description = f"{num_markets} markets • {league_display}"
+            if len(description) > 100:
+                description = description[:97] + "..."
+            
+            options.append(discord.SelectOption(
+                label=label,
+                value=match_id,
+                description=description,
+            ))
+        
+        return options
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        """Handle game selection."""
+        selected_match_id = interaction.data["values"][0]
+        match_data = self.matches.get(selected_match_id)
+        
+        if not match_data:
+            await interaction.response.send_message(
+                "❌ Could not find the selected game. Please try again.",
+                ephemeral=True,
+            )
+            return
+        
+        # Acknowledge selection and show loading state
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            # Get markets for this specific game
+            markets = match_data.get("markets", [])
+            title = match_data.get("title", "Unknown Match")
+            
+            logger.info(f"Running {self.sport} analysis for: {title} ({len(markets)} markets)")
+            
+            # Format markets for analysis and run appropriate analysis
+            if self.sport == "basketball":
+                markets_text = format_basketball_markets_for_analysis(markets)
+                result = await run_basketball_analysis(
+                    settings=self.bot.settings,
+                    markets_text=markets_text,
+                )
+            else:
+                markets_text = format_markets_for_analysis(markets)
+                result = await run_soccer_analysis(
+                    settings=self.bot.settings,
+                    markets_text=markets_text,
+                )
+            
+            # Create Discord embeds (without details to keep size manageable)
+            embeds = create_analysis_embeds(result, markets, include_details=False, sport=self.sport)
+            
+            # Batch embeds to stay under Discord's 6000 char limit per message
+            batches = batch_embeds_by_size(embeds)
+            
+            # Send first batch as followup
+            if batches:
+                await interaction.followup.send(embeds=batches[0])
+                
+                # Send remaining batches as regular messages
+                for batch in batches[1:]:
+                    await interaction.channel.send(embeds=batch)
+            
+            logger.info(f"Analysis posted for: {title} ({len(batches)} messages)")
+            
+        except Exception as e:
+            logger.error(f"Analysis failed for {selected_match_id}: {e}", exc_info=True)
+            error_embed = create_error_embed(str(e))
+            await interaction.followup.send(embed=error_embed)
+        
+        # Disable the view after selection
+        self.stop()
+    
+    async def on_timeout(self):
+        """Called when the view times out."""
+        # Optionally disable all items
+        for item in self.children:
+            item.disabled = True
 
 
 # Create bot instance and commands
-_bot_instance: Optional[SoccerResearchBot] = None
+_bot_instance: Optional[SportsResearchBot] = None
+
+# Keep legacy alias
+SoccerResearchBot = SportsResearchBot
 
 
-def create_bot(settings: Settings) -> SoccerResearchBot:
+def create_bot(settings: Settings) -> SportsResearchBot:
     """Create and configure the research bot."""
     global _bot_instance
     
-    bot = SoccerResearchBot(settings)
+    bot = SportsResearchBot(settings)
     _bot_instance = bot
     
     # Register slash commands
     @bot.tree.command(name="analyze", description="Run soccer betting analysis")
     @app_commands.describe(
-        league="Which league to analyze (default: both)",
+        league="Which league to analyze (default: all)",
     )
     @app_commands.choices(league=[
         app_commands.Choice(name="All (La Liga + Premier League)", value="all"),
         app_commands.Choice(name="La Liga only", value="la_liga"),
         app_commands.Choice(name="Premier League only", value="premier_league"),
+        app_commands.Choice(name="MLS only", value="mls"),
     ])
     async def analyze_command(
         interaction: discord.Interaction,
         league: str = "all",
     ):
-        """Slash command to run analysis on demand."""
+        """Slash command to run soccer analysis on demand."""
         leagues = None if league == "all" else [league]
         await bot.run_analysis_and_post(interaction=interaction, leagues=leagues)
+    
+    @bot.tree.command(name="nba", description="Run NBA basketball betting analysis")
+    async def nba_command(interaction: discord.Interaction):
+        """Slash command to run NBA basketball analysis on demand."""
+        await bot.run_basketball_analysis_and_post(interaction=interaction, leagues=["nba"])
+    
+    @bot.tree.command(name="nba_games", description="List available NBA games and pick one to analyze")
+    async def nba_games_command(interaction: discord.Interaction):
+        """Slash command to list NBA games and select one for analysis."""
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            # Fetch NBA basketball markets from Kalshi
+            logger.info("Fetching NBA basketball markets for /nba_games command")
+            markets = get_basketball_markets(
+                key_id=bot.settings.kalshi_api_key_id,
+                private_key_pem=bot.settings.kalshi_private_key_pem,
+                ws_url=bot.settings.kalshi_ws_url,
+                leagues=["nba"],
+            )
+            
+            if not markets:
+                embed = create_no_markets_embed(sport="basketball")
+                await interaction.followup.send(embed=embed)
+                return
+            
+            # Group markets by game
+            matches = group_markets_by_match(markets)
+            
+            if not matches:
+                embed = create_no_markets_embed(sport="basketball")
+                await interaction.followup.send(embed=embed)
+                return
+            
+            logger.info(f"Found {len(matches)} NBA games available")
+            
+            # Create embed showing available games
+            embed = discord.Embed(
+                title="🏀 Available NBA Games",
+                description=f"Found **{len(matches)}** games with open markets.\n\nSelect a game from the dropdown below to run a full LLM Council analysis.",
+                color=0x1D428A,  # NBA blue
+            )
+            
+            # Add summary
+            total_markets = sum(len(m.get("markets", [])) for m in matches.values())
+            embed.add_field(
+                name="📊 Summary",
+                value=f"🏀 NBA: {len(matches)} games ({total_markets} markets)",
+                inline=False,
+            )
+            
+            embed.set_footer(text="⏳ Analysis takes 2-3 minutes per game")
+            
+            # Create and send the view with dropdown
+            view = GameSelectView(matches=matches, bot=bot, sport="basketball")
+            await interaction.followup.send(embed=embed, view=view)
+            
+        except Exception as e:
+            logger.error(f"Error in /nba_games command: {e}", exc_info=True)
+            error_embed = create_error_embed(str(e))
+            await interaction.followup.send(embed=error_embed)
     
     @bot.tree.command(name="status", description="Check research bot status")
     async def status_command(interaction: discord.Interaction):
         """Check bot status and next scheduled run."""
         embed = discord.Embed(
-            title="🤖 Soccer Research Bot Status",
+            title="🤖 Sports Research Bot Status",
             color=0x00ff00,
         )
         
         embed.add_field(
             name="Status",
             value="✅ Online",
+            inline=True,
+        )
+        
+        embed.add_field(
+            name="Supported Sports",
+            value="⚽ Soccer (La Liga, EPL, MLS)\n🏀 Basketball (NBA)",
             inline=True,
         )
         
@@ -297,11 +633,91 @@ def create_bot(settings: Settings) -> SoccerResearchBot:
         
         embed.add_field(
             name="Research Model",
-            value="perplexity/sonar-pro (web search)",
+            value="Gemini 2.5 Flash (Google Search grounding)",
             inline=False,
         )
         
         await interaction.response.send_message(embed=embed)
+    
+    @bot.tree.command(name="games", description="List available soccer games and pick one to analyze")
+    @app_commands.describe(
+        league="Which league to show games for (default: all)",
+    )
+    @app_commands.choices(league=[
+        app_commands.Choice(name="All leagues", value="all"),
+        app_commands.Choice(name="La Liga only", value="la_liga"),
+        app_commands.Choice(name="Premier League only", value="premier_league"),
+        app_commands.Choice(name="MLS only", value="mls"),
+    ])
+    async def games_command(
+        interaction: discord.Interaction,
+        league: str = "all",
+    ):
+        """Slash command to list soccer games and select one for analysis."""
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            # Determine leagues to fetch
+            leagues = None if league == "all" else [league]
+            
+            # Fetch soccer markets from Kalshi
+            logger.info(f"Fetching soccer markets for /games command (leagues: {leagues})")
+            markets = get_soccer_markets(
+                key_id=bot.settings.kalshi_api_key_id,
+                private_key_pem=bot.settings.kalshi_private_key_pem,
+                ws_url=bot.settings.kalshi_ws_url,
+                leagues=leagues,
+            )
+            
+            if not markets:
+                embed = create_no_markets_embed(sport="soccer")
+                await interaction.followup.send(embed=embed)
+                return
+            
+            # Group markets by match
+            matches = group_markets_by_match(markets)
+            
+            if not matches:
+                embed = create_no_markets_embed(sport="soccer")
+                await interaction.followup.send(embed=embed)
+                return
+            
+            logger.info(f"Found {len(matches)} games available")
+            
+            # Create embed showing available games
+            embed = discord.Embed(
+                title="⚽ Available Soccer Games",
+                description=f"Found **{len(matches)}** games with open markets.\n\nSelect a game from the dropdown below to run a full LLM Council analysis.",
+                color=0x5865F2,
+            )
+            
+            # Add summary of games by league
+            league_counts = {}
+            for match_data in matches.values():
+                l = match_data.get("league", "unknown")
+                league_counts[l] = league_counts.get(l, 0) + 1
+            
+            league_summary = []
+            for l, count in league_counts.items():
+                emoji = {"la_liga": "🇪🇸", "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "mls": "🇺🇸"}.get(l, "⚽")
+                league_summary.append(f"{emoji} {l.replace('_', ' ').title()}: {count} games")
+            
+            embed.add_field(
+                name="📊 By League",
+                value="\n".join(league_summary) or "No games found",
+                inline=False,
+            )
+            
+            embed.set_footer(text="⏳ Analysis takes 2-3 minutes per game")
+            
+            # Create and send the view with dropdown
+            view = GameSelectView(matches=matches, bot=bot, sport="soccer")
+            await interaction.followup.send(embed=embed, view=view)
+            
+        except Exception as e:
+            logger.error(f"Error in /games command: {e}", exc_info=True)
+            error_embed = create_error_embed(str(e))
+            await interaction.followup.send(embed=error_embed)
     
     return bot
 
@@ -337,7 +753,7 @@ async def run_research_bot():
     signal.signal(signal.SIGTERM, signal_handler)
     
     # Run bot
-    logger.info("Starting Soccer Research Bot...")
+    logger.info("Starting Sports Research Bot (Soccer & Basketball)...")
     
     if settings.discord_bot_token:
         await bot.start(settings.discord_bot_token)

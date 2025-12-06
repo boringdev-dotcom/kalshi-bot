@@ -1,4 +1,4 @@
-"""Discord embed formatters for soccer research bot."""
+"""Discord embed formatters for sports research bot (Soccer & Basketball)."""
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import re
@@ -15,6 +15,8 @@ COLOR_WARNING = 0xFEE75C    # Yellow
 COLOR_ERROR = 0xED4245      # Red
 COLOR_LA_LIGA = 0xEE8707    # Orange (La Liga colors)
 COLOR_PREMIER = 0x3D195B    # Purple (Premier League colors)
+COLOR_NBA = 0x1D428A        # NBA blue
+COLOR_MLS = 0xE4002B        # MLS red
 
 
 def truncate_text(text: str, max_length: int = 1024) -> str:
@@ -22,6 +24,72 @@ def truncate_text(text: str, max_length: int = 1024) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length - 3] + "..."
+
+
+def get_embed_size(embed: discord.Embed) -> int:
+    """
+    Calculate the total character count of an embed.
+    
+    Discord counts: title, description, footer.text, author.name,
+    and all field names and values.
+    """
+    total = 0
+    if embed.title:
+        total += len(embed.title)
+    if embed.description:
+        total += len(embed.description)
+    if embed.footer and embed.footer.text:
+        total += len(embed.footer.text)
+    if embed.author and embed.author.name:
+        total += len(embed.author.name)
+    for field in embed.fields:
+        total += len(field.name) + len(field.value)
+    return total
+
+
+def batch_embeds_by_size(embeds: List[discord.Embed], max_size: int = 5900) -> List[List[discord.Embed]]:
+    """
+    Batch embeds so each batch stays under Discord's 6000 char limit.
+    
+    Args:
+        embeds: List of embeds to batch
+        max_size: Maximum total characters per batch (default 5900 for safety margin)
+        
+    Returns:
+        List of embed batches, each batch safe to send in one message
+    """
+    batches = []
+    current_batch = []
+    current_size = 0
+    
+    for embed in embeds:
+        embed_size = get_embed_size(embed)
+        
+        # If single embed is too big, truncate it
+        if embed_size > max_size:
+            # Truncate description if present
+            if embed.description and len(embed.description) > 500:
+                embed.description = embed.description[:497] + "..."
+            # Truncate fields
+            for i, field in enumerate(embed.fields):
+                if len(field.value) > 500:
+                    embed.set_field_at(i, name=field.name, value=field.value[:497] + "...", inline=field.inline)
+            embed_size = get_embed_size(embed)
+        
+        # Check if adding this embed would exceed limit
+        if current_size + embed_size > max_size and current_batch:
+            batches.append(current_batch)
+            current_batch = []
+            current_size = 0
+        
+        current_batch.append(embed)
+        current_size += embed_size
+    
+    # Don't forget the last batch
+    if current_batch:
+        batches.append(current_batch)
+    
+    return batches
 
 
 def extract_recommendations(text: str) -> List[Dict[str, str]]:
@@ -52,19 +120,28 @@ def extract_recommendations(text: str) -> List[Dict[str, str]]:
     return recommendations
 
 
-def create_header_embed() -> discord.Embed:
+def create_header_embed(sport: str = "soccer") -> discord.Embed:
     """Create the header embed for the analysis."""
+    if sport == "basketball":
+        title = "🏀 NBA Basketball Betting Analysis"
+        footer = "Kalshi Basketball Research Bot"
+        color = COLOR_NBA
+    else:
+        title = "⚽ Soccer Betting Analysis"
+        footer = "Kalshi Soccer Research Bot"
+        color = COLOR_PRIMARY
+    
     embed = discord.Embed(
-        title="⚽ Soccer Betting Analysis",
-        description="**LLM Council Analysis Report**\n\nMultiple AI models have analyzed today's matches and reached a consensus.",
-        color=COLOR_PRIMARY,
+        title=title,
+        description="**LLM Council Analysis Report**\n\nMultiple AI models have analyzed today's games and reached a consensus.",
+        color=color,
         timestamp=datetime.utcnow(),
     )
     
     embed.add_field(
         name="📊 Analysis Pipeline",
         value=(
-            "1️⃣ **Research**: Web search for match data\n"
+            "1️⃣ **Research**: Web search for game data\n"
             "2️⃣ **Analysis**: 4 LLMs analyze independently\n"
             "3️⃣ **Review**: Models peer-review each other\n"
             "4️⃣ **Synthesis**: Chairman compiles recommendation"
@@ -72,64 +149,118 @@ def create_header_embed() -> discord.Embed:
         inline=False,
     )
     
-    embed.set_footer(text="Kalshi Soccer Research Bot")
+    embed.set_footer(text=footer)
     
     return embed
 
 
-def create_markets_embed(markets: List[Dict[str, Any]]) -> discord.Embed:
+def create_markets_embed(markets: List[Dict[str, Any]], sport: str = "soccer") -> discord.Embed:
     """Create embed showing available markets."""
-    embed = discord.Embed(
-        title="📈 Kalshi Soccer Markets",
-        color=COLOR_PRIMARY,
-    )
-    
-    # Group by league
-    la_liga = [m for m in markets if m.get("league") == "la_liga"]
-    premier = [m for m in markets if m.get("league") == "premier_league"]
-    other = [m for m in markets if m.get("league") not in ("la_liga", "premier_league")]
-    
-    if la_liga:
-        la_liga_text = []
-        for m in la_liga[:5]:  # Limit to 5
-            ticker = m.get("ticker", "N/A")
-            title = m.get("title", "Unknown")
-            yes_bid = m.get("yes_bid", "?")
-            la_liga_text.append(f"• **{title}**\n  `{ticker}` | YES: {yes_bid}¢")
+    if sport == "basketball":
+        embed = discord.Embed(
+            title="📈 Kalshi NBA Markets",
+            color=COLOR_NBA,
+        )
+        
+        # Group by league (for basketball, typically just NBA)
+        nba = [m for m in markets if m.get("league") == "nba"]
+        other = [m for m in markets if m.get("league") != "nba"]
+        
+        if nba:
+            nba_text = []
+            for m in nba[:8]:  # Limit to 8
+                ticker = m.get("ticker", "N/A")
+                title = m.get("title", "Unknown")
+                yes_bid = m.get("yes_bid", "?")
+                nba_text.append(f"• **{title}**\n  `{ticker}` | YES: {yes_bid}¢")
+            
+            embed.add_field(
+                name="🏀 NBA",
+                value="\n".join(nba_text) or "No markets",
+                inline=False,
+            )
+        
+        if other:
+            other_text = [f"• `{m.get('ticker')}`: {m.get('title')}" for m in other[:3]]
+            embed.add_field(
+                name="Other Basketball Markets",
+                value="\n".join(other_text),
+                inline=False,
+            )
         
         embed.add_field(
-            name="🇪🇸 La Liga",
-            value="\n".join(la_liga_text) or "No markets",
-            inline=False,
+            name="Total Markets",
+            value=f"**{len(markets)}** basketball markets found",
+            inline=True,
         )
-    
-    if premier:
-        premier_text = []
-        for m in premier[:5]:
-            ticker = m.get("ticker", "N/A")
-            title = m.get("title", "Unknown")
-            yes_bid = m.get("yes_bid", "?")
-            premier_text.append(f"• **{title}**\n  `{ticker}` | YES: {yes_bid}¢")
+    else:
+        # Soccer markets
+        embed = discord.Embed(
+            title="📈 Kalshi Soccer Markets",
+            color=COLOR_PRIMARY,
+        )
+        
+        # Group by league
+        la_liga = [m for m in markets if m.get("league") == "la_liga"]
+        premier = [m for m in markets if m.get("league") == "premier_league"]
+        mls = [m for m in markets if m.get("league") == "mls"]
+        other = [m for m in markets if m.get("league") not in ("la_liga", "premier_league", "mls")]
+        
+        if la_liga:
+            la_liga_text = []
+            for m in la_liga[:5]:  # Limit to 5
+                ticker = m.get("ticker", "N/A")
+                title = m.get("title", "Unknown")
+                yes_bid = m.get("yes_bid", "?")
+                la_liga_text.append(f"• **{title}**\n  `{ticker}` | YES: {yes_bid}¢")
+            
+            embed.add_field(
+                name="🇪🇸 La Liga",
+                value="\n".join(la_liga_text) or "No markets",
+                inline=False,
+            )
+        
+        if premier:
+            premier_text = []
+            for m in premier[:5]:
+                ticker = m.get("ticker", "N/A")
+                title = m.get("title", "Unknown")
+                yes_bid = m.get("yes_bid", "?")
+                premier_text.append(f"• **{title}**\n  `{ticker}` | YES: {yes_bid}¢")
+            
+            embed.add_field(
+                name="🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League",
+                value="\n".join(premier_text) or "No markets",
+                inline=False,
+            )
+        
+        if mls:
+            mls_text = []
+            for m in mls[:5]:
+                ticker = m.get("ticker", "N/A")
+                title = m.get("title", "Unknown")
+                yes_bid = m.get("yes_bid", "?")
+                mls_text.append(f"• **{title}**\n  `{ticker}` | YES: {yes_bid}¢")
+            
+            embed.add_field(
+                name="🇺🇸 MLS",
+                value="\n".join(mls_text) or "No markets",
+                inline=False,
+            )
+        
+        if other:
+            other_text = [f"• `{m.get('ticker')}`: {m.get('title')}" for m in other[:3]]
+            embed.add_field(
+                name="Other Markets",
+                value="\n".join(other_text),
+                inline=False,
+            )
         
         embed.add_field(
-            name="🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League",
-            value="\n".join(premier_text) or "No markets",
-            inline=False,
+            name="Total Markets",
+            value=f"**{len(markets)}** soccer markets found",
+            inline=True,
         )
-    
-    if other:
-        other_text = [f"• `{m.get('ticker')}`: {m.get('title')}" for m in other[:3]]
-        embed.add_field(
-            name="Other Markets",
-            value="\n".join(other_text),
-            inline=False,
-        )
-    
-    embed.add_field(
-        name="Total Markets",
-        value=f"**{len(markets)}** soccer markets found",
-        inline=True,
-    )
     
     return embed
 
@@ -273,6 +404,7 @@ def create_analysis_embeds(
     result: CouncilResult,
     markets: List[Dict[str, Any]],
     include_details: bool = True,
+    sport: str = "soccer",
 ) -> List[discord.Embed]:
     """
     Create all embeds for an analysis result.
@@ -281,6 +413,7 @@ def create_analysis_embeds(
         result: CouncilResult from the LLM Council
         markets: List of market dictionaries
         include_details: Whether to include individual model analyses
+        sport: Sport type ("soccer" or "basketball")
         
     Returns:
         List of Discord embeds
@@ -288,10 +421,10 @@ def create_analysis_embeds(
     embeds = []
     
     # Header
-    embeds.append(create_header_embed())
+    embeds.append(create_header_embed(sport=sport))
     
     # Markets overview
-    embeds.append(create_markets_embed(markets))
+    embeds.append(create_markets_embed(markets, sport=sport))
     
     # Main recommendation
     embeds.append(create_recommendation_embed(result))
@@ -328,20 +461,34 @@ def create_error_embed(error_message: str) -> discord.Embed:
     return embed
 
 
-def create_no_markets_embed() -> discord.Embed:
+def create_no_markets_embed(sport: str = "soccer") -> discord.Embed:
     """Create embed for when no markets are found."""
-    embed = discord.Embed(
-        title="📭 No Soccer Markets Found",
-        description=(
-            "No open soccer markets were found for La Liga or Premier League on Kalshi.\n\n"
-            "This could mean:\n"
-            "• No matches are scheduled for today\n"
-            "• Markets haven't opened yet\n"
-            "• Markets have already closed"
-        ),
-        color=COLOR_WARNING,
-        timestamp=datetime.utcnow(),
-    )
+    if sport == "basketball":
+        embed = discord.Embed(
+            title="📭 No NBA Markets Found",
+            description=(
+                "No open NBA basketball markets were found on Kalshi.\n\n"
+                "This could mean:\n"
+                "• No games are scheduled for today\n"
+                "• Markets haven't opened yet\n"
+                "• Markets have already closed"
+            ),
+            color=COLOR_WARNING,
+            timestamp=datetime.utcnow(),
+        )
+    else:
+        embed = discord.Embed(
+            title="📭 No Soccer Markets Found",
+            description=(
+                "No open soccer markets were found for La Liga or Premier League on Kalshi.\n\n"
+                "This could mean:\n"
+                "• No matches are scheduled for today\n"
+                "• Markets haven't opened yet\n"
+                "• Markets have already closed"
+            ),
+            color=COLOR_WARNING,
+            timestamp=datetime.utcnow(),
+        )
     
     embed.set_footer(text="Try again later when new markets are available.")
     
