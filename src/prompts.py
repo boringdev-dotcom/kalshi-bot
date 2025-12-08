@@ -142,16 +142,18 @@ For each game, search and find:
 3. **Injuries & Rest**: Current injury report and players resting. Search "[Team name] injury report today" - THIS IS CRITICAL for NBA
 4. **Back-to-Back**: Is either team on a back-to-back (played yesterday)? Search "[Team name] schedule"
 5. **Home/Away Performance**: How each team performs at home vs on the road
-6. **Key Players**: Star player stats and recent performance. Search "[Star player name] stats recent games"
+6. **Players**: All players stats and recent performance. Search "[Team name] players stats recent games"
 7. **Betting Lines**: What are Vegas/sportsbooks saying? Search "[Team A] vs [Team B] betting preview odds"
+You can also add your own research to the data you find.
 
 Be specific with actual data - scores, dates, player names, injury status. Don't say you can't access information - search for it.
-
+Research as much as possible with as much data as possible. You are giving this data to a council of analysts to analyze and make recommendations. So the better your data is, the better the recommendations will be.
 Format your findings clearly for each game with the actual data you found."""
 
 
 # Stage 1: Analysis prompt for basketball council members
 BASKETBALL_ANALYSIS_PROMPT = """You are an expert NBA basketball betting analyst. Based on the research provided below, analyze each game and provide betting recommendations for the Kalshi prediction market.
+You will trust the research data. Research data is the latest data.
 
 RESEARCH DATA:
 {research}
@@ -165,6 +167,7 @@ For each game, provide:
    - Consider injuries carefully - missing star players significantly impacts NBA games
    - Factor in back-to-back fatigue if applicable
    - Consider home court advantage
+   - Identify patterns in the data
    
 2. **Value Analysis**: Compare your probability estimate to Kalshi's odds - identify any value bets
 
@@ -188,6 +191,7 @@ Remember: A value bet exists when your estimated probability differs significant
 
 # Stage 2: Review prompt for basketball analysts
 BASKETBALL_REVIEW_PROMPT = """You are reviewing NBA betting analyses from other analysts. Your task is to evaluate their work and rank them.
+You will trust the research data. Research data is the latest data.
 
 ORIGINAL RESEARCH DATA:
 {research}

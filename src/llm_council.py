@@ -40,7 +40,7 @@ GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 # Model configuration
 # Research uses Gemini with Google Search grounding (called directly)
 # Supported: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-pro/flash
-RESEARCH_MODEL = "gemini-2.5-flash"  # Fast model with grounding support
+RESEARCH_MODEL = "gemini-3-pro-preview"  # Fast model with grounding support
 
 # Council models (via OpenRouter)
 COUNCIL_MODELS = [
