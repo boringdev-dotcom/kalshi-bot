@@ -49,7 +49,7 @@ def main():
     total_scanned = 0
     
     # Soccer-related prefixes to look for in tickers and series
-    soccer_prefixes = ["KXLALIGA", "KXEPL", "KXPREMIER", "LALIGA", "EPL", "SOCCER", "FUTBOL", "MLS", "CHAMPIONS", "BUNDESLIGA", "SERIE"]
+    soccer_prefixes = ["KXLALIGA", "KXEPL", "KXPREMIER", "LALIGA", "EPL", "SOCCER", "FUTBOL", "MLS", "CHAMPIONS", "BUNDESLIGA", "SERIE", "KXUCLGAME"]
     soccer_terms = ["LA LIGA", "PREMIER LEAGUE", "LALIGA", "EPL", "SOCCER", "FUTBOL", "FOOTBALL", "MLS", "CHAMPIONS LEAGUE", "BUNDESLIGA", "SERIE A", "VS", "SPREAD", "ARSENAL", "MANCHESTER", "LIVERPOOL", "CHELSEA", "REAL MADRID", "BARCELONA"]
     
     # Broader sports terms to help discover naming patterns
@@ -216,7 +216,7 @@ def main():
     print("="*60)
     
     known_series = [
-        "KXLALIGAGAME", "KXLALIGASPREAD", "KXLALIGA",
+        "KXLALIGAGAME", "KXLALIGASPREAD", "KXLALIGA", "KXUCLGAME", "KXUCLSPREAD", "KXUCLTOTAL", "KXUCLBTTS",
         "KXEPLGAME", "KXEPLSPREAD", "KXEPL",
         "KXNFLGAME", "KXNFLSPREAD", 
         "KXNBAGAME", "KXNBASPREAD",

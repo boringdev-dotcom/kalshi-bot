@@ -3,7 +3,9 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
+import sys
+from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Set up logging to see what's happening
@@ -11,6 +13,50 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+
+def test_gemini_grounding():
+    """Quick test to verify Gemini grounding is working."""
+    from google import genai
+    from google.genai import types
+    import os
+    
+    # Load API key from environment or .env
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        from dotenv import load_dotenv
+        load_dotenv()
+        api_key = os.getenv("GOOGLE_API_KEY")
+    
+    if not api_key:
+        print("❌ GOOGLE_API_KEY not found in environment")
+        return
+    
+    print("🔍 Testing Gemini with Google Search grounding...")
+    print()
+    
+    client = genai.Client(api_key=api_key)
+    
+    grounding_tool = types.Tool(
+        google_search=types.GoogleSearch()
+    )
+    
+    config = types.GenerateContentConfig(
+        tools=[grounding_tool]
+    )
+    
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents="Who won the euro 2024?",
+        config=config,
+    )
+    
+    print("✅ Response received!")
+    print(f"📝 First 200 characters: {response.text[:200]}...")
+    print()
+    print(f"📊 Full response length: {len(response.text)} characters")
+    print()
+    return response.text
 
 
 def sanitize_filename(text: str) -> str:
@@ -118,6 +164,7 @@ def generate_markdown_report(
     md.append(f"- **Council Models:** {', '.join(result.metadata.get('council_models', []))}")
     md.append(f"- **Chairman Model:** {result.metadata.get('chairman_model', 'N/A')}")
     md.append(f"- **Sport:** {result.metadata.get('sport', sport)}")
+    md.append(f"- **Prompt Version:** {result.metadata.get('prompt_version', 'v1').upper()}")
     md.append("")
     
     return "\n".join(md)
@@ -157,7 +204,7 @@ async def main():
     print("="*60)
     print("🏆 Select Sport to Analyze:")
     print("="*60)
-    print("  1. ⚽ Soccer (La Liga, Premier League, MLS)")
+    print("  1. ⚽ Soccer (La Liga, Premier League, UCL, MLS)")
     print("  2. 🏀 Basketball (NBA)")
     print()
     
@@ -173,6 +220,67 @@ async def main():
     
     print()
     
+    # League selection for soccer
+    selected_leagues = None
+    prompt_version = "v1"  # Default prompt version
+    
+    if sport == "soccer":
+        print("="*60)
+        print("⚽ Select Soccer League:")
+        print("="*60)
+        print("  1. 🇪🇸 La Liga (Spain)")
+        print("  2. 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (England)")
+        print("  3. 🏆 UEFA Champions League")
+        print("  4. 🇺🇸 MLS (USA)")
+        print("  5. 🌍 All Leagues")
+        print()
+        
+        league_map = {
+            "1": ["la_liga"],
+            "2": ["premier_league"],
+            "3": ["ucl"],
+            "4": ["mls"],
+            "5": ["la_liga", "premier_league", "ucl", "mls"],
+        }
+        
+        try:
+            league_choice = input("Enter league number (1-5): ").strip()
+            selected_leagues = league_map.get(league_choice, ["la_liga", "premier_league", "ucl", "mls"])
+        except (ValueError, KeyboardInterrupt):
+            print("Defaulting to all leagues...")
+            selected_leagues = ["la_liga", "premier_league", "ucl", "mls"]
+        
+        print()
+    
+    # Prompt version selection (for both sports)
+    print("="*60)
+    print("📝 Select Prompt Version:")
+    print("="*60)
+    if sport == "soccer":
+        print("  1. V1 (Original) - Standard analytical prompts")
+        print("  2. V2 (Rewritten) - Sharp persona-based prompts with xG, PPDA focus")
+    else:
+        print("  1. V1 (Original) - Standard analytical prompts")
+        print("  2. V2 (Rewritten) - Four Factors, role-based analysis (Quant/Scout/Situationalist/Contrarian)")
+    print()
+    
+    try:
+        version_choice = input("Enter version number (1 or 2): ").strip()
+        if version_choice == "2":
+            prompt_version = "v2"
+            if sport == "soccer":
+                print("✅ Using V2 prompts (Sharp/Quantitative approach)")
+            else:
+                print("✅ Using V2 prompts (Four Factors/Role-based approach)")
+        else:
+            prompt_version = "v1"
+            print("✅ Using V1 prompts (Original approach)")
+    except (ValueError, KeyboardInterrupt):
+        print("Defaulting to V1 prompts...")
+        prompt_version = "v1"
+    
+    print()
+    
     # Fetch markets based on selected sport
     if sport == "basketball":
         print("📊 Fetching NBA basketball markets from Kalshi...")
@@ -184,11 +292,13 @@ async def main():
         sport_emoji = "🏀"
         sport_name = "basketball"
     else:
-        print("📊 Fetching soccer markets from Kalshi...")
+        league_names = ", ".join(l.replace("_", " ").title() for l in selected_leagues)
+        print(f"📊 Fetching soccer markets from Kalshi ({league_names})...")
         markets = get_soccer_markets(
             key_id=settings.kalshi_api_key_id,
             private_key_pem=settings.kalshi_private_key_pem,
             ws_url=settings.kalshi_ws_url,
+            leagues=selected_leagues,
         )
         sport_emoji = "⚽"
         sport_name = "soccer"
@@ -209,31 +319,100 @@ async def main():
         if len(parts) >= 2:
             match_id = parts[1]  # e.g., 25DEC08OSALEV
             if match_id not in matches:
+                # Extract date from close_time or expiration_time
+                close_time = m.get("close_time") or m.get("expiration_time")
+                match_date = None
+                if close_time:
+                    try:
+                        # Parse ISO format datetime (e.g., "2024-12-08T20:00:00Z")
+                        match_date = datetime.fromisoformat(close_time.replace("Z", "+00:00")).date()
+                    except (ValueError, AttributeError):
+                        pass
+                
+                # Fallback: parse date from match_id (e.g., 25DEC08OSALEV -> Dec 8, 2025)
+                if not match_date and len(match_id) >= 7:
+                    try:
+                        year_prefix = match_id[:2]  # "25"
+                        month_str = match_id[2:5]   # "DEC"
+                        day_str = match_id[5:7]     # "08"
+                        month_map = {
+                            "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4,
+                            "MAY": 5, "JUN": 6, "JUL": 7, "AUG": 8,
+                            "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12
+                        }
+                        if month_str in month_map:
+                            year = 2000 + int(year_prefix)
+                            month = month_map[month_str]
+                            day = int(day_str)
+                            match_date = datetime(year, month, day).date()
+                    except (ValueError, IndexError):
+                        pass
+                
                 matches[match_id] = {
                     "title": m.get("title", "Unknown"),
                     "league": m.get("league", "unknown"),
+                    "date": match_date,
                     "markets": []
                 }
             matches[match_id]["markets"].append(m)
     
-    # Show available matches/games
+    # Group matches by date
+    matches_by_date = defaultdict(list)
+    for match_id, match_data in matches.items():
+        match_date = match_data.get("date")
+        matches_by_date[match_date].append((match_id, match_data))
+    
+    # Sort dates (None at the end)
+    sorted_dates = sorted(
+        matches_by_date.keys(),
+        key=lambda d: (d is None, d if d else datetime.max.date())
+    )
+    
+    # Helper function for date display
+    def format_date_header(d):
+        if d is None:
+            return "📅 Unknown Date"
+        today = datetime.now().date()
+        tomorrow = today + timedelta(days=1)
+        if d == today:
+            return f"📅 Today ({d.strftime('%a, %b %d')})"
+        elif d == tomorrow:
+            return f"📅 Tomorrow ({d.strftime('%a, %b %d')})"
+        return f"📅 {d.strftime('%A, %b %d')}"
+    
+    # Build flat list for selection while displaying grouped by date
+    match_list = []
+    
+    # Show available matches/games grouped by date
     print("="*60)
     print(f"📅 Available {sport_name.title()} Games:")
     print("="*60)
     
-    match_list = list(matches.items())
-    for i, (match_id, match_data) in enumerate(match_list):
-        league = match_data["league"]
-        # Get appropriate emoji for the league
-        if sport == "basketball":
-            league_emoji = "🏀"
-        else:
-            league_emoji = {
-                "la_liga": "🇪🇸",
-                "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-                "mls": "🇺🇸",
-            }.get(league, "⚽")
-        print(f"  {i+1}. {league_emoji} {match_data['title']} ({len(match_data['markets'])} markets)")
+    game_number = 1
+    for date_key in sorted_dates:
+        date_matches = matches_by_date[date_key]
+        # Sort matches within date by league
+        date_matches.sort(key=lambda x: x[1].get("league", "zzz"))
+        
+        print()
+        print(f"  {format_date_header(date_key)}")
+        print(f"  {'-'*40}")
+        
+        for match_id, match_data in date_matches:
+            league = match_data["league"]
+            # Get appropriate emoji for the league
+            if sport == "basketball":
+                league_emoji = "🏀"
+            else:
+                league_emoji = {
+                    "la_liga": "🇪🇸",
+                    "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+                    "mls": "🇺🇸",
+                    "ucl": "🏆",
+                }.get(league, "⚽")
+            print(f"    {game_number}. {league_emoji} {match_data['title']} ({len(match_data['markets'])} markets)")
+            match_list.append((match_id, match_data))
+            game_number += 1
     
     print()
     
@@ -271,6 +450,11 @@ async def main():
     print("="*60)
     print(f"{sport_emoji} Running LLM Council {sport_name.title()} Analysis")
     print("="*60)
+    if sport == "soccer":
+        version_display = "V2 (Sharp/Quantitative)" if prompt_version == "v2" else "V1 (Original)"
+    else:
+        version_display = "V2 (Four Factors/Role-based)" if prompt_version == "v2" else "V1 (Original)"
+    print(f"📝 Prompt Version: {version_display}")
     print()
     print("Pipeline stages:")
     print("  1️⃣  Research (Gemini + Google Search grounding) - ~30s")
@@ -287,11 +471,13 @@ async def main():
             result = await run_basketball_analysis(
                 settings=settings,
                 markets_text=markets_text,
+                prompt_version=prompt_version,
             )
         else:
             result = await run_soccer_analysis(
                 settings=settings,
                 markets_text=markets_text,
+                prompt_version=prompt_version,
             )
         
         # Generate markdown report
@@ -306,10 +492,10 @@ async def main():
             selected_markets=selected_markets,
         )
         
-        # Create filename from match title
+        # Create filename from match title (include prompt version)
         date_str = datetime.now().strftime("%Y%m%d")
         safe_title = sanitize_filename(match_title)
-        filename = f"{safe_title}_{date_str}.md"
+        filename = f"{safe_title}_{prompt_version}_{date_str}.md"
         
         # Save to file
         output_path = Path(filename)
@@ -342,4 +528,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "test-grounding":
+        test_gemini_grounding()
+    else:
+        asyncio.run(main())
