@@ -27,7 +27,13 @@ SOCCER_SERIES_TICKERS = {
     ],
     "mls": [
         "KXMLSGAME",         # Winner/Tie markets        # Both Teams To Score
-    ]
+    ],
+    "ucl": [
+        "KXUCLGAME",         # Winner/Tie markets
+        "KXUCLSPREAD",       # Spread markets
+        "KXUCLTOTAL",        # Total goals (Over/Under)
+        "KXUCLBTTS",         # Both Teams To Score
+    ],
 }
 
 # Ticker prefixes for searching (markets start with these)
@@ -35,6 +41,7 @@ SOCCER_TICKER_PREFIXES = {
     "la_liga": ["KXLALIGA", "LALIGA"],
     "premier_league": ["KXEPL", "KXPREMIER", "EPL"],
     "mls": ["KXMLS", "MLS"],
+    "ucl": ["KXUCL", "UCL"],
 }
 
 # Fallback search terms if series tickers don't work

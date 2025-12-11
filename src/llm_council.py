@@ -4,12 +4,15 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import json
+from functools import partial
 
 import httpx
+from google import genai
+from google.genai import types
 
 from .config import Settings
 from .prompts import (
-    # Soccer prompts
+    # Soccer prompts V1 (original)
     RESEARCH_PROMPT,
     ANALYSIS_PROMPT,
     REVIEW_PROMPT,
@@ -18,7 +21,16 @@ from .prompts import (
     ANALYST_SYSTEM_PROMPT,
     REVIEWER_SYSTEM_PROMPT,
     CHAIRMAN_SYSTEM_PROMPT,
-    # Basketball prompts
+    # Soccer prompts V2 (rewritten)
+    RESEARCH_PROMPT_V2,
+    ANALYSIS_PROMPT_V2,
+    REVIEW_PROMPT_V2,
+    SYNTHESIS_PROMPT_V2,
+    RESEARCH_SYSTEM_PROMPT_V2,
+    ANALYST_SYSTEM_PROMPT_V2,
+    REVIEWER_SYSTEM_PROMPT_V2,
+    CHAIRMAN_SYSTEM_PROMPT_V2,
+    # Basketball prompts V1 (original)
     BASKETBALL_RESEARCH_PROMPT,
     BASKETBALL_ANALYSIS_PROMPT,
     BASKETBALL_REVIEW_PROMPT,
@@ -27,6 +39,24 @@ from .prompts import (
     BASKETBALL_ANALYST_SYSTEM_PROMPT,
     BASKETBALL_REVIEWER_SYSTEM_PROMPT,
     BASKETBALL_CHAIRMAN_SYSTEM_PROMPT,
+    # Basketball prompts V2 (rewritten)
+    BASKETBALL_RESEARCH_PROMPT_V2,
+    BASKETBALL_ANALYSIS_PROMPT_V2,
+    BASKETBALL_REVIEW_PROMPT_V2,
+    BASKETBALL_SYNTHESIS_PROMPT_V2,
+    BASKETBALL_RESEARCH_SYSTEM_PROMPT_V2,
+    BASKETBALL_ANALYST_SYSTEM_PROMPT_V2,
+    BASKETBALL_REVIEWER_SYSTEM_PROMPT_V2,
+    BASKETBALL_CHAIRMAN_SYSTEM_PROMPT_V2,
+    # Soccer prompts V3 (UCL specific)
+    RESEARCH_PROMPT_V3,
+    ANALYSIS_PROMPT_V3,
+    REVIEW_PROMPT_V3,
+    SYNTHESIS_PROMPT_V3,
+    RESEARCH_SYSTEM_PROMPT_V3,
+    ANALYST_SYSTEM_PROMPT_V3,
+    REVIEWER_SYSTEM_PROMPT_V3,
+    CHAIRMAN_SYSTEM_PROMPT_V3,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +70,7 @@ GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 # Model configuration
 # Research uses Gemini with Google Search grounding (called directly)
 # Supported: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-pro/flash
-RESEARCH_MODEL = "gemini-2.5-flash"  # Fast model with grounding support
+RESEARCH_MODEL = "gemini-3-pro-preview"  # Fast model with grounding support
 
 # Council models (via OpenRouter)
 COUNCIL_MODELS = [
@@ -78,6 +108,7 @@ class LLMCouncil:
         openrouter_api_key: str,
         google_api_key: Optional[str] = None,
         sport: str = "soccer",
+        prompt_version: str = "v1",
     ):
         """
         Initialize the LLM Council.
@@ -86,14 +117,27 @@ class LLMCouncil:
             openrouter_api_key: OpenRouter API key for council models
             google_api_key: Google API key for Gemini with grounding (research)
             sport: Sport type ("soccer" or "basketball")
+            prompt_version: Prompt version to use ("v1" or "v2", default "v1")
         """
         self.openrouter_api_key = openrouter_api_key
         self.google_api_key = google_api_key
         self.sport = sport
+        self.prompt_version = prompt_version
         self.client = httpx.AsyncClient(timeout=120.0)
         
         # Set sport-specific prompts
-        if sport == "basketball":
+        if sport == "basketball" and prompt_version == "v2":
+            # Basketball V2 prompts (Four Factors, role-based analysis)
+            self.research_prompt = BASKETBALL_RESEARCH_PROMPT_V2
+            self.analysis_prompt = BASKETBALL_ANALYSIS_PROMPT_V2
+            self.review_prompt = BASKETBALL_REVIEW_PROMPT_V2
+            self.synthesis_prompt = BASKETBALL_SYNTHESIS_PROMPT_V2
+            self.research_system_prompt = BASKETBALL_RESEARCH_SYSTEM_PROMPT_V2
+            self.analyst_system_prompt = BASKETBALL_ANALYST_SYSTEM_PROMPT_V2
+            self.reviewer_system_prompt = BASKETBALL_REVIEWER_SYSTEM_PROMPT_V2
+            self.chairman_system_prompt = BASKETBALL_CHAIRMAN_SYSTEM_PROMPT_V2
+        elif sport == "basketball":
+            # Basketball V1 prompts (original)
             self.research_prompt = BASKETBALL_RESEARCH_PROMPT
             self.analysis_prompt = BASKETBALL_ANALYSIS_PROMPT
             self.review_prompt = BASKETBALL_REVIEW_PROMPT
@@ -102,8 +146,28 @@ class LLMCouncil:
             self.analyst_system_prompt = BASKETBALL_ANALYST_SYSTEM_PROMPT
             self.reviewer_system_prompt = BASKETBALL_REVIEWER_SYSTEM_PROMPT
             self.chairman_system_prompt = BASKETBALL_CHAIRMAN_SYSTEM_PROMPT
+        elif sport == "soccer" and prompt_version == "v3":
+            # Soccer V3 prompts (UCL specific)
+            self.research_prompt = RESEARCH_PROMPT_V3
+            self.analysis_prompt = ANALYSIS_PROMPT_V3
+            self.review_prompt = REVIEW_PROMPT_V3
+            self.synthesis_prompt = SYNTHESIS_PROMPT_V3
+            self.research_system_prompt = RESEARCH_SYSTEM_PROMPT_V3
+            self.analyst_system_prompt = ANALYST_SYSTEM_PROMPT_V3
+            self.reviewer_system_prompt = REVIEWER_SYSTEM_PROMPT_V3
+            self.chairman_system_prompt = CHAIRMAN_SYSTEM_PROMPT_V3
+        elif sport == "soccer" and prompt_version == "v2":
+            # Soccer V2 prompts (rewritten with sharper personas)
+            self.research_prompt = RESEARCH_PROMPT_V2
+            self.analysis_prompt = ANALYSIS_PROMPT_V2
+            self.review_prompt = REVIEW_PROMPT_V2
+            self.synthesis_prompt = SYNTHESIS_PROMPT_V2
+            self.research_system_prompt = RESEARCH_SYSTEM_PROMPT_V2
+            self.analyst_system_prompt = ANALYST_SYSTEM_PROMPT_V2
+            self.reviewer_system_prompt = REVIEWER_SYSTEM_PROMPT_V2
+            self.chairman_system_prompt = CHAIRMAN_SYSTEM_PROMPT_V2
         else:
-            # Default to soccer
+            # Default to soccer V1
             self.research_prompt = RESEARCH_PROMPT
             self.analysis_prompt = ANALYSIS_PROMPT
             self.review_prompt = REVIEW_PROMPT
@@ -117,15 +181,52 @@ class LLMCouncil:
         """Close the HTTP client."""
         await self.client.aclose()
     
+    def _call_gemini_sync(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+    ) -> str:
+        """
+        Synchronous call to Gemini with Google Search grounding.
+        Uses the official google-genai SDK for reliable grounding.
+        """
+        client = genai.Client(api_key=self.google_api_key)
+        
+        # Configure Google Search grounding tool
+        grounding_tool = types.Tool(
+            google_search=types.GoogleSearch()
+        )
+        
+        # Build config with grounding and optional system instruction
+        config_params = {
+            "tools": [grounding_tool],
+            "temperature": 0.3,
+            "max_output_tokens": 8192,
+        }
+        
+        if system_prompt:
+            config_params["system_instruction"] = system_prompt
+        
+        config = types.GenerateContentConfig(**config_params)
+        
+        response = client.models.generate_content(
+            model=RESEARCH_MODEL,
+            contents=prompt,
+            config=config,
+        )
+        
+        return response.text
+    
     async def _call_gemini_with_grounding(
         self,
         prompt: str,
         system_prompt: str = "",
     ) -> str:
         """
-        Call Gemini API directly with Google Search grounding enabled.
+        Call Gemini API with Google Search grounding enabled.
         
-        Based on: https://ai.google.dev/gemini-api/docs/google-search
+        Uses the official google-genai SDK for reliable grounding support.
+        Runs synchronous SDK call in executor to maintain async compatibility.
         
         Args:
             prompt: User prompt
@@ -137,68 +238,19 @@ class LLMCouncil:
         if not self.google_api_key:
             raise ValueError("GOOGLE_API_KEY required for Gemini grounding")
         
-        # URL format: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
-        url = f"{GEMINI_API_URL}/{RESEARCH_MODEL}:generateContent"
-        
-        # Use x-goog-api-key header as per docs
-        headers = {
-            "x-goog-api-key": self.google_api_key,
-            "Content-Type": "application/json",
-        }
-        
-        # Build contents with optional system instruction
-        contents = [
-            {
-                "parts": [{"text": prompt}]
-            }
-        ]
-        
-        payload = {
-            "contents": contents,
-            "tools": [
-                {
-                    "google_search": {}  # Enable Google Search grounding
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.3,
-                "maxOutputTokens": 8192,
-            }
-        }
-        
-        # Add system instruction if provided
-        if system_prompt:
-            payload["systemInstruction"] = {
-                "parts": [{"text": system_prompt}]
-            }
-        
         try:
-            response = await self.client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
+            # Run sync SDK call in executor to not block event loop
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                partial(self._call_gemini_sync, prompt, system_prompt)
+            )
             
-            data = response.json()
+            logger.info(f"Gemini grounding response received ({len(result)} chars)")
+            return result
             
-            # Extract text from response
-            candidates = data.get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                text_parts = [p.get("text", "") for p in parts if "text" in p]
-                
-                # Log grounding metadata if available
-                grounding_meta = candidates[0].get("groundingMetadata", {})
-                if grounding_meta:
-                    queries = grounding_meta.get("webSearchQueries", [])
-                    logger.info(f"Gemini search queries: {queries}")
-                
-                return "\n".join(text_parts)
-            
-            return "No response from Gemini"
-            
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Gemini API error: {e.response.status_code} - {e.response.text}")
-            raise
         except Exception as e:
-            logger.error(f"Error calling Gemini: {e}")
+            logger.error(f"Error calling Gemini with grounding: {e}")
             raise
     
     async def _call_llm(
@@ -278,6 +330,18 @@ class LLMCouncil:
         )
         
         logger.info("Stage 0: Research complete")
+        
+        # Print preview of research response
+        print()
+        print("=" * 60)
+        print("📊 RESEARCH PREVIEW (first 500 chars):")
+        print("=" * 60)
+        print(research[:500])
+        if len(research) > 500:
+            print(f"\n... [{len(research) - 500} more characters]")
+        print("=" * 60)
+        print()
+        
         return research
     
     async def stage_1_analysis(
@@ -479,6 +543,7 @@ class LLMCouncil:
             final_recommendation=final_recommendation,
             metadata={
                 "sport": self.sport,
+                "prompt_version": self.prompt_version,
                 "research_model": RESEARCH_MODEL,
                 "council_models": COUNCIL_MODELS,
                 "chairman_model": CHAIRMAN_MODEL,
@@ -489,6 +554,7 @@ class LLMCouncil:
 async def run_soccer_analysis(
     settings: Settings,
     markets_text: str,
+    prompt_version: str = "v1",
 ) -> CouncilResult:
     """
     Convenience function to run soccer analysis.
@@ -496,6 +562,7 @@ async def run_soccer_analysis(
     Args:
         settings: Application settings with API keys
         markets_text: Formatted market data for analysis
+        prompt_version: Prompt version to use ("v1" or "v2", default "v1")
         
     Returns:
         CouncilResult with analysis
@@ -509,6 +576,7 @@ async def run_soccer_analysis(
         openrouter_api_key=settings.openrouter_api_key,
         google_api_key=settings.google_api_key,
         sport="soccer",
+        prompt_version=prompt_version,
     )
     
     try:
@@ -538,6 +606,7 @@ Focus on:
 async def run_basketball_analysis(
     settings: Settings,
     markets_text: str,
+    prompt_version: str = "v1",
 ) -> CouncilResult:
     """
     Convenience function to run NBA basketball analysis.
@@ -545,6 +614,7 @@ async def run_basketball_analysis(
     Args:
         settings: Application settings with API keys
         markets_text: Formatted market data for analysis
+        prompt_version: Prompt version to use ("v1" or "v2", default "v1")
         
     Returns:
         CouncilResult with analysis
@@ -558,6 +628,7 @@ async def run_basketball_analysis(
         openrouter_api_key=settings.openrouter_api_key,
         google_api_key=settings.google_api_key,
         sport="basketball",
+        prompt_version=prompt_version,
     )
     
     try:
