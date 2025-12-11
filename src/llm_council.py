@@ -48,6 +48,15 @@ from .prompts import (
     BASKETBALL_ANALYST_SYSTEM_PROMPT_V2,
     BASKETBALL_REVIEWER_SYSTEM_PROMPT_V2,
     BASKETBALL_CHAIRMAN_SYSTEM_PROMPT_V2,
+    # Soccer prompts V3 (UCL specific)
+    RESEARCH_PROMPT_V3,
+    ANALYSIS_PROMPT_V3,
+    REVIEW_PROMPT_V3,
+    SYNTHESIS_PROMPT_V3,
+    RESEARCH_SYSTEM_PROMPT_V3,
+    ANALYST_SYSTEM_PROMPT_V3,
+    REVIEWER_SYSTEM_PROMPT_V3,
+    CHAIRMAN_SYSTEM_PROMPT_V3,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,7 +146,17 @@ class LLMCouncil:
             self.analyst_system_prompt = BASKETBALL_ANALYST_SYSTEM_PROMPT
             self.reviewer_system_prompt = BASKETBALL_REVIEWER_SYSTEM_PROMPT
             self.chairman_system_prompt = BASKETBALL_CHAIRMAN_SYSTEM_PROMPT
-        elif prompt_version == "v2":
+        elif sport == "soccer" and prompt_version == "v3":
+            # Soccer V3 prompts (UCL specific)
+            self.research_prompt = RESEARCH_PROMPT_V3
+            self.analysis_prompt = ANALYSIS_PROMPT_V3
+            self.review_prompt = REVIEW_PROMPT_V3
+            self.synthesis_prompt = SYNTHESIS_PROMPT_V3
+            self.research_system_prompt = RESEARCH_SYSTEM_PROMPT_V3
+            self.analyst_system_prompt = ANALYST_SYSTEM_PROMPT_V3
+            self.reviewer_system_prompt = REVIEWER_SYSTEM_PROMPT_V3
+            self.chairman_system_prompt = CHAIRMAN_SYSTEM_PROMPT_V3
+        elif sport == "soccer" and prompt_version == "v2":
             # Soccer V2 prompts (rewritten with sharper personas)
             self.research_prompt = RESEARCH_PROMPT_V2
             self.analysis_prompt = ANALYSIS_PROMPT_V2

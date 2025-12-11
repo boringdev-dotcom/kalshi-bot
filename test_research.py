@@ -259,6 +259,7 @@ async def main():
     if sport == "soccer":
         print("  1. V1 (Original) - Standard analytical prompts")
         print("  2. V2 (Rewritten) - Sharp persona-based prompts with xG, PPDA focus")
+        print("  3. V3 (Rewritten) - UCL specific prompts")
     else:
         print("  1. V1 (Original) - Standard analytical prompts")
         print("  2. V2 (Rewritten) - Four Factors, role-based analysis (Quant/Scout/Situationalist/Contrarian)")
@@ -272,6 +273,9 @@ async def main():
                 print("✅ Using V2 prompts (Sharp/Quantitative approach)")
             else:
                 print("✅ Using V2 prompts (Four Factors/Role-based approach)")
+        elif version_choice == "3":
+            prompt_version = "v3"
+            print("✅ Using V3 prompts (UCL specific approach)")
         else:
             prompt_version = "v1"
             print("✅ Using V1 prompts (Original approach)")
