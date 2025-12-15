@@ -39,7 +39,7 @@ from .prompts import (
     BASKETBALL_ANALYST_SYSTEM_PROMPT,
     BASKETBALL_REVIEWER_SYSTEM_PROMPT,
     BASKETBALL_CHAIRMAN_SYSTEM_PROMPT,
-    # Basketball prompts V2 (rewritten)
+    # Basketball prompts V2 (multi-stage research)
     BASKETBALL_RESEARCH_PROMPT_V2,
     BASKETBALL_ANALYSIS_PROMPT_V2,
     BASKETBALL_REVIEW_PROMPT_V2,
@@ -48,6 +48,14 @@ from .prompts import (
     BASKETBALL_ANALYST_SYSTEM_PROMPT_V2,
     BASKETBALL_REVIEWER_SYSTEM_PROMPT_V2,
     BASKETBALL_CHAIRMAN_SYSTEM_PROMPT_V2,
+    # Basketball V2 stage prompts (multi-stage research)
+    BASKETBALL_STAGE_1_EFFICIENCY,
+    BASKETBALL_STAGE_2_BETTING_LINES,
+    BASKETBALL_STAGE_3_INJURIES,
+    BASKETBALL_STAGE_4_SITUATIONAL,
+    BASKETBALL_STAGE_5_H2H,
+    BASKETBALL_STAGE_6_PROPS,
+    BASKETBALL_RESEARCH_SYNTHESIS_V2,
     # Soccer prompts V3 (UCL specific)
     RESEARCH_PROMPT_V3,
     ANALYSIS_PROMPT_V3,
@@ -57,6 +65,13 @@ from .prompts import (
     ANALYST_SYSTEM_PROMPT_V3,
     REVIEWER_SYSTEM_PROMPT_V3,
     CHAIRMAN_SYSTEM_PROMPT_V3,
+    # Soccer V2 stage prompts (multi-stage research)
+    SOCCER_STAGE_1_FORM_METRICS,
+    SOCCER_STAGE_2_BETTING_LINES,
+    SOCCER_STAGE_3_TEAM_NEWS,
+    SOCCER_STAGE_4_SITUATIONAL,
+    SOCCER_STAGE_5_TACTICAL,
+    SOCCER_RESEARCH_SYNTHESIS_V2,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,6 +89,7 @@ RESEARCH_MODEL = "gemini-3-pro-preview"  # Fast model with grounding support
 
 # Council models (via OpenRouter)
 COUNCIL_MODELS = [
+    "deepseek/deepseek-v3.2",
     "anthropic/claude-opus-4.5",
     "google/gemini-3-pro-preview",
     "x-ai/grok-4.1-fast",
@@ -344,6 +360,267 @@ class LLMCouncil:
         
         return research
     
+    async def stage_0_research_multistage(
+        self,
+        home_team: str,
+        away_team: str,
+        game_date: str,
+        include_props: bool = True,
+        players: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Stage 0: Multi-stage research for NBA games.
+        
+        Runs 5-6 focused research stages sequentially, each with Gemini grounding.
+        This allows more targeted searches and better data quality.
+        
+        Args:
+            home_team: Home team name
+            away_team: Away team name
+            game_date: Game date string
+            include_props: Whether to include player props stage
+            players: List of player names for props research
+            
+        Returns:
+            Combined research from all stages
+        """
+        logger.info(f"Stage 0: Starting multi-stage NBA research for {home_team} vs {away_team}...")
+        
+        context = {
+            "home_team": home_team,
+            "away_team": away_team,
+            "game_date": game_date,
+        }
+        
+        # Define research stages
+        stages = [
+            ("1_efficiency", BASKETBALL_STAGE_1_EFFICIENCY),
+            ("2_betting_lines", BASKETBALL_STAGE_2_BETTING_LINES),
+            ("3_injuries", BASKETBALL_STAGE_3_INJURIES),
+            ("4_situational", BASKETBALL_STAGE_4_SITUATIONAL),
+            ("5_h2h", BASKETBALL_STAGE_5_H2H),
+        ]
+        
+        # Optionally add props stage
+        if include_props and players:
+            context["player_list"] = ", ".join(players)
+            context["opponent_team"] = away_team
+            stages.append(("6_props", BASKETBALL_STAGE_6_PROPS))
+        
+        stage_outputs = {}
+        
+        # Execute each stage sequentially
+        for stage_name, stage_prompt in stages:
+            logger.info(f"  Executing research stage: {stage_name}")
+            print(f"\n{'='*60}")
+            print(f"🔍 RESEARCH STAGE: {stage_name}")
+            print('='*60)
+            
+            try:
+                prompt = stage_prompt.format(**context)
+                result = await self._call_gemini_with_grounding(
+                    prompt=prompt,
+                    system_prompt=self.research_system_prompt,
+                )
+                stage_outputs[stage_name] = result
+                
+                # Print preview
+                print(f"✓ Completed ({len(result)} chars)")
+                preview = result[:300] if len(result) > 300 else result
+                print(preview)
+                if len(result) > 300:
+                    print(f"... [{len(result) - 300} more chars]")
+                    
+            except Exception as e:
+                logger.error(f"  Stage {stage_name} failed: {e}")
+                stage_outputs[stage_name] = f"[Stage failed: {e}]"
+        
+        # Compile all stage outputs
+        compiled_research = self._compile_stage_outputs(
+            stage_outputs, home_team, away_team, game_date
+        )
+        
+        logger.info(f"Stage 0: Multi-stage research complete ({len(compiled_research)} chars)")
+        
+        return compiled_research
+    
+    def _compile_stage_outputs(
+        self,
+        stage_outputs: Dict[str, str],
+        home_team: str,
+        away_team: str,
+        game_date: str,
+    ) -> str:
+        """
+        Compile all stage outputs into a single research document.
+        
+        Args:
+            stage_outputs: Dictionary of stage name -> output
+            home_team: Home team name
+            away_team: Away team name
+            game_date: Game date string
+            
+        Returns:
+            Compiled research document
+        """
+        sections = [
+            f"# NBA Research Report: {home_team} vs {away_team}",
+            f"**Date:** {game_date}",
+            "",
+            "---",
+            "",
+        ]
+        
+        stage_labels = {
+            "1_efficiency": "## Stage 1: Efficiency & Performance Metrics",
+            "2_betting_lines": "## Stage 2: Betting Lines & Market Data",
+            "3_injuries": "## Stage 3: Injuries & Roster Status",
+            "4_situational": "## Stage 4: Situational & Scheduling Factors",
+            "5_h2h": "## Stage 5: Head-to-Head & Matchup History",
+            "6_props": "## Stage 6: Player Props Research",
+        }
+        
+        for stage_name, output in stage_outputs.items():
+            label = stage_labels.get(stage_name, f"## {stage_name}")
+            sections.append(label)
+            sections.append("")
+            sections.append(output)
+            sections.append("")
+            sections.append("---")
+            sections.append("")
+        
+        return "\n".join(sections)
+    
+    async def stage_0_research_multistage_soccer(
+        self,
+        home_team: str,
+        away_team: str,
+        competition: str,
+        match_date: str,
+    ) -> str:
+        """
+        Stage 0: Multi-stage research for soccer matches.
+        
+        Runs 5 focused research stages sequentially, each with Gemini grounding.
+        This allows more targeted searches and better data quality.
+        
+        Args:
+            home_team: Home team name
+            away_team: Away team name
+            competition: Competition/league name
+            match_date: Match date string
+            
+        Returns:
+            Combined research from all stages
+        """
+        logger.info(f"Stage 0: Starting multi-stage soccer research for {home_team} vs {away_team}...")
+        
+        # Extract month from match_date for situational stage
+        month = match_date.split()[0] if match_date else "December"
+        
+        context = {
+            "home_team": home_team,
+            "away_team": away_team,
+            "competition": competition,
+            "match_date": match_date,
+            "month": month,
+        }
+        
+        # Define research stages
+        stages = [
+            ("1_form_metrics", SOCCER_STAGE_1_FORM_METRICS),
+            ("2_betting_lines", SOCCER_STAGE_2_BETTING_LINES),
+            ("3_team_news", SOCCER_STAGE_3_TEAM_NEWS),
+            ("4_situational", SOCCER_STAGE_4_SITUATIONAL),
+            ("5_tactical", SOCCER_STAGE_5_TACTICAL),
+        ]
+        
+        stage_outputs = {}
+        
+        # Execute each stage sequentially
+        for stage_name, stage_prompt in stages:
+            logger.info(f"  Executing soccer research stage: {stage_name}")
+            print(f"\n{'='*60}")
+            print(f"🔍 RESEARCH STAGE: {stage_name}")
+            print('='*60)
+            
+            try:
+                prompt = stage_prompt.format(**context)
+                result = await self._call_gemini_with_grounding(
+                    prompt=prompt,
+                    system_prompt=self.research_system_prompt,
+                )
+                stage_outputs[stage_name] = result
+                
+                # Print preview
+                print(f"✓ Completed ({len(result)} chars)")
+                preview = result[:300] if len(result) > 300 else result
+                print(preview)
+                if len(result) > 300:
+                    print(f"... [{len(result) - 300} more chars]")
+                    
+            except Exception as e:
+                logger.error(f"  Stage {stage_name} failed: {e}")
+                stage_outputs[stage_name] = f"[Stage failed: {e}]"
+        
+        # Compile all stage outputs
+        compiled_research = self._compile_soccer_stage_outputs(
+            stage_outputs, home_team, away_team, competition, match_date
+        )
+        
+        logger.info(f"Stage 0: Multi-stage soccer research complete ({len(compiled_research)} chars)")
+        
+        return compiled_research
+    
+    def _compile_soccer_stage_outputs(
+        self,
+        stage_outputs: Dict[str, str],
+        home_team: str,
+        away_team: str,
+        competition: str,
+        match_date: str,
+    ) -> str:
+        """
+        Compile all soccer stage outputs into a single research document.
+        
+        Args:
+            stage_outputs: Dictionary of stage name -> output
+            home_team: Home team name
+            away_team: Away team name
+            competition: Competition/league name
+            match_date: Match date string
+            
+        Returns:
+            Compiled research document
+        """
+        sections = [
+            f"# Soccer Research Report: {home_team} vs {away_team}",
+            f"**Competition:** {competition}",
+            f"**Date:** {match_date}",
+            "",
+            "---",
+            "",
+        ]
+        
+        stage_labels = {
+            "1_form_metrics": "## Stage 1: Form & Underlying Metrics (xG)",
+            "2_betting_lines": "## Stage 2: Betting Lines & Market Data",
+            "3_team_news": "## Stage 3: Injuries, Suspensions & Team News",
+            "4_situational": "## Stage 4: Situational & Motivation Factors",
+            "5_tactical": "## Stage 5: Tactical & Style Matchup",
+        }
+        
+        for stage_name, output in stage_outputs.items():
+            label = stage_labels.get(stage_name, f"## {stage_name}")
+            sections.append(label)
+            sections.append("")
+            sections.append(output)
+            sections.append("")
+            sections.append("---")
+            sections.append("")
+        
+        return "\n".join(sections)
+    
     async def stage_1_analysis(
         self,
         research: str,
@@ -555,6 +832,10 @@ async def run_soccer_analysis(
     settings: Settings,
     markets_text: str,
     prompt_version: str = "v1",
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+    competition: Optional[str] = None,
+    match_date: Optional[str] = None,
 ) -> CouncilResult:
     """
     Convenience function to run soccer analysis.
@@ -562,7 +843,11 @@ async def run_soccer_analysis(
     Args:
         settings: Application settings with API keys
         markets_text: Formatted market data for analysis
-        prompt_version: Prompt version to use ("v1" or "v2", default "v1")
+        prompt_version: Prompt version to use ("v1", "v2", or "v3", default "v1")
+        home_team: Home team name (required for v2 multi-stage research)
+        away_team: Away team name (required for v2 multi-stage research)
+        competition: Competition/league name (required for v2 multi-stage research)
+        match_date: Match date string (required for v2 multi-stage research)
         
     Returns:
         CouncilResult with analysis
@@ -580,9 +865,52 @@ async def run_soccer_analysis(
     )
     
     try:
-        # Extract match info for research
-        # The markets_text should contain match titles that we can research
-        matches_for_research = f"""
+        # V2 uses multi-stage research if match info is provided
+        if prompt_version == "v2" and home_team and away_team and competition and match_date:
+            logger.info(f"Using multi-stage research for {home_team} vs {away_team}")
+            
+            # Stage 0: Multi-stage research
+            research = await council.stage_0_research_multistage_soccer(
+                home_team=home_team,
+                away_team=away_team,
+                competition=competition,
+                match_date=match_date,
+            )
+            
+            # Stage 1: Analysis
+            analyses = await council.stage_1_analysis(research, markets_text)
+            
+            # Stage 2: Review
+            reviews = await council.stage_2_review(research, markets_text, analyses)
+            
+            # Stage 3: Synthesis
+            final_recommendation = await council.stage_3_synthesis(
+                research, markets_text, analyses, reviews
+            )
+            
+            logger.info("LLM Council soccer analysis pipeline complete (multi-stage)")
+            
+            return CouncilResult(
+                research=research,
+                analyses=analyses,
+                reviews=reviews,
+                final_recommendation=final_recommendation,
+                metadata={
+                    "sport": "soccer",
+                    "prompt_version": prompt_version,
+                    "research_model": RESEARCH_MODEL,
+                    "council_models": COUNCIL_MODELS,
+                    "chairman_model": CHAIRMAN_MODEL,
+                    "research_type": "multi-stage",
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "competition": competition,
+                    "match_date": match_date,
+                },
+            )
+        else:
+            # V1, V3, or V2 without match info: use legacy single-call research
+            matches_for_research = f"""
 Based on these Kalshi soccer markets, research the following matches:
 
 {markets_text}
@@ -591,13 +919,13 @@ Focus on:
 - La Liga matches
 - Premier League matches
 """
-        
-        result = await council.run_council(
-            matches=matches_for_research,
-            market_odds=markets_text,
-        )
-        
-        return result
+            
+            result = await council.run_council(
+                matches=matches_for_research,
+                market_odds=markets_text,
+            )
+            
+            return result
         
     finally:
         await council.close()
@@ -607,6 +935,11 @@ async def run_basketball_analysis(
     settings: Settings,
     markets_text: str,
     prompt_version: str = "v1",
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+    game_date: Optional[str] = None,
+    include_props: bool = True,
+    players: Optional[List[str]] = None,
 ) -> CouncilResult:
     """
     Convenience function to run NBA basketball analysis.
@@ -615,6 +948,11 @@ async def run_basketball_analysis(
         settings: Application settings with API keys
         markets_text: Formatted market data for analysis
         prompt_version: Prompt version to use ("v1" or "v2", default "v1")
+        home_team: Home team name (required for v2 multi-stage research)
+        away_team: Away team name (required for v2 multi-stage research)
+        game_date: Game date string (required for v2 multi-stage research)
+        include_props: Whether to include player props research (v2 only)
+        players: List of player names for props research (v2 only)
         
     Returns:
         CouncilResult with analysis
@@ -632,9 +970,52 @@ async def run_basketball_analysis(
     )
     
     try:
-        # Extract game info for research
-        # The markets_text should contain game titles that we can research
-        matches_for_research = f"""
+        # V2 uses multi-stage research if team info is provided
+        if prompt_version == "v2" and home_team and away_team and game_date:
+            logger.info(f"Using multi-stage research for {home_team} vs {away_team}")
+            
+            # Stage 0: Multi-stage research
+            research = await council.stage_0_research_multistage(
+                home_team=home_team,
+                away_team=away_team,
+                game_date=game_date,
+                include_props=include_props,
+                players=players,
+            )
+            
+            # Stage 1: Analysis
+            analyses = await council.stage_1_analysis(research, markets_text)
+            
+            # Stage 2: Review
+            reviews = await council.stage_2_review(research, markets_text, analyses)
+            
+            # Stage 3: Synthesis
+            final_recommendation = await council.stage_3_synthesis(
+                research, markets_text, analyses, reviews
+            )
+            
+            logger.info("LLM Council basketball analysis pipeline complete (multi-stage)")
+            
+            return CouncilResult(
+                research=research,
+                analyses=analyses,
+                reviews=reviews,
+                final_recommendation=final_recommendation,
+                metadata={
+                    "sport": "basketball",
+                    "prompt_version": prompt_version,
+                    "research_model": RESEARCH_MODEL,
+                    "council_models": COUNCIL_MODELS,
+                    "chairman_model": CHAIRMAN_MODEL,
+                    "research_type": "multi-stage",
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "game_date": game_date,
+                },
+            )
+        else:
+            # V1 or V2 without team info: use legacy single-call research
+            matches_for_research = f"""
 Based on these Kalshi NBA basketball markets, research the following games:
 
 {markets_text}
@@ -645,13 +1026,13 @@ Focus on:
 - Back-to-back scheduling
 - Recent team performance
 """
-        
-        result = await council.run_council(
-            matches=matches_for_research,
-            market_odds=markets_text,
-        )
-        
-        return result
+            
+            result = await council.run_council(
+                matches=matches_for_research,
+                market_odds=markets_text,
+            )
+            
+            return result
         
     finally:
         await council.close()

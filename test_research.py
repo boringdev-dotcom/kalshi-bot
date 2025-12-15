@@ -314,6 +314,13 @@ async def main():
     print(f"✅ Found {len(markets)} {sport_name} markets")
     print()
     
+    # Debug: Show full raw market data to find game date field
+    print("🔍 DEBUG - Full raw market data (first market):")
+    if markets:
+        import json
+        print(json.dumps(markets[0], indent=2, default=str))
+    print()
+    
     # Group markets by match (event)
     matches = {}
     for m in markets:
@@ -329,7 +336,16 @@ async def main():
                 if close_time:
                     try:
                         # Parse ISO format datetime (e.g., "2024-12-08T20:00:00Z")
-                        match_date = datetime.fromisoformat(close_time.replace("Z", "+00:00")).date()
+                        parsed_date = datetime.fromisoformat(close_time.replace("Z", "+00:00")).date()
+                        
+                        # Fix Kalshi's incorrect year (they sometimes return 2026 instead of 2025)
+                        today = datetime.now().date()
+                        if parsed_date.year > today.year + 1:
+                            # Year is too far in the future, correct it
+                            corrected_year = today.year if parsed_date.month >= today.month else today.year + 1
+                            match_date = parsed_date.replace(year=corrected_year)
+                        else:
+                            match_date = parsed_date
                     except (ValueError, AttributeError):
                         pass
                 
@@ -455,33 +471,184 @@ async def main():
     print(f"{sport_emoji} Running LLM Council {sport_name.title()} Analysis")
     print("="*60)
     if sport == "soccer":
-        version_display = "V2 (Sharp/Quantitative)" if prompt_version == "v2" else "V1 (Original)"
+        version_display = "V2 (Multi-Stage xG Research)" if prompt_version == "v2" else "V1 (Original)" if prompt_version == "v1" else "V3 (UCL specific)"
     else:
-        version_display = "V2 (Four Factors/Role-based)" if prompt_version == "v2" else "V1 (Original)"
+        version_display = "V2 (Multi-Stage Research)" if prompt_version == "v2" else "V1 (Original)"
     print(f"📝 Prompt Version: {version_display}")
     print()
     print("Pipeline stages:")
-    print("  1️⃣  Research (Gemini + Google Search grounding) - ~30s")
-    print("  2️⃣  Analysis (4 LLMs in parallel) - ~45s")
-    print("  3️⃣  Review (peer review) - ~45s")
-    print("  4️⃣  Synthesis (final recommendation) - ~20s")
-    print()
-    print("⏳ Total estimated time: 2-3 minutes...")
+    if sport == "basketball" and prompt_version == "v2":
+        print("  0️⃣  Multi-Stage Research (5 sequential Gemini calls):")
+        print("      • Stage 1: Efficiency Metrics")
+        print("      • Stage 2: Betting Lines & Market Data")
+        print("      • Stage 3: Injuries & Roster Status")
+        print("      • Stage 4: Situational & Scheduling Factors")
+        print("      • Stage 5: Head-to-Head History")
+        print("  1️⃣  Analysis (4 LLMs in parallel) - ~45s")
+        print("  2️⃣  Review (peer review) - ~45s")
+        print("  3️⃣  Synthesis (final recommendation) - ~20s")
+        print()
+        print("⏳ Total estimated time: 4-6 minutes (more thorough research)...")
+    elif sport == "soccer" and prompt_version == "v2":
+        print("  0️⃣  Multi-Stage Research (5 sequential Gemini calls):")
+        print("      • Stage 1: Form & xG Metrics")
+        print("      • Stage 2: Betting Lines & Market Data")
+        print("      • Stage 3: Injuries & Team News")
+        print("      • Stage 4: Situational & Motivation Factors")
+        print("      • Stage 5: Tactical & Style Matchup")
+        print("  1️⃣  Analysis (4 LLMs in parallel) - ~45s")
+        print("  2️⃣  Review (peer review) - ~45s")
+        print("  3️⃣  Synthesis (final recommendation) - ~20s")
+        print()
+        print("⏳ Total estimated time: 4-6 minutes (more thorough research)...")
+    else:
+        print("  1️⃣  Research (Gemini + Google Search grounding) - ~30s")
+        print("  2️⃣  Analysis (4 LLMs in parallel) - ~45s")
+        print("  3️⃣  Review (peer review) - ~45s")
+        print("  4️⃣  Synthesis (final recommendation) - ~20s")
+        print()
+        print("⏳ Total estimated time: 2-3 minutes...")
     print()
     
     try:
         # Run the appropriate analysis
         if sport == "basketball":
+            # Parse team names from match title for multi-stage research (v2)
+            home_team = None
+            away_team = None
+            game_date_str = None
+            
+            if prompt_version == "v2":
+                # Parse teams from title like "Boston vs Milwaukee Winner?"
+                # Need to clean up suffixes like "Winner?", "Winner", "Total", etc.
+                clean_title = match_title
+                for suffix in [" Winner?", " Winner", " Total?", " Total", " Spread?", " Spread"]:
+                    clean_title = clean_title.replace(suffix, "")
+                
+                if " vs " in clean_title:
+                    parts = clean_title.split(" vs ")
+                    if len(parts) == 2:
+                        away_team = parts[0].strip()
+                        home_team = parts[1].strip()
+                        print(f"   Away Team: {away_team}")
+                        print(f"   Home Team: {home_team}")
+                
+                # Format game date - handle season year vs calendar year
+                # Kalshi uses "25DEC26" to mean the 24-25 season, not year 2025
+                today = datetime.now().date()
+                game_date_str = None
+                
+                # Try to get date from market's close_time first (most accurate)
+                for m in selected_markets:
+                    close_time = m.get("close_time") or m.get("expiration_time")
+                    if close_time:
+                        try:
+                            actual_date = datetime.fromisoformat(close_time.replace("Z", "+00:00")).date()
+                            game_date_str = actual_date.strftime("%B %d, %Y")
+                            break
+                        except (ValueError, AttributeError):
+                            pass
+                
+                # Fallback to parsed date with year correction
+                if not game_date_str and match_data.get("date"):
+                    parsed_date = match_data["date"]
+                    # If parsed date is more than 6 months in the future, subtract a year
+                    if parsed_date > today + timedelta(days=180):
+                        corrected_date = parsed_date.replace(year=parsed_date.year - 1)
+                        game_date_str = corrected_date.strftime("%B %d, %Y")
+                    else:
+                        game_date_str = parsed_date.strftime("%B %d, %Y")
+                
+                # Final fallback to today
+                if not game_date_str:
+                    game_date_str = today.strftime("%B %d, %Y")
+                game_date_str = today.strftime("%B %d, %Y")
+                print(f"   Game Date: {game_date_str}")
+                
+                print()
+                print("🔬 Using MULTI-STAGE research (5 sequential stages)")
+                print()
+            
             result = await run_basketball_analysis(
                 settings=settings,
                 markets_text=markets_text,
                 prompt_version=prompt_version,
+                home_team=home_team,
+                away_team=away_team,
+                game_date=game_date_str,
             )
         else:
+            # Parse team names from match title for multi-stage research (v2)
+            home_team = None
+            away_team = None
+            match_date_str = None
+            competition = None
+            
+            if prompt_version == "v2":
+                # Parse teams from title like "Barcelona vs Real Madrid Winner?"
+                # Need to clean up suffixes like "Winner?", "Winner", "Tie?", etc.
+                clean_title = match_title
+                for suffix in [" Winner?", " Winner", " Tie?", " Tie", " Draw?", " Draw"]:
+                    clean_title = clean_title.replace(suffix, "")
+                
+                if " vs " in clean_title:
+                    parts = clean_title.split(" vs ")
+                    if len(parts) == 2:
+                        # In soccer, format is usually "Away vs Home" on Kalshi
+                        away_team = parts[0].strip()
+                        home_team = parts[1].strip()
+                        print(f"   Away Team: {away_team}")
+                        print(f"   Home Team: {home_team}")
+                
+                # Get competition from league field
+                league = match_data.get("league", "unknown")
+                competition_map = {
+                    "la_liga": "La Liga",
+                    "premier_league": "Premier League",
+                    "ucl": "UEFA Champions League",
+                    "mls": "MLS",
+                }
+                competition = competition_map.get(league, league.replace("_", " ").title())
+                print(f"   Competition: {competition}")
+                
+                # Format match date
+                today = datetime.now().date()
+                match_date_str = None
+                
+                # Try to get date from market's close_time first (most accurate)
+                for m in selected_markets:
+                    close_time = m.get("close_time") or m.get("expiration_time")
+                    if close_time:
+                        try:
+                            actual_date = datetime.fromisoformat(close_time.replace("Z", "+00:00")).date()
+                            match_date_str = actual_date.strftime("%B %d, %Y")
+                            break
+                        except (ValueError, AttributeError):
+                            pass
+                
+                # Fallback to parsed date
+                if not match_date_str and match_data.get("date"):
+                    parsed_date = match_data["date"]
+                    match_date_str = parsed_date.strftime("%B %d, %Y")
+                
+                # Final fallback to today
+                if not match_date_str:
+                    match_date_str = today.strftime("%B %d, %Y")
+
+                match_date_str = "December 14, 2025"
+                print(f"   Match Date: {match_date_str}")
+                print()
+                print("🔬 Using MULTI-STAGE research (5 sequential stages)")
+                print()
+            
             result = await run_soccer_analysis(
                 settings=settings,
                 markets_text=markets_text,
                 prompt_version=prompt_version,
+                home_team=home_team,
+                away_team=away_team,
+                competition=competition,
+                match_date=match_date_str,
             )
         
         # Generate markdown report
