@@ -34,6 +34,12 @@ SOCCER_SERIES_TICKERS = {
         "KXUCLTOTAL",        # Total goals (Over/Under)
         "KXUCLBTTS",         # Both Teams To Score
     ],
+    "bundesliga": [
+        "KXBUNDESLIGAGAME",         # Winner/Tie markets
+        "KXBUNDESLIGASPREAD",       # Spread markets
+        "KXBUNDESLIGATOTAL",        # Total goals (Over/Under)
+        "KXBUNDESLIGABTTS",         # Both Teams To Score
+    ],
 }
 
 # Ticker prefixes for searching (markets start with these)
@@ -42,6 +48,7 @@ SOCCER_TICKER_PREFIXES = {
     "premier_league": ["KXEPL", "KXPREMIER", "EPL"],
     "mls": ["KXMLS", "MLS"],
     "ucl": ["KXUCL", "UCL"],
+    "bundesliga": ["KXBUNDESLIGA", "BUNDESLIGA"],
 }
 
 # Fallback search terms if series tickers don't work
@@ -401,7 +408,7 @@ def get_soccer_markets(
         List of soccer market dictionaries with market details and odds
     """
     if leagues is None:
-        leagues = ["la_liga", "premier_league", "mls"]
+        leagues = ["la_liga", "premier_league", "mls", "bundesliga"]
     
     soccer_markets = []
     seen_tickers = set()  # Avoid duplicates across series
