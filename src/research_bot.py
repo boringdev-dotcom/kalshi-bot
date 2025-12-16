@@ -408,6 +408,7 @@ class GameSelectView(discord.ui.View):
                 "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
                 "mls": "🇺🇸",
                 "nba": "🏀",
+                "bundesliga": "🇩🇪",
             }.get(league, "🏀" if self.sport == "basketball" else "⚽")
             
             # Truncate title if too long (Discord limit: 100 chars for label)
@@ -699,7 +700,7 @@ def create_bot(settings: Settings) -> SportsResearchBot:
             
             league_summary = []
             for l, count in league_counts.items():
-                emoji = {"la_liga": "🇪🇸", "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "mls": "🇺🇸"}.get(l, "⚽")
+                emoji = {"la_liga": "🇪🇸", "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "mls": "🇺🇸", "bundesliga": "🇩🇪"}.get(l, "⚽")
                 league_summary.append(f"{emoji} {l.replace('_', ' ').title()}: {count} games")
             
             embed.add_field(

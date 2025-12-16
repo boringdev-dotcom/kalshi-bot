@@ -232,7 +232,8 @@ async def main():
         print("  2. 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (England)")
         print("  3. 🏆 UEFA Champions League")
         print("  4. 🇺🇸 MLS (USA)")
-        print("  5. 🌍 All Leagues")
+        print("  5. �🇪 Bundesliga (Germany)")
+        print("  6. �🌍 All Leagues")
         print()
         
         league_map = {
@@ -240,15 +241,16 @@ async def main():
             "2": ["premier_league"],
             "3": ["ucl"],
             "4": ["mls"],
-            "5": ["la_liga", "premier_league", "ucl", "mls"],
+            "5": ["bundesliga"],
+            "6": ["la_liga", "premier_league", "ucl", "mls", "bundesliga"],
         }
         
         try:
             league_choice = input("Enter league number (1-5): ").strip()
-            selected_leagues = league_map.get(league_choice, ["la_liga", "premier_league", "ucl", "mls"])
+            selected_leagues = league_map.get(league_choice, ["la_liga", "premier_league", "ucl", "mls", "bundesliga"])
         except (ValueError, KeyboardInterrupt):
             print("Defaulting to all leagues...")
-            selected_leagues = ["la_liga", "premier_league", "ucl", "mls"]
+            selected_leagues = ["la_liga", "premier_league", "ucl", "mls", "bundesliga"]
         
         print()
     
@@ -429,6 +431,7 @@ async def main():
                     "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
                     "mls": "🇺🇸",
                     "ucl": "🏆",
+                    "bundesliga": "🇩🇪",
                 }.get(league, "⚽")
             print(f"    {game_number}. {league_emoji} {match_data['title']} ({len(match_data['markets'])} markets)")
             match_list.append((match_id, match_data))
@@ -635,7 +638,7 @@ async def main():
                 if not match_date_str:
                     match_date_str = today.strftime("%B %d, %Y")
 
-                match_date_str = "December 14, 2025"
+                match_date_str = "December 15, 2025"
                 print(f"   Match Date: {match_date_str}")
                 print()
                 print("🔬 Using MULTI-STAGE research (5 sequential stages)")
