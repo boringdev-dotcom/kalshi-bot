@@ -67,6 +67,7 @@ BASKETBALL_SERIES_TICKERS = {
         "KXNBAGAME",      # Winner markets (moneyline)
         "KXNBASPREAD",    # Point spread markets
         "KXNBATOTAL",     # Total points (Over/Under)
+        "KXNBACUP",       # Cup markets
     ],
 }
 

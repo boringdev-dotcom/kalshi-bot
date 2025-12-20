@@ -638,7 +638,7 @@ async def main():
                 if not match_date_str:
                     match_date_str = today.strftime("%B %d, %Y")
 
-                match_date_str = "December 15, 2025"
+                match_date_str = "December 20, 2025"
                 print(f"   Match Date: {match_date_str}")
                 print()
                 print("🔬 Using MULTI-STAGE research (5 sequential stages)")
