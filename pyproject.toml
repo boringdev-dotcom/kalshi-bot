@@ -19,6 +19,7 @@ dependencies = [
   "pytz>=2024.1",
   "google",
   "google.genai",
+  "streamlit>=1.40.0",
 ]
 
 [project.scripts]
