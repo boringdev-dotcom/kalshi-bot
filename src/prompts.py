@@ -482,119 +482,112 @@ Output purely the structured data without narrative filler."""
 # ANALYSIS PROMPT (The Edge Finder)
 # -----------------------------------------------------------------------------
 
-NBA_ANALYSIS_PROMPT = """You are analyzing NBA games for betting value. 
+NBA_ANALYSIS_PROMPT = """You are an NBA Quantitative Analyst.
 
-RESEARCH DATA:
+INPUT DATA:
 {research}
 
-MARKET ODDS:
+MARKET DATA (DO NOT LOOK YET):
 {market_odds}
 
 ---
 
-## YOUR TASK: Apply the 4-Lens Framework
+## YOUR TASK: The "Blind Price" Protocol
 
-For EACH game, analyze through these 4 independent lenses. They may disagree - that's fine.
+You must calculate your own "Fair Line" BEFORE looking at the market odds to avoid anchoring bias.
 
-### LENS 1: THE QUANT (Pure Numbers)
-Using ONLY the efficiency metrics from the research:
+### PHASE 1: THE QUANT LENS (Blind Calculation)
 
-| Metric | Home Team | Away Team | Edge |
-|--------|-----------|-----------|------|
-| Net Rating | [from research] | [from research] | [+/- X.X] |
-| eFG% | [from research] | [from research] | [+/- X.X%] |
-| Pace | [from research] | [from research] | [implications] |
-| L10 Record | [from research] | [from research] | [trend] |
+**Step A: The Raw Efficiency Spread**
+Using the Net Ratings from research, apply this formula:
+`Raw_Spread = (Away_NetRtg - Home_NetRtg) * 0.5`
+*(Note: 1.0 diff in Net Rating is approx 0.5 points value)*
 
-**Quant Verdict:** Based purely on numbers, [TEAM] has a [X.X] point advantage.
-**Estimated Spread:** [YOUR NUMBER] vs Market [MARKET NUMBER]
-**Quant Edge:** [DIFFERENCE] points
+**Step B: The Situational Adjustments**
+Apply these modifiers to the `Raw_Spread`:
+1. **Home Court:** Add +2.5 points to the Home Team.
+2. **Rest Disadvantage:** Subtract -2.5 points from any team on a Back-to-Back (0 days rest).
+3. **Travel:** Subtract -1.0 point if a team is on game 3+ of a road trip.
 
-### LENS 2: THE SCOUT (Injuries & Matchups)
-Using ONLY the injury and roster data:
+**Step C: The Injury Adjustment (The Star Tax)**
+Adjust for KEY players marked OUT in the research:
+- **MVP Candidate:** Adjust 6-8 points against their team.
+- **All-Star:** Adjust 3-4 points against their team.
+- **Key Starter:** Adjust 1.5-2 points against their team.
 
-**Home Team Injury Impact:**
-- Key OUT: [List from research with PPG impact]
-- Estimated point swing: [+/- X]
+**Step D: Final "Blind Price"**
+Sum A + B + C to get your Fair Line.
+> *Example: Boston (Home) vs Knicks. Raw spread -4. Home court +2.5. Total -6.5.*
 
-**Away Team Injury Impact:**
-- Key OUT: [List from research with PPG impact]  
-- Estimated point swing: [+/- X]
-
-**Matchup Notes:**
-- [Any specific player matchup concerns from H2H data]
-
-**Scout Verdict:** Injuries favor [TEAM] by approximately [X] points.
-**Scout Risk Flag:** [Any GTD or late scratch concerns?]
-
-### LENS 3: THE SITUATIONALIST (Schedule & Context)
-Using ONLY the situational data:
-
-| Factor | Home Team | Away Team |
-|--------|-----------|-----------|
-| Days Rest | [from research] | [from research] |
-| B2B? | [Yes/No] | [Yes/No] |
-| Home/Road Record | [from research] | [from research] |
-| Travel | [from research] | [from research] |
-
-**Rest Edge:** [TEAM] has [X] more days rest = ~[X] point edge
-**Schedule Spot:** [Look-ahead? Letdown? Trap game?]
-**Situational Verdict:** Context favors [TEAM] by [X] points.
-
-### LENS 4: THE CONTRARIAN (Why the Market is Wrong)
-This lens MUST argue against the favorite or consensus:
-
-**The Market Says:** [Current line and implied favorite]
-**The Counter-Argument:**
-- [Specific reason #1 the favorite could fail]
-- [Specific reason #2 from research data]
-
-**Contrarian Verdict:** [Is there a case for the other side? YES/NO]
+**OUTPUT FOR PHASE 1:**
+- **Calculated Fair Spread:** [TEAM] [NUMBER]
+- **Calculated Fair Total:** (Home_Pace + Away_Pace) * (Home_OffRtg + Away_OffRtg) / 200 ... *Rough Estimate*
 
 ---
 
-## SYNTHESIS: Combining the Lenses
+### PHASE 2: THE MARKET COMPARISON
 
-| Lens | Favors | Edge (pts) | Confidence |
-|------|--------|------------|------------|
-| Quant | [Team] | [X.X] | [High/Med/Low] |
-| Scout | [Team] | [X.X] | [High/Med/Low] |
-| Situational | [Team] | [X.X] | [High/Med/Low] |
-| Contrarian | [Team/No Edge] | [X.X] | [High/Med/Low] |
+NOW, look at the `{market_odds}` provided in the input.
 
-**Combined Edge Estimate:** [SUM] points toward [TEAM]
+| Metric | Your Fair Line | Market Line | Discrepancy (Edge) |
+|--------|----------------|-------------|--------------------|
+| Spread |                |             |                    |
+| Total  |                |             |                    |
+
+**Gap Analysis:**
+- If Edge > 3.0 points: **LARGE EDGE** (High Priority)
+- If Edge > 1.5 points: **MODERATE EDGE**
+- If Edge < 1.5 points: **NO EDGE / PASS**
+
+---
+
+### PHASE 3: THE NARRATIVE CHECK (Scout & Situationalist)
+
+**The Scout (Matchups):**
+- Does the "Blind Price" miss a specific mismatch? (e.g., "Team A has poor rim protection and Team B drives 50 times a game").
+- If YES, adjust your Fair Line manually by 1-2 points.
+
+**The Situationalist (The Spot):**
+- Is this a "Letdown Spot" (after a big win)?
+- Is this a "Lookahead Spot" (before a rival game)?
+- If YES, reduce Confidence Score.
 
 ---
 
-## FINAL RECOMMENDATIONS
+### PHASE 4: FINAL RECOMMENDATION
 
-### SPREAD BET
-- **Pick:** [TEAM +/- LINE]
-- **Your Fair Line:** [NUMBER]
-- **Market Line:** [NUMBER]
-- **Edge:** [DIFFERENCE] points ([X]%)
-- **Confidence:** [1-10, where 10 = max confidence]
-- **Primary Driver:** [Which lens is most important?]
-
-### TOTAL BET
-- **Pick:** [OVER/UNDER NUMBER]
-- **Your Projection:** [TOTAL POINTS]
-- **Market Total:** [NUMBER]
-- **Edge:** [DIFFERENCE] points
-- **Confidence:** [1-10]
-- **Logic:** [Pace + efficiency = expected total]
-
-### KILL SWITCH (What Ruins This Bet)
-- [Specific scenario that would make you pull the bet]
-- [Late news to monitor before tip-off]
-
----
+Construct the final betting card based on where the *Math* and the *Matchup* agree.
 
 **CRITICAL RULES:**
-1. You MUST cite specific numbers from the research data
-2. If a lens has no data available, state "INSUFFICIENT DATA" 
-3. Do NOT invent statistics - use only what's in the research
-4. If total edge is < 3 points, recommend PASS
+1. **No Edge, No Bet:** If your Fair Line is within 1.5 points of the Market, output "PASS".
+2. **Injury Safety:** If a Key Player is "Questionable" (GTD), downgrade Confidence to LOW or PASS.
+3. **Kill Switch:** What specific event ruins this bet? (e.g., "If Embiid sits, this bet is dead").
+
+---
+
+## FINAL OUTPUT FORMAT (Strict JSON)
+
+At the very end of your response, you MUST provide the decision in this valid JSON format:
+
+```json
+{{
+  "game_matchup": "{{home_team}} vs {{away_team}}",
+  "derived_metrics": {{
+    "fair_spread": [NUMBER],
+    "fair_total": [NUMBER],
+    "market_spread_gap": [NUMBER]
+  }},
+  "recommendation": {{
+    "bet_type": "SPREAD" | "TOTAL" | "PASS",
+    "pick": "Team/Over/Under",
+    "line": [Market Line],
+    "units": [1-3],
+    "confidence": [Low/Medium/High],
+    "reasoning": "Short summary of why edge exists",
+    "kill_switch": "Condition to cancel bet"
+  }}
+}}
+```
 """
 
 
