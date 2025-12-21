@@ -89,7 +89,7 @@ RESEARCH_MODEL = "gemini-3-pro-preview"  # Fast model with grounding support
 
 # Council models (via OpenRouter)
 COUNCIL_MODELS = [
-    "deepseek/deepseek-v3.2",
+    "openai/gpt-5.2-pro",
     "anthropic/claude-opus-4.5",
     "google/gemini-3-pro-preview",
     "x-ai/grok-4.1-fast",
@@ -139,7 +139,7 @@ class LLMCouncil:
         self.google_api_key = google_api_key
         self.sport = sport
         self.prompt_version = prompt_version
-        self.client = httpx.AsyncClient(timeout=120.0)
+        self.client = httpx.AsyncClient(timeout=300.0)  # Extended timeout for reasoning models
         
         # Set sport-specific prompts
         if sport == "basketball" and prompt_version == "v2":
@@ -302,10 +302,10 @@ class LLMCouncil:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": temperature,
-            "max_tokens": 4096,
-             "reasoning": {
-                "effort": "high", 
-              }
+            "max_tokens": 8192,  # Increased for detailed analysis
+            "reasoning": {
+                "effort": "high",
+            }
         }
         
         try:
@@ -317,7 +317,17 @@ class LLMCouncil:
             response.raise_for_status()
             
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            
+            # Validate response structure
+            if not data.get("choices"):
+                raise ValueError(f"No choices in response from {model}")
+            
+            content = data["choices"][0].get("message", {}).get("content")
+            if not content or not content.strip():
+                raise ValueError(f"Empty response from {model}")
+            
+            logger.info(f"Received response from {model} ({len(content)} chars)")
+            return content
             
         except httpx.HTTPStatusError as e:
             logger.error(f"OpenRouter API error for {model}: {e.response.status_code} - {e.response.text}")
@@ -325,6 +335,53 @@ class LLMCouncil:
         except Exception as e:
             logger.error(f"Error calling {model}: {e}")
             raise
+    
+    async def _call_llm_with_retry(
+        self,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.7,
+        max_retries: int = 3,
+    ) -> str:
+        """
+        Call LLM with retry logic and exponential backoff.
+        
+        Args:
+            model: Model identifier
+            system_prompt: System message
+            user_prompt: User message
+            temperature: Sampling temperature
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Model response text
+            
+        Raises:
+            Exception: If all retries fail
+        """
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                return await self._call_llm(
+                    model=model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                )
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # 1s, 2s, 4s
+                    logger.warning(
+                        f"Retry {attempt + 1}/{max_retries} for {model} after {wait_time}s: {e}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"All {max_retries} retries failed for {model}: {e}")
+        
+        raise last_error
     
     async def stage_0_research(self, matches: str) -> str:
         """
@@ -646,19 +703,20 @@ class LLMCouncil:
         analyst_system_prompt = self.analyst_system_prompt
         
         async def get_analysis(model: str) -> tuple[str, str]:
-            """Get analysis from a single model."""
+            """Get analysis from a single model with retry logic."""
             try:
-                analysis = await self._call_llm(
+                analysis = await self._call_llm_with_retry(
                     model=model,
                     system_prompt=analyst_system_prompt,
                     user_prompt=prompt,
                     temperature=0.7,
+                    max_retries=3,
                 )
-                logger.info(f"Stage 1: {model} analysis complete")
+                logger.info(f"Stage 1: {model} analysis complete ({len(analysis)} chars)")
                 return model, analysis
             except Exception as e:
-                logger.error(f"Stage 1: {model} failed: {e}")
-                return model, f"[Analysis failed: {e}]"
+                logger.error(f"Stage 1: {model} failed after all retries: {e}")
+                return model, f"[Analysis failed after 3 retries: {e}]"
         
         # Run all analyses in parallel
         tasks = [get_analysis(model) for model in COUNCIL_MODELS]
@@ -706,21 +764,22 @@ class LLMCouncil:
         reviewer_system_prompt = self.reviewer_system_prompt
         
         async def get_review(model: str) -> tuple[str, str]:
-            """Get review from a single model."""
+            """Get review from a single model with retry logic."""
             # Don't let a model review its own work
             # We still include all analyses but the model doesn't know which is theirs
             try:
-                review = await self._call_llm(
+                review = await self._call_llm_with_retry(
                     model=model,
                     system_prompt=reviewer_system_prompt,
                     user_prompt=prompt,
                     temperature=0.5,
+                    max_retries=3,
                 )
-                logger.info(f"Stage 2: {model} review complete")
+                logger.info(f"Stage 2: {model} review complete ({len(review)} chars)")
                 return model, review
             except Exception as e:
-                logger.error(f"Stage 2: {model} failed: {e}")
-                return model, f"[Review failed: {e}]"
+                logger.error(f"Stage 2: {model} failed after all retries: {e}")
+                return model, f"[Review failed after 3 retries: {e}]"
         
         # Run all reviews in parallel
         tasks = [get_review(model) for model in COUNCIL_MODELS]
@@ -770,14 +829,15 @@ class LLMCouncil:
             reviews=reviews_text,
         )
         
-        final_recommendation = await self._call_llm(
+        final_recommendation = await self._call_llm_with_retry(
             model=CHAIRMAN_MODEL,
             system_prompt=self.chairman_system_prompt,
             user_prompt=prompt,
             temperature=0.4,
+            max_retries=3,
         )
         
-        logger.info("Stage 3: Synthesis complete")
+        logger.info(f"Stage 3: Synthesis complete ({len(final_recommendation)} chars)")
         return final_recommendation
     
     async def run_council(
