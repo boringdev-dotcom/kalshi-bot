@@ -456,7 +456,7 @@ OUTPUT FORMAT:
 ```
 ## Roster & Injury Report
 
-### {home_team} FULL ROSTER (2024-25 Season)
+### {home_team} FULL ROSTER (2025-26 Season)
 | Player | Position | Role | PPG | RPG | APG | Status |
 |--------|----------|------|-----|-----|-----|--------|
 | [Name] | [PG/SG/SF/PF/C] | [Starter/Rotation/Bench] | X.X | X.X | X.X | [HEALTHY/OUT/GTD/etc] |
@@ -470,7 +470,7 @@ Key Players Summary:
 - Defensive Anchors: [Names]
 - Sixth Man: [Name]
 
-### {away_team} FULL ROSTER (2024-25 Season)
+### {away_team} FULL ROSTER (2025-26 Season)
 | Player | Position | Role | PPG | RPG | APG | Status |
 |--------|----------|------|-----|-----|-----|--------|
 | [Name] | [PG/SG/SF/PF/C] | [Starter/Rotation/Bench] | X.X | X.X | X.X | [HEALTHY/OUT/GTD/etc] |
@@ -833,7 +833,7 @@ GAME: {home_team} vs {away_team}
 FOR EACH PLAYER, EXECUTE THESE SEARCHES:
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 1: "[PLAYER NAME] stats last 10 games 2024-25"
+SEARCH 1: "[PLAYER NAME] stats last 10 games 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Points, rebounds, assists per game (L10)
@@ -851,7 +851,7 @@ EXTRACT:
 - Any notable performances
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 3: "{opponent_team} defense vs [POSITION] 2024-25"
+SEARCH 3: "{opponent_team} defense vs [POSITION] 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Points allowed to position (rank)
@@ -960,7 +960,7 @@ EXTRACT:
 - Confirmation of assignment
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 2: "[REFEREE NAME] over under stats 2024-25"
+SEARCH 2: "[REFEREE NAME] over under stats 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Average total in games officiated
@@ -992,7 +992,7 @@ EXTRACT:
 - Any notable games
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 6: "NBA referee stats totals 2024-25"
+SEARCH 6: "NBA referee stats totals 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - League average for comparison
@@ -1061,7 +1061,7 @@ GAME: {home_team} vs {away_team} on {game_date}
 EXECUTE THESE SPECIFIC SEARCHES:
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 1: "{home_team} offensive efficiency 2024-25"
+SEARCH 1: "{home_team} offensive efficiency 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Points per 100 possessions
@@ -1071,12 +1071,12 @@ EXTRACT:
 - 3PT attempt rate and %
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 2: "{away_team} offensive efficiency 2024-25"
+SEARCH 2: "{away_team} offensive efficiency 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 3: "{home_team} defensive efficiency 2024-25"
+SEARCH 3: "{home_team} defensive efficiency 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Points allowed per 100 possessions
@@ -1086,12 +1086,12 @@ EXTRACT:
 - Transition defense rating
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 4: "{away_team} defensive efficiency 2024-25"
+SEARCH 4: "{away_team} defensive efficiency 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 5: "{home_team} first half scoring 2024-25"
+SEARCH 5: "{home_team} first half scoring 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - 1H points scored avg
@@ -1100,7 +1100,7 @@ EXTRACT:
 - Pace in 1H vs 2H
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 6: "{away_team} first half scoring 2024-25"
+SEARCH 6: "{away_team} first half scoring 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
@@ -1113,7 +1113,7 @@ EXTRACT:
 - Highest/lowest games
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 8: "NBA highest lowest totals 2024-25 pace"
+SEARCH 8: "NBA highest lowest totals 2025-26 pace"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - League average total
@@ -2217,14 +2217,14 @@ DATE: {match_date}
 
 EXECUTE THESE SPECIFIC SEARCHES:
 
-SEARCH 1: "{home_team} xG 2024-25 season stats"
+SEARCH 1: "{home_team} xG 2025-26 season stats"
 EXTRACT:
 - xG (Expected Goals) per game
 - xGA (Expected Goals Against) per game
 - Actual Goals vs xG difference (overperforming/underperforming?)
 - xPTS (Expected Points) vs Actual Points
 
-SEARCH 2: "{away_team} xG 2024-25 season stats"
+SEARCH 2: "{away_team} xG 2025-26 season stats"
 EXTRACT: Same metrics as above
 
 SEARCH 3: "{home_team} last 5 matches results xG"
@@ -2237,14 +2237,14 @@ EXTRACT:
 SEARCH 4: "{away_team} last 5 matches results xG"
 EXTRACT: Same as above
 
-SEARCH 5: "{home_team} home record 2024-25"
+SEARCH 5: "{home_team} home record 2025-26"
 EXTRACT:
 - Home W-D-L record
 - Home goals scored/conceded
 - Home xG/xGA
 - Points per game at home
 
-SEARCH 6: "{away_team} away record 2024-25"
+SEARCH 6: "{away_team} away record 2025-26"
 EXTRACT:
 - Away W-D-L record
 - Away goals scored/conceded
@@ -2302,17 +2302,17 @@ EXTRACT:
 - Which way has money moved?
 - Any significant line shifts
 
-SEARCH 3: "{home_team} over under goals record 2024-25"
+SEARCH 3: "{home_team} over under goals record 2025-26"
 EXTRACT:
 - Over 2.5 percentage (home games)
 - Over 1.5 percentage
 - Clean sheet percentage
 - BTTS percentage
 
-SEARCH 4: "{away_team} over under goals record 2024-25"
+SEARCH 4: "{away_team} over under goals record 2025-26"
 EXTRACT: Same metrics, focusing on away games
 
-SEARCH 5: "{competition} home win draw away percentage 2024-25"
+SEARCH 5: "{competition} home win draw away percentage 2025-26"
 EXTRACT:
 - League-wide home/draw/away percentages
 - Average goals per game in competition
@@ -2434,17 +2434,17 @@ DATE: {match_date}
 
 EXECUTE THESE SPECIFIC SEARCHES:
 
-SEARCH 1: "{home_team} fixtures schedule {month} 2024"
+SEARCH 1: "{home_team} fixtures schedule {month} 2025-26"
 EXTRACT:
 - Days since last match
 - Days until next match
 - Is this a congested period? (Cup ties, European football)
 - Did they play midweek?
 
-SEARCH 2: "{away_team} fixtures schedule {month} 2024"
+SEARCH 2: "{away_team} fixtures schedule {month} 2025-26"
 EXTRACT: Same as above
 
-SEARCH 3: "{competition} table standings 2024-25"
+SEARCH 3: "{competition} table standings 2025-26"
 EXTRACT:
 - {home_team} position and points
 - {away_team} position and points
@@ -2505,14 +2505,14 @@ DATE: {match_date}
 
 EXECUTE THESE SPECIFIC SEARCHES:
 
-SEARCH 1: "{home_team} tactics formation playing style 2024-25"
+SEARCH 1: "{home_team} tactics formation playing style 2025-26"
 EXTRACT:
 - Primary formation
 - Playing style (Possession/Counter/Direct/High press)
 - Defensive line height (High/Medium/Low)
 - Where do their goals come from?
 
-SEARCH 2: "{away_team} tactics formation playing style 2024-25"
+SEARCH 2: "{away_team} tactics formation playing style 2025-26"
 EXTRACT: Same as above
 
 SEARCH 3: "{home_team} vs {away_team} tactical preview analysis"
@@ -2521,13 +2521,13 @@ EXTRACT:
 - Key matchups
 - Analyst predictions
 
-SEARCH 4: "{home_team} set piece goals corners 2024-25"
+SEARCH 4: "{home_team} set piece goals corners 2025-26"
 EXTRACT:
 - Goals from corners
 - Goals from free kicks
 - Set piece threat rating
 
-SEARCH 5: "{away_team} set piece goals corners 2024-25"
+SEARCH 5: "{away_team} set piece goals corners 2025-26"
 EXTRACT: Same as above
 
 SEARCH 6: "{home_team} vs {away_team} head to head last 5"
@@ -3156,7 +3156,7 @@ def format_prompt(prompt_template: str, **kwargs) -> str:
             NBA_STAGE_1_EFFICIENCY,
             home_team="Lakers",
             away_team="Celtics", 
-            game_date="2024-12-20"
+            game_date="2025-12-20"
         )
     """
     return prompt_template.format(**kwargs)
