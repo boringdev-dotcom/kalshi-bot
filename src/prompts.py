@@ -154,7 +154,7 @@ GAME: {home_team} vs {away_team} on {game_date}
 EXECUTE THESE SPECIFIC SEARCHES:
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 1: "{home_team} team stats 2024-25 basketball reference"
+SEARCH 1: "{home_team} team stats 2025-26 basketball reference"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Offensive Rating (ORtg)
@@ -167,12 +167,12 @@ EXTRACT:
 - FT Rate (Free Throws Attempted per FGA)
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 2: "{away_team} team stats 2024-25 basketball reference"
+SEARCH 2: "{away_team} team stats 2025-26 basketball reference"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same metrics as above
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 3: "{home_team} strength of schedule 2024-25"
+SEARCH 3: "{home_team} strength of schedule 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Overall SOS ranking
@@ -180,7 +180,7 @@ EXTRACT:
 - Net Rating vs .500+ teams (if available)
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 4: "{away_team} strength of schedule 2024-25"
+SEARCH 4: "{away_team} strength of schedule 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
@@ -287,7 +287,7 @@ EXTRACT:
 - % of money on Over vs Under
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 4: "{home_team} ATS record 2024-25"
+SEARCH 4: "{home_team} ATS record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Overall ATS record
@@ -296,12 +296,12 @@ EXTRACT:
 - ATS in last 10 games
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 5: "{away_team} ATS record 2024-25"
+SEARCH 5: "{away_team} ATS record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above (with Road ATS focus)
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 6: "{home_team} over under record 2024-25"
+SEARCH 6: "{home_team} over under record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Overall O/U record
@@ -310,7 +310,7 @@ EXTRACT:
 - Average total in games
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 7: "{away_team} over under record 2024-25"
+SEARCH 7: "{away_team} over under record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above (with Road O/U focus)
 
@@ -384,7 +384,7 @@ GAME: {home_team} vs {away_team} on {game_date}
 EXECUTE THESE SPECIFIC SEARCHES:
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 1: "{home_team} roster 2024-25"
+SEARCH 1: "{home_team} roster 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Complete list of all players on the roster
@@ -393,7 +393,7 @@ EXTRACT:
 - Role (Starter/Rotation/Bench)
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 2: "{away_team} roster 2024-25"
+SEARCH 2: "{away_team} roster 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above - complete roster with stats
 
@@ -414,7 +414,7 @@ EXTRACT: Same categories as above
 
 ═══════════════════════════════════════════════════════════════
 SEARCH 5: For each significant injured player (star/starter):
-"{home_team} record without [PLAYER NAME] 2024-25"
+"{home_team} record without [PLAYER NAME] 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Team's W-L record without the player
@@ -423,7 +423,7 @@ EXTRACT:
 
 ═══════════════════════════════════════════════════════════════
 SEARCH 6: For each significant injured player:
-"[PLAYER NAME] replacement [BACKUP NAME] stats 2024-25"
+"[PLAYER NAME] replacement [BACKUP NAME] stats 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Backup player's PPG, RPG, APG
@@ -578,7 +578,7 @@ GAME: {home_team} vs {away_team} on {game_date}
 EXECUTE THESE SPECIFIC SEARCHES:
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 1: "{home_team} schedule December 2024" (or relevant month)
+SEARCH 1: "{home_team} schedule December 2025" (or relevant month)
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Last game: Date, opponent, result
@@ -588,12 +588,12 @@ EXTRACT:
 - Travel (home stand vs road trip)
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 2: "{away_team} schedule December 2024"
+SEARCH 2: "{away_team} schedule December 2025"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 3: "{home_team} home record 2024-25"
+SEARCH 3: "{home_team} home record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Overall home record
@@ -602,7 +602,7 @@ EXTRACT:
 - Home court advantage metrics
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 4: "{away_team} road record 2024-25"
+SEARCH 4: "{away_team} road record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Overall road record
@@ -611,7 +611,7 @@ EXTRACT:
 - Performance drop-off on road
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 5: "{home_team} back to back record 2024-25"
+SEARCH 5: "{home_team} back to back record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Record on zero days rest
@@ -619,12 +619,12 @@ EXTRACT:
 - ATS record on B2Bs
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 6: "{away_team} back to back record 2024-25"
+SEARCH 6: "{away_team} back to back record 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 7: "NBA standings 2024-25 playoff picture"
+SEARCH 7: "NBA standings 2025-26 playoff picture"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Current standings position for both teams
@@ -714,7 +714,7 @@ GAME: {home_team} vs {away_team} on {game_date}
 EXECUTE THESE SPECIFIC SEARCHES:
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 1: "{home_team} vs {away_team} 2024-25 results"
+SEARCH 1: "{home_team} vs {away_team} 2025-26 results"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Results of any games this season
@@ -723,7 +723,7 @@ EXTRACT:
 - Over/Under results
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 2: "{home_team} vs {away_team} last 10 meetings history"
+SEARCH 2: "{home_team} vs {away_team} last 10 meetings 2025-26 history"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Overall record in recent meetings
@@ -741,7 +741,7 @@ EXTRACT:
 - Trend direction (higher/lower scoring over time)
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 4: "{home_team} defense vs guards 2024-25" (or relevant position)
+SEARCH 4: "{home_team} defense vs guards 2025-26" (or relevant position)
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Points allowed to position
@@ -749,12 +749,12 @@ EXTRACT:
 - Weaknesses to exploit
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 5: "{away_team} defense vs [position] 2024-25"
+SEARCH 5: "{away_team} defense vs [position] 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above for relevant positions
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 6: "{home_team} style of play 2024-25 fast slow"
+SEARCH 6: "{home_team} style of play 2025-26 fast slow"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Transition frequency
@@ -763,7 +763,7 @@ EXTRACT:
 - Paint points
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 7: "{away_team} style of play 2024-25"
+SEARCH 7: "{away_team} style of play 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
