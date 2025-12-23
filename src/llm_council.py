@@ -216,7 +216,7 @@ class LLMCouncil:
         # Build config with grounding and optional system instruction
         config_params = {
             "tools": [grounding_tool],
-            "temperature": 0.3,
+            "temperature": 1,
             "max_output_tokens": 8192,
         }
         
