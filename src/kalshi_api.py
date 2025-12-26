@@ -918,8 +918,8 @@ def format_basketball_markets_for_analysis(markets: List[Dict[str, Any]]) -> str
                 yes_sub = market.get("yes_sub_title", "YES")
                 no_sub = market.get("no_sub_title", "NO")
                 
-                # Format odds
-                if yes_bid and yes_ask:
+                # Format odds - use `is not None` to handle 0 as valid price
+                if yes_bid is not None and yes_ask is not None:
                     yes_mid = (yes_bid + yes_ask) / 2
                     no_mid = 100 - yes_mid
                     output.append(f"  [{market_type.upper()}] {ticker}")
@@ -931,6 +931,218 @@ def format_basketball_markets_for_analysis(markets: List[Dict[str, Any]]) -> str
                     output.append(f"    Last Price: {last_price}¢")
                 
                 output.append("")
+    
+    return "\n".join(output)
+
+
+def _parse_strike_from_ticker(ticker: str) -> Optional[float]:
+    """
+    Parse the strike value from a Kalshi ticker.
+    
+    Examples:
+        KXNBASPREAD-25DEC23WASCHA-CHA5 -> 5.5 (Charlotte wins by over 5.5)
+        KXNBATOTAL-25DEC23WASCHA-237 -> 237.5 (Over 237.5 points)
+        KXNBAGAME-25DEC23WASCHA-WAS -> None (winner market, no strike)
+    
+    Returns:
+        Strike value as float, or None if not applicable
+    """
+    import re
+    parts = ticker.split("-")
+    if len(parts) < 3:
+        return None
+    
+    suffix = parts[-1]
+    
+    # For spread markets like CHA5, WAS7, extract the number
+    # For total markets like 237, 249, extract the number
+    match = re.search(r'(\d+)$', suffix)
+    if match:
+        base_value = int(match.group(1))
+        # Kalshi uses whole numbers in tickers, but spreads/totals are typically .5
+        return base_value + 0.5
+    
+    return None
+
+
+def _parse_team_direction_from_ticker(ticker: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Parse the team abbreviation and direction from a Kalshi ticker.
+    
+    Examples:
+        KXNBASPREAD-25DEC23WASCHA-CHA5 -> ("CHA", "spread")
+        KXNBATOTAL-25DEC23WASCHA-237 -> (None, "over")
+        KXNBAGAME-25DEC23WASCHA-WAS -> ("WAS", "winner")
+    
+    Returns:
+        Tuple of (team_abbrev or None, direction/type)
+    """
+    import re
+    parts = ticker.split("-")
+    if len(parts) < 3:
+        return None, None
+    
+    suffix = parts[-1]
+    series = parts[0] if parts else ""
+    
+    if "SPREAD" in series:
+        # Extract team abbreviation before the number
+        match = re.match(r'([A-Z]+)(\d+)?$', suffix)
+        if match:
+            return match.group(1), "spread"
+    elif "TOTAL" in series:
+        # Total markets don't have team, just "over X"
+        return None, "over"
+    elif "GAME" in series:
+        # Winner markets have team abbreviation
+        return suffix, "winner"
+    
+    return None, None
+
+
+def format_basketball_markets_for_kalshi_trading(markets: List[Dict[str, Any]]) -> str:
+    """
+    Format basketball markets for Kalshi-native trading decisions.
+    
+    This formatter provides complete bid/ask data for both YES and NO sides,
+    volume/liquidity info, and parsed strike values so the LLM can:
+    - Compare specific contracts and strikes
+    - Calculate EV using actual bid/ask (not mid-prices)
+    - Identify liquid vs illiquid markets
+    - Choose the better side (YES or NO) based on pricing
+    
+    Args:
+        markets: List of basketball market dictionaries
+        
+    Returns:
+        Formatted string with full Kalshi contract details
+    """
+    if not markets:
+        return "No basketball markets found for the specified leagues."
+    
+    from collections import defaultdict
+    by_league = defaultdict(list)
+    
+    for market in markets:
+        league = market.get("league", "unknown")
+        by_league[league].append(market)
+    
+    output = []
+    output.append("=" * 70)
+    output.append("KALSHI NBA MARKET BOARD - TRADEABLE CONTRACTS")
+    output.append("=" * 70)
+    output.append("")
+    output.append("PRICING GUIDE:")
+    output.append("  • To BUY YES: pay the 'yes_ask' price")
+    output.append("  • To BUY NO: pay the 'no_ask' price (or equivalently, SELL YES at 'yes_bid')")
+    output.append("  • Spread = ask - bid (tighter is better, >10¢ = illiquid)")
+    output.append("  • EV = (model_prob × 100) - price_paid")
+    output.append("")
+    
+    for league, league_markets in by_league.items():
+        league_display = league.upper()
+        output.append(f"\n{'='*70}")
+        output.append(f"  {league_display}")
+        output.append(f"{'='*70}")
+        
+        # Group by event/game
+        by_event = defaultdict(list)
+        for market in league_markets:
+            event = market.get("event_ticker") or market.get("title", "Unknown")
+            by_event[event].append(market)
+        
+        for event, event_markets in by_event.items():
+            # Get the main game title
+            main_title = event_markets[0].get("title", event)
+            output.append(f"\n🏀 {main_title}")
+            output.append("-" * 70)
+            
+            # Sort markets by type for better organization
+            winner_markets = [m for m in event_markets if m.get("market_type") == "winner"]
+            spread_markets = [m for m in event_markets if m.get("market_type") == "spread"]
+            total_markets = [m for m in event_markets if m.get("market_type") == "total"]
+            other_markets = [m for m in event_markets if m.get("market_type") not in ("winner", "spread", "total")]
+            
+            # Output each category
+            for category_name, category_markets in [
+                ("WINNER/MONEYLINE", winner_markets),
+                ("SPREAD", spread_markets),
+                ("TOTAL (OVER/UNDER)", total_markets),
+                ("OTHER", other_markets),
+            ]:
+                if not category_markets:
+                    continue
+                    
+                output.append(f"\n  [{category_name}]")
+                
+                for market in category_markets:
+                    ticker = market.get("ticker", "N/A")
+                    yes_bid = market.get("yes_bid")
+                    yes_ask = market.get("yes_ask")
+                    no_bid = market.get("no_bid")
+                    no_ask = market.get("no_ask")
+                    volume = market.get("volume", 0) or 0
+                    open_interest = market.get("open_interest", 0) or 0
+                    yes_sub = market.get("yes_sub_title", "YES")
+                    no_sub = market.get("no_sub_title", "NO")
+                    
+                    # Parse strike from ticker
+                    strike = _parse_strike_from_ticker(ticker)
+                    team_abbrev, direction = _parse_team_direction_from_ticker(ticker)
+                    
+                    output.append(f"  ┌─ Ticker: {ticker}")
+                    
+                    # Show the question/statement being bet on
+                    if yes_sub and yes_sub != "YES":
+                        output.append(f"  │  Question: {yes_sub}?")
+                    if strike is not None:
+                        output.append(f"  │  Strike: {strike}")
+                    if team_abbrev:
+                        output.append(f"  │  Team: {team_abbrev}")
+                    
+                    # YES side pricing
+                    if yes_bid is not None and yes_ask is not None:
+                        yes_spread = yes_ask - yes_bid
+                        liquidity_flag = "⚠️ WIDE" if yes_spread > 10 else "✓"
+                        output.append(f"  │  YES: bid={yes_bid}¢, ask={yes_ask}¢ (spread={yes_spread}¢) {liquidity_flag}")
+                    elif yes_bid is not None:
+                        output.append(f"  │  YES: bid={yes_bid}¢, ask=N/A")
+                    elif yes_ask is not None:
+                        output.append(f"  │  YES: bid=N/A, ask={yes_ask}¢")
+                    else:
+                        last_price = market.get("last_price")
+                        if last_price is not None:
+                            output.append(f"  │  YES: last_price={last_price}¢ (no live quotes)")
+                        else:
+                            output.append(f"  │  YES: no pricing available")
+                    
+                    # NO side pricing
+                    if no_bid is not None and no_ask is not None:
+                        no_spread = no_ask - no_bid
+                        liquidity_flag = "⚠️ WIDE" if no_spread > 10 else "✓"
+                        output.append(f"  │  NO:  bid={no_bid}¢, ask={no_ask}¢ (spread={no_spread}¢) {liquidity_flag}")
+                    elif no_bid is not None:
+                        output.append(f"  │  NO:  bid={no_bid}¢, ask=N/A")
+                    elif no_ask is not None:
+                        output.append(f"  │  NO:  bid=N/A, ask={no_ask}¢")
+                    else:
+                        # Calculate NO from YES if available
+                        if yes_bid is not None and yes_ask is not None:
+                            implied_no_bid = 100 - yes_ask
+                            implied_no_ask = 100 - yes_bid
+                            output.append(f"  │  NO:  (implied from YES) bid≈{implied_no_bid}¢, ask≈{implied_no_ask}¢")
+                        else:
+                            output.append(f"  │  NO:  no pricing available")
+                    
+                    # Liquidity info
+                    output.append(f"  │  Volume: {volume} contracts | Open Interest: {open_interest}")
+                    output.append(f"  └─")
+                    output.append("")
+    
+    output.append("")
+    output.append("=" * 70)
+    output.append("END OF MARKET BOARD")
+    output.append("=" * 70)
     
     return "\n".join(output)
 

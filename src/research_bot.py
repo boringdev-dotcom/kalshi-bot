@@ -18,7 +18,7 @@ from .kalshi_api import (
     get_soccer_markets,
     get_basketball_markets,
     format_markets_for_analysis,
-    format_basketball_markets_for_analysis,
+    format_basketball_markets_for_kalshi_trading,
     group_markets_by_match,
 )
 from .llm_council import run_soccer_analysis, run_basketball_analysis, CouncilResult
@@ -243,7 +243,7 @@ class SportsResearchBot(discord.Client):
                     return None
                 
                 # Format markets for analysis
-                markets_text = format_basketball_markets_for_analysis(markets)
+                markets_text = format_basketball_markets_for_kalshi_trading(markets)
                 logger.info(f"Found {len(markets)} basketball markets")
                 
                 # Run LLM Council analysis
@@ -454,7 +454,7 @@ class GameSelectView(discord.ui.View):
             
             # Format markets for analysis and run appropriate analysis
             if self.sport == "basketball":
-                markets_text = format_basketball_markets_for_analysis(markets)
+                markets_text = format_basketball_markets_for_kalshi_trading(markets)
                 result = await run_basketball_analysis(
                     settings=self.bot.settings,
                     markets_text=markets_text,

@@ -176,7 +176,7 @@ async def main():
         get_soccer_markets,
         get_basketball_markets,
         format_markets_for_analysis,
-        format_basketball_markets_for_analysis,
+        format_basketball_markets_for_kalshi_trading,
     )
     from src.llm_council import run_soccer_analysis, run_basketball_analysis
     
@@ -463,9 +463,9 @@ async def main():
     print(f"📋 Analyzing: {match_title}")
     print(f"   Markets: {len(selected_markets)}")
     
-    # Format markets for analysis
+    # Format markets for analysis - use Kalshi-native format for basketball
     if sport == "basketball":
-        markets_text = format_basketball_markets_for_analysis(selected_markets)
+        markets_text = format_basketball_markets_for_kalshi_trading(selected_markets)
     else:
         markets_text = format_markets_for_analysis(selected_markets)
     
