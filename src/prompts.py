@@ -40,6 +40,14 @@ PRIME DIRECTIVES:
 4. If official injury reports aren't out, search beat reporter tweets and practice reports
 5. Track replacement player quality, not just who's out
 
+⚠️ CRITICAL - ROSTER ACCURACY (HIGHEST PRIORITY):
+- NBA rosters change frequently due to trades, signings, and waivers
+- You MUST verify rosters are current AS OF THE GAME DATE
+- ALWAYS search for recent trades/transactions before listing rosters
+- NEVER assume a player is still on a team without verification
+- If you cannot verify a player's current team, explicitly state "UNVERIFIED"
+- Listing a traded player on their old team is a CRITICAL ERROR
+
 DATA HIERARCHY (Most to Least Valuable):
 - Opponent-adjusted efficiency metrics
 - On/off court differentials for key players
@@ -47,7 +55,13 @@ DATA HIERARCHY (Most to Least Valuable):
 - Pace matchup interactions
 - Raw team averages (least valuable alone)
 
-You output structured data. No opinions. No predictions. Just facts with source attribution. Your data accuracy is valuable so please review each data accurately and make sure they are correct."""
+You output structured data. No opinions. No predictions. Just facts with source attribution.
+
+ACCURACY REQUIREMENTS:
+- Every stat must come from a verifiable source
+- If data is unavailable, state "NOT FOUND" rather than guessing
+- Double-check all roster information against recent transaction news
+- Your data accuracy is critical - hallucinated data leads to losing bets"""
 
 
 NBA_ANALYST_SYSTEM = """You are an NBA Quantitative Analyst with a specific analytical framework.
@@ -150,6 +164,13 @@ NBA_STAGE_1_EFFICIENCY = """
 TASK: Gather core team efficiency metrics for NBA betting analysis.
 
 GAME: {home_team} vs {away_team} on {game_date}
+
+CRITICAL DATE CONTEXT:
+- Today's date: {game_date}
+- Current NBA Season: 2025-26 (October 2025 - June 2026)
+- ALWAYS use "2025-26" when searching for current season stats
+- VERIFY all data is from the CURRENT season, not previous seasons
+- Rosters change mid-season - always verify current roster status
 
 EXECUTE THESE SPECIFIC SEARCHES:
 
@@ -381,39 +402,60 @@ IMPORTANT: The analyst models do NOT have current roster information. You MUST p
 
 GAME: {home_team} vs {away_team} on {game_date}
 
+⚠️ CRITICAL - ROSTER ACCURACY REQUIREMENTS ⚠️
+- Rosters change frequently due to trades, signings, and releases
+- You MUST verify the roster is current AS OF {game_date}, NOT the start-of-season roster
+- ALWAYS search for recent trades/transactions to catch mid-season roster changes
+- If a player was traded, DO NOT list them on their old team
+- When in doubt, search "[Player Name] current team {game_date}" to verify
+
 EXECUTE THESE SPECIFIC SEARCHES:
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 1: "{home_team} roster 2025-26"
+SEARCH 1: "{home_team} current roster December 2025" (use current month/year)
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
-- Complete list of all players on the roster
+- Complete list of all players CURRENTLY on the roster
 - Each player's position
 - Each player's key stats (PPG, RPG, APG)
 - Role (Starter/Rotation/Bench)
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 2: "{away_team} roster 2025-26"
+SEARCH 2: "{home_team} trades transactions 2025-26"
 ═══════════════════════════════════════════════════════════════
-EXTRACT: Same as above - complete roster with stats
+EXTRACT:
+- Any players traded AWAY from this team
+- Any players acquired BY this team
+- Date of each transaction
+- This prevents listing players who are no longer on the team
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 3: "{home_team} injury report {game_date}"
+SEARCH 3: "{away_team} current roster December 2025" (use current month/year)
+═══════════════════════════════════════════════════════════════
+EXTRACT: Same as above - complete CURRENT roster with stats
+
+═══════════════════════════════════════════════════════════════
+SEARCH 4: "{away_team} trades transactions 2025-26"
+═══════════════════════════════════════════════════════════════
+EXTRACT: Same as Search 2 - verify no traded players are listed
+
+═══════════════════════════════════════════════════════════════
+SEARCH 5: "{home_team} injury report {game_date}"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Players listed as OUT
-- Players listed as DOUBTFUL  
+- Players listed as DOUBTFUL
 - Players listed as QUESTIONABLE
 - Players listed as PROBABLE
 - Any GTD (Game-Time Decision) designations
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 4: "{away_team} injury report {game_date}"
+SEARCH 6: "{away_team} injury report {game_date}"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same categories as above
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 5: For each significant injured player (star/starter):
+SEARCH 7: For each significant injured player (star/starter):
 "{home_team} record without [PLAYER NAME] 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
@@ -422,7 +464,7 @@ EXTRACT:
 - Point differential change
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 6: For each significant injured player:
+SEARCH 8: For each significant injured player:
 "[PLAYER NAME] replacement [BACKUP NAME] stats 2025-26"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
@@ -432,20 +474,20 @@ EXTRACT:
 - Backup's Net Rating when on court
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 7: "{home_team} starting lineup tonight"
+SEARCH 9: "{home_team} starting lineup tonight {game_date}"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
-- Projected starters
+- Projected starters (verify all players are CURRENTLY on team)
 - Any rotation changes
 - Minutes distribution expectations
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 8: "{away_team} starting lineup tonight"
+SEARCH 10: "{away_team} starting lineup tonight {game_date}"
 ═══════════════════════════════════════════════════════════════
 EXTRACT: Same as above
 
 ═══════════════════════════════════════════════════════════════
-SEARCH 9: "{home_team} {away_team} injury news twitter"
+SEARCH 11: "{home_team} {away_team} injury news twitter {game_date}"
 ═══════════════════════════════════════════════════════════════
 EXTRACT:
 - Beat reporter updates
@@ -456,13 +498,29 @@ OUTPUT FORMAT:
 ```
 ## Roster & Injury Report
 
-### {home_team} FULL ROSTER (2025-26 Season)
+### ⚠️ ROSTER VERIFICATION (as of {game_date})
+
+**{home_team} Recent Transactions:**
+| Date | Player | Transaction Type | Notes |
+|------|--------|------------------|-------|
+| [Date] | [Name] | [Traded to/Acquired from/Waived/Signed] | [Details] |
+(List any trades/signings/releases since season start. If none, write "No transactions")
+
+**{away_team} Recent Transactions:**
+| Date | Player | Transaction Type | Notes |
+|------|--------|------------------|-------|
+| [Date] | [Name] | [Traded to/Acquired from/Waived/Signed] | [Details] |
+(List any trades/signings/releases since season start. If none, write "No transactions")
+
+---
+
+### {home_team} CURRENT ROSTER (verified as of {game_date})
 | Player | Position | Role | PPG | RPG | APG | Status |
 |--------|----------|------|-----|-----|-----|--------|
 | [Name] | [PG/SG/SF/PF/C] | [Starter/Rotation/Bench] | X.X | X.X | X.X | [HEALTHY/OUT/GTD/etc] |
 | [Name] | | | | | | |
 | ... | | | | | | |
-(List ALL players on the roster)
+(List ALL players CURRENTLY on the roster - exclude any traded players)
 
 Key Players Summary:
 - Star(s): [Names + PPG]
@@ -470,13 +528,13 @@ Key Players Summary:
 - Defensive Anchors: [Names]
 - Sixth Man: [Name]
 
-### {away_team} FULL ROSTER (2025-26 Season)
+### {away_team} CURRENT ROSTER (verified as of {game_date})
 | Player | Position | Role | PPG | RPG | APG | Status |
 |--------|----------|------|-----|-----|-----|--------|
 | [Name] | [PG/SG/SF/PF/C] | [Starter/Rotation/Bench] | X.X | X.X | X.X | [HEALTHY/OUT/GTD/etc] |
 | [Name] | | | | | | |
 | ... | | | | | | |
-(List ALL players on the roster)
+(List ALL players CURRENTLY on the roster - exclude any traded players)
 
 Key Players Summary:
 - Star(s): [Names + PPG]
@@ -1393,27 +1451,20 @@ Output purely the structured data without narrative filler."""
 
 
 # -----------------------------------------------------------------------------
-# ANALYSIS PROMPT (The Edge Finder) - KALSHI-NATIVE VERSION
+# ANALYSIS PROMPT (The Edge Finder) - ENHANCED
 # -----------------------------------------------------------------------------
 
-NBA_ANALYSIS_PROMPT = """You are an NBA Quantitative Analyst for a Kalshi trading operation.
-
-IMPORTANT: The market data below is from Kalshi, a prediction market exchange.
-- Each contract is a YES/NO bet on a specific statement (e.g., "Charlotte wins by over 5.5 Points")
-- Prices are in CENTS (1-99¢). A price of 60¢ = 60% implied probability.
-- To BUY YES: pay the "yes_ask" price. To BUY NO: pay the "no_ask" price.
-- EV = (your_probability × 100) - price_paid
-- Wide spreads (ask - bid > 10¢) indicate illiquid markets - avoid these.
+NBA_ANALYSIS_PROMPT = """You are an NBA Quantitative Analyst.
 
 INPUT DATA:
 {research}
 
-KALSHI MARKET BOARD (DO NOT LOOK YET - AVOID ANCHORING):
+MARKET DATA (DO NOT LOOK YET - AVOID ANCHORING):
 {market_odds}
 
 ═══════════════════════════════════════════════════════════════
 ## PHASE 1: THE BLIND PRICE PROTOCOL
-Calculate your fair probabilities BEFORE looking at market prices.
+Calculate your fair lines BEFORE looking at market odds.
 ═══════════════════════════════════════════════════════════════
 
 ### Step A: Raw Efficiency Spread
@@ -1428,7 +1479,7 @@ Show your math:
 - Home Team Adjusted Net Rating: [X]
 - Away Team Adjusted Net Rating: [X]
 - Difference: [X]
-- Raw Spread: [X] (positive = Home favored)
+- Raw Spread: [X]
 
 ### Step B: Situational Adjustments
 
@@ -1482,6 +1533,8 @@ Injury Adjustment Total: [+/- X]
 | + Injury Adjustments | +/- |
 | **= YOUR FAIR SPREAD** | **[NUMBER]** |
 
+═══════════════════════════════════════════════════════════════
+
 ### Step E: Fair Total Calculation
 
 Using pace and efficiency data:
@@ -1511,194 +1564,155 @@ Total Adjustments:
 
 **YOUR FAIR TOTAL:** [NUMBER]
 
-### Step F: Convert to Probabilities for Each Strike
-
-For each spread strike, calculate probability of YES:
-- If your fair spread = Home -5.0, then:
-  - "Home wins by over 7.5" → P(YES) ≈ 35% (need to beat by 8+)
-  - "Home wins by over 5.5" → P(YES) ≈ 45% (need to beat by 6+)
-  - "Home wins by over 2.5" → P(YES) ≈ 60% (need to beat by 3+)
-  - "Away wins by over 2.5" → P(YES) ≈ 25% (away needs to win by 3+)
-
-For each total strike, calculate probability of OVER:
-- If your fair total = 234, then:
-  - "Over 237.5" → P(YES) ≈ 40%
-  - "Over 234.5" → P(YES) ≈ 48%
-  - "Over 231.5" → P(YES) ≈ 58%
-
-For winner markets:
-- Convert your fair spread to win probability
-- If Home favored by 5 points → Home win prob ≈ 65-70%
-
-**YOUR PROBABILITY ESTIMATES:**
-| Statement Type | Strike | Your P(YES) |
-|----------------|--------|-------------|
-| [Team] wins | N/A | % |
-| [Team] wins by over X.5 | X.5 | % |
-| Over X.5 total points | X.5 | % |
-[Add rows for each relevant strike from the market board]
-
 ═══════════════════════════════════════════════════════════════
-## PHASE 2: KALSHI CONTRACT EVALUATION
-NOW look at the market board and evaluate each tradeable contract.
+## PHASE 2: MARKET COMPARISON
+NOW look at the {market_odds}
 ═══════════════════════════════════════════════════════════════
 
-For EACH contract in the market board, calculate:
+| Market | Your Fair Line | Market Line | Edge | Signal |
+|--------|----------------|-------------|------|--------|
+| Spread | | | [+/- X pts] | [BET/PASS] |
+| Total | | | [+/- X pts] | [BET/PASS] |
+| 1H Spread | | | [+/- X pts] | [BET/PASS] |
+| 1H Total | | | [+/- X pts] | [BET/PASS] |
 
-### Contract Screening (Filter out bad markets first)
-Skip contracts where:
-- Spread (ask - bid) > 10¢ (illiquid)
-- No live quotes (bid or ask is N/A)
-- Volume = 0 AND Open Interest = 0 (dead market)
-
-### EV Calculation for Remaining Contracts
-
-For each viable contract:
-```
-EV_BUY_YES = (Your_P_YES × 100) - yes_ask
-EV_BUY_NO = (Your_P_NO × 100) - no_ask
-  where P_NO = 100 - P_YES
-```
-
-| Ticker | Statement | Your P(YES) | yes_ask | EV_YES | no_ask | EV_NO | Best Side |
-|--------|-----------|-------------|---------|--------|--------|-------|-----------|
-| [ticker] | [statement] | % | ¢ | ¢ | ¢ | ¢ | YES/NO |
-[Add row for each viable contract]
-
-### Rank by EV
-Sort contracts by absolute EV (best opportunities first):
-
-| Rank | Ticker | Action | Side | Price | Your Prob | Implied Prob | EV | Edge% |
-|------|--------|--------|------|-------|-----------|--------------|-----|-------|
-| 1 | | BUY | YES/NO | ¢ | % | % | ¢ | % |
-| 2 | | BUY | YES/NO | ¢ | % | % | ¢ | % |
-| 3 | | BUY | YES/NO | ¢ | % | % | ¢ | % |
-
-**TOP 3 TRADES BY EV:**
-1. [Ticker]: BUY [YES/NO] at [X]¢ → EV = [X]¢ per contract
-2. [Ticker]: BUY [YES/NO] at [X]¢ → EV = [X]¢ per contract
-3. [Ticker]: BUY [YES/NO] at [X]¢ → EV = [X]¢ per contract
+### Edge Classification
+| Edge Size | Classification | Recommended Action |
+|-----------|----------------|-------------------|
+| > 4.0 pts | LARGE EDGE | High confidence bet |
+| 2.5-4.0 pts | MODERATE EDGE | Standard bet |
+| 1.5-2.5 pts | SMALL EDGE | Low confidence / conditions apply |
+| < 1.5 pts | NO EDGE | PASS |
 
 ═══════════════════════════════════════════════════════════════
-## PHASE 3: CORRELATION CHECK
+## PHASE 3: QUALITATIVE CROSS-CHECK
 ═══════════════════════════════════════════════════════════════
 
-Avoid betting correlated positions (e.g., "Home wins" + "Home -5.5" are correlated).
+### The Scout's Check (Matchups)
+Does your fair line miss a specific mismatch?
 
-| Trade 1 | Trade 2 | Correlation | Keep Both? |
-|---------|---------|-------------|------------|
-| | | HIGH/MED/LOW | YES/NO |
+| Matchup Factor | Impact | Line Adjustment Needed? |
+|----------------|--------|------------------------|
+| [Position mismatch] | | +/- |
+| [Scheme advantage] | | +/- |
+| [Pace control] | | +/- |
 
-If high correlation, keep only the highest EV trade.
+Scout's Adjustment: [+/- X or NONE]
 
-═══════════════════════════════════════════════════════════════
-## PHASE 4: QUALITATIVE CROSS-CHECK
-═══════════════════════════════════════════════════════════════
+### The Situationalist's Check (The Spot)
+| Spot Check | Status | Confidence Impact |
+|------------|--------|-------------------|
+| Letdown spot (after big win)? | YES/NO | -1 tier if YES |
+| Lookahead spot (before rival)? | YES/NO | -1 tier if YES |
+| Sandwich game? | YES/NO | -1 tier if YES |
+| Motivation mismatch? | YES/NO | Note it |
+
+Situational Confidence Adjustment: [NONE / -1 TIER]
 
 ### Sharp Money Alignment
-| Your Top Trade | Sharp Money Direction | Alignment |
-|----------------|----------------------|-----------|
-| [Ticker/Side] | [From research] | WITH/AGAINST |
+| Your Position | Sharp Money Direction | Alignment |
+|---------------|----------------------|-----------|
+| [Your spread pick] | [From research] | WITH/AGAINST |
+| [Your total pick] | [From research] | WITH/AGAINST |
 
 Note: Being against sharp money requires EXTRA conviction.
 
-### Kill Switches
+═══════════════════════════════════════════════════════════════
+## PHASE 4: RISK ASSESSMENT
+═══════════════════════════════════════════════════════════════
+
+### Kill Switches (What Cancels This Bet)
 | Condition | Probability | Action if Triggered |
 |-----------|-------------|---------------------|
-| [Injury status change] | [H/M/L] | [Cancel / Adjust limit price] |
-| [Key player ruled out] | [H/M/L] | [Cancel / Switch to different strike] |
+| [Injury status change] | [H/M/L] | [Cancel / Adjust] |
+| [Line moves past X] | [H/M/L] | [Cancel / Still bet] |
+| [If X plays/sits] | [H/M/L] | [Cancel / Adjust] |
+
+### Uncertainty Quantification
+| Factor | Uncertainty Level | Impact on Confidence |
+|--------|-------------------|---------------------|
+| Injury status (GTD players) | [H/M/L] | |
+| Data quality | [H/M/L] | |
+| Sample size concerns | [H/M/L] | |
 
 ═══════════════════════════════════════════════════════════════
-## PHASE 5: FINAL KALSHI TRADE RECOMMENDATIONS
+## PHASE 5: FINAL RECOMMENDATION
 ═══════════════════════════════════════════════════════════════
 
-### Position Sizing (Based on Edge)
-| EV per Contract | Units |
-|-----------------|-------|
-| 3-5¢ | 0.5u |
-| 5-8¢ | 1.0u |
-| 8-12¢ | 1.5u |
-| 12-15¢ | 2.0u |
-| 15¢+ | 2.5u |
+### Position Sizing Framework
+| Edge | Base Size | Adjustments | Final Size |
+|------|-----------|-------------|------------|
+| 3-5% | 1.0u | | |
+| 5-7% | 1.5u | -0.5u if against sharps | |
+| 7-10% | 2.0u | -0.5u if GTD uncertainty | |
+| 10%+ | 2.5u | -1.0u if major uncertainty | |
+
+### Timing Recommendation
+| Bet Type | Timing | Reasoning |
+|----------|--------|-----------|
+| [Bet 1] | [Early/Wait/Game-time] | [Public money direction] |
+| [Bet 2] | [Early/Wait/Game-time] | |
 
 ═══════════════════════════════════════════════════════════════
-## FINAL OUTPUT (Strict JSON for Kalshi Trading)
+## FINAL OUTPUT (Strict JSON)
 ═══════════════════════════════════════════════════════════════
 
 ```json
 {{
   "game_matchup": "[Home Team] vs [Away Team]",
   "game_date": "[Date]",
-  "model_estimates": {{
+  "derived_metrics": {{
     "fair_spread": [NUMBER],
+    "market_spread": [NUMBER],
+    "spread_edge": [NUMBER],
     "fair_total": [NUMBER],
-    "home_win_probability": [NUMBER 0-100],
-    "away_win_probability": [NUMBER 0-100]
+    "market_total": [NUMBER],
+    "total_edge": [NUMBER]
   }},
-  "kalshi_trades": [
-    {{
-      "rank": 1,
-      "ticker": "[EXACT KALSHI TICKER from market board]",
-      "market_type": "WINNER" | "SPREAD" | "TOTAL",
-      "statement": "[What YES means, e.g., 'Charlotte wins by over 5.5 Points']",
-      "action": "BUY",
-      "side": "YES" | "NO",
-      "limit_price_cents": [NUMBER - use yes_ask for BUY YES, no_ask for BUY NO],
-      "model_probability": [NUMBER 0-100 - your probability for the side you're buying],
-      "market_implied_probability": [NUMBER 0-100 - limit_price for that side],
-      "edge_percentage": [NUMBER - model_prob minus implied_prob],
-      "ev_cents": [NUMBER - (model_prob × 100) - limit_price],
-      "units": [0.5-2.5],
-      "confidence": "LOW" | "MEDIUM" | "HIGH",
-      "timing": "BET_NOW" | "WAIT_FOR_INJURY_NEWS" | "WAIT_FOR_BETTER_PRICE",
-      "reasoning": "[Why this specific contract and strike]",
-      "liquidity_note": "[volume/open_interest from market board]",
-      "kill_switch": "[Specific condition that cancels this trade]"
-    }},
-    {{
-      "rank": 2,
-      ...
-    }}
-  ],
-  "contracts_evaluated": [NUMBER - how many contracts you analyzed],
-  "contracts_passed": [NUMBER - how many had positive EV but were filtered out],
-  "pass_reasons": ["[Reason 1]", "[Reason 2]"],
+  "primary_recommendation": {{
+    "bet_type": "SPREAD" | "TOTAL" | "MONEYLINE" | "PASS",
+    "pick": "[Team/Over/Under] [Line]",
+    "odds": "[Current odds]",
+    "edge_percent": [NUMBER],
+    "confidence": "LOW" | "MEDIUM" | "HIGH",
+    "units": [0.5-3.0],
+    "timing": "BET_NOW" | "WAIT_FOR_LINE" | "WAIT_FOR_INJURY_NEWS",
+    "reasoning": "[2-3 sentence summary of edge]",
+    "kill_switch": "[Specific condition that cancels bet]"
+  }},
+  "secondary_recommendation": {{
+    "bet_type": "SPREAD" | "TOTAL" | "1H_SPREAD" | "1H_TOTAL" | "NONE",
+    "pick": "[If applicable]",
+    "odds": "[If applicable]",
+    "edge_percent": [NUMBER],
+    "confidence": "LOW" | "MEDIUM" | "HIGH",
+    "units": [0.5-2.0],
+    "reasoning": "[If applicable]"
+  }},
   "sharp_money_alignment": "WITH" | "AGAINST" | "NEUTRAL",
   "key_risks": [
     "[Risk 1]",
     "[Risk 2]"
   ],
   "pre_game_checklist": [
-    "Verify [player] injury status",
-    "Confirm line hasn't moved to [threshold]"
+    "[Item to verify before bet]",
+    "[Item to verify before bet]"
   ]
 }}
 ```
-
-CRITICAL RULES:
-1. The "ticker" field MUST be an EXACT ticker from the market board (e.g., "KXNBASPREAD-25DEC23WASCHA-CHA5")
-2. The "limit_price_cents" MUST match the yes_ask or no_ask from the market board
-3. Only recommend contracts with EV > 3¢ and spread < 10¢
-4. Maximum 3 trades to avoid over-betting correlated positions
-5. If no trades meet criteria, return empty "kalshi_trades" array with explanation in "pass_reasons"
 """
 
 
 # -----------------------------------------------------------------------------
-# REVIEW PROMPT (The Auditor) - KALSHI-NATIVE VERSION
+# REVIEW PROMPT (The Auditor) - ENHANCED
 # -----------------------------------------------------------------------------
 
-NBA_REVIEW_PROMPT = """You are the Risk Manager auditing Kalshi trading recommendations.
-
-IMPORTANT: These are Kalshi prediction market trades, not sportsbook bets.
-- Each trade involves a specific TICKER (contract)
-- Trades are BUY YES or BUY NO at specific LIMIT PRICES (in cents)
-- EV is calculated as: (model_probability × 100) - limit_price
+NBA_REVIEW_PROMPT = """You are the Risk Manager auditing the betting analysis.
 
 ORIGINAL RESEARCH DATA:
 {research}
 
-KALSHI MARKET BOARD:
+MARKET ODDS:
 {market_odds}
 
 ANALYSES TO AUDIT:
@@ -1725,86 +1739,119 @@ Cross-reference analyst claims against research data:
 **Data Verification Checks:**
 - [ ] Net Rating values match research
 - [ ] Injury statuses correctly stated
+- [ ] ATS records accurate
+- [ ] Line movement correctly described
 - [ ] H2H data accurate
-- [ ] Pace/efficiency numbers correct
+- [ ] ⚠️ ROSTER ACCURACY: All players mentioned are CURRENTLY on their listed teams (check for trades)
+- [ ] Kill switch players verified as current roster members
 
 **Hallucinations Found:** [List any invented/incorrect stats]
+**Traded Player Errors:** [List any players mentioned who are no longer on the team]
 
 **Data Integrity Score:** [X/25]
+- 25: All data accurate
+- 20: Minor errors only
+- 15: 1-2 major errors
+- 10: Multiple major errors
+- 0-5: Critical data wrong
 
 ---
 
-### SECTION 2: KALSHI CONTRACT VERIFICATION (25 points)
+### SECTION 2: MATHEMATICAL VERIFICATION (25 points)
 
-**CRITICAL: Verify the analyst used REAL tickers and prices from the market board.**
+Verify the analyst's calculations:
 
-| Trade Recommended | Ticker Exists? | Price Matches Board? | Liquidity OK? |
-|-------------------|----------------|---------------------|---------------|
-| [Ticker 1] | ✓/✗ | [Analyst: X¢, Board: Y¢] | ✓/✗ |
-| [Ticker 2] | ✓/✗ | [Analyst: X¢, Board: Y¢] | ✓/✗ |
-| [Ticker 3] | ✓/✗ | [Analyst: X¢, Board: Y¢] | ✓/✗ |
+**Fair Spread Calculation:**
+| Component | Analyst's Value | Correct Value | Error? |
+|-----------|-----------------|---------------|--------|
+| Raw Efficiency | | | |
+| Home Court | | +2.5 | |
+| Rest Adjustment | | | |
+| Injury Adjustment | | | |
+| Final Fair Spread | | | |
 
-**Contract Verification Checks:**
-- [ ] All tickers are EXACT matches from market board (e.g., KXNBASPREAD-25DEC23WASCHA-CHA5)
-- [ ] limit_price_cents matches the actual yes_ask or no_ask from board
-- [ ] Spread (ask - bid) < 10¢ for all recommended contracts
-- [ ] Volume/Open Interest indicates tradeable market
+**Fair Total Calculation:**
+| Component | Analyst's Value | Correct Value | Error? |
+|-----------|-----------------|---------------|--------|
+| Projected Pace | | | |
+| Raw Total | | | |
+| Adjustments | | | |
+| Final Fair Total | | | |
 
-**Ticker/Price Errors Found:** [List any mismatched or invented tickers/prices]
-- This is a CRITICAL error if found - the trade cannot be executed
+**Edge Calculation:**
+| Market | Fair Line | Market Line | Analyst Edge | Correct Edge |
+|--------|-----------|-------------|--------------|--------------|
+| Spread | | | | |
+| Total | | | | |
 
-**Contract Verification Score:** [X/25]
-- 25: All tickers and prices match exactly
-- 15: Minor price discrepancies (1-2¢)
-- 5: Ticker doesn't exist or price is significantly wrong
-- 0: Made up tickers or completely wrong prices
+**Math Errors Found:** [List specific errors]
 
----
-
-### SECTION 3: EV CALCULATION VERIFICATION (25 points)
-
-Verify the analyst's EV calculations:
-
-For each recommended trade:
-
-| Ticker | Analyst P(YES) | Analyst Price | Analyst EV | My P(YES) | Correct EV | Error |
-|--------|----------------|---------------|------------|-----------|------------|-------|
-| | % | ¢ | ¢ | % | ¢ | ¢ |
-| | % | ¢ | ¢ | % | ¢ | ¢ |
-
-**EV Formula Check:**
-```
-EV_BUY_YES = (P_YES × 100) - yes_ask
-EV_BUY_NO = ((100 - P_YES) × 100) - no_ask = (P_NO × 100) - no_ask
-```
-
-**Probability Reasonableness Check:**
-| Analyst's Estimate | My Independent Estimate | Difference | Concern? |
-|--------------------|------------------------|------------|----------|
-| P(Home wins) = % | % | ±% | YES/NO |
-| P(Over X.5) = % | % | ±% | YES/NO |
-| P(Team -X.5) = % | % | ±% | YES/NO |
-
-**EV Calculation Score:** [X/25]
-- 25: All EV calculations correct
-- 20: Rounding errors only (within 1¢)
-- 15: Probability estimates reasonable but slightly off
-- 10: Significant probability or EV errors
-- 0-5: Fundamental calculation errors
+**Math Score:** [X/25]
+- 25: All calculations correct
+- 20: Rounding errors only
+- 15: Minor methodology difference
+- 10: Significant calculation error
+- 0-5: Fundamental math wrong
 
 ---
 
-### SECTION 4: LOGICAL CONSISTENCY (15 points)
+### SECTION 3: LOGICAL CONSISTENCY (25 points)
+
+Evaluate the reasoning chain:
 
 | Check | Status | Issue |
 |-------|--------|-------|
-| Fair spread/total → probability conversions sensible? | ✓/✗ | |
-| Selected strike makes sense vs fair line? | ✓/✗ | |
-| Side selection (YES vs NO) optimizes EV? | ✓/✗ | |
-| Correlation check performed (no conflicting positions)? | ✓/✗ | |
-| Position sizing matches EV? | ✓/✗ | |
+| Conclusion follows from data? | ✓/✗ | |
+| Spread and total picks internally consistent? | ✓/✗ | |
+| Injury impact appropriately weighted? | ✓/✗ | |
+| Situational factors logically applied? | ✓/✗ | |
+| Edge size justifies confidence level? | ✓/✗ | |
+| Position sizing matches edge? | ✓/✗ | |
 
-**Logic Score:** [X/15]
+**Contradiction Check:**
+| Pick | Supporting Data | Contradicting Data | Resolution |
+|------|-----------------|-------------------|------------|
+| [Spread pick] | | | |
+| [Total pick] | | | |
+
+**Logic Errors Found:** [List contradictions]
+
+**Critical Flaw:** [Most serious logical error, if any]
+
+**Logic Score:** [X/25]
+- 25: Airtight reasoning
+- 20: Minor logical gaps
+- 15: Notable inconsistency
+- 10: Major contradiction
+- 0-5: Fundamentally flawed logic
+
+---
+
+### SECTION 4: COMPLETENESS (15 points)
+
+Did the analyst use ALL available information?
+
+| Research Section | Used? | If Ignored, Impact | Notes |
+|------------------|-------|-------------------|-------|
+| Efficiency Metrics | ✓/✗ | [H/M/L] | |
+| SOS Adjustment | ✓/✗ | [H/M/L] | |
+| Injury Report | ✓/✗ | [H/M/L] | |
+| Replacement Quality | ✓/✗ | [H/M/L] | |
+| Rest/Schedule | ✓/✗ | [H/M/L] | |
+| Situational Spots | ✓/✗ | [H/M/L] | |
+| Line Movement | ✓/✗ | [H/M/L] | |
+| Sharp Money Signals | ✓/✗ | [H/M/L] | |
+| H2H Data | ✓/✗ | [H/M/L] | |
+| Referee Data | ✓/✗ | [H/M/L] | |
+
+**Critical Omission:** [Most important ignored factor]
+
+**Completeness Score:** [X/15]
+- 15: All relevant data used
+- 12: Minor factors missed
+- 9: One important factor missed
+- 6: Multiple important factors missed
+- 0-3: Critical factors ignored
 
 ---
 
@@ -1814,11 +1861,18 @@ EV_BUY_NO = ((100 - P_YES) × 100) - no_ask = (P_NO × 100) - no_ask
 |------------|----------|---------|
 | Kill switch identified? | ✓/✗ | [Specific/Vague/Missing] |
 | Injury uncertainty flagged? | ✓/✗ | [Adequate/Inadequate] |
-| Wide spread warning if applicable? | ✓/✗ | |
-| Liquidity concerns noted? | ✓/✗ | |
+| Contrarian case considered? | ✓/✗ | [Strong/Weak/Missing] |
+| Line sensitivity noted? | ✓/✗ | |
 | Pre-game checklist provided? | ✓/✗ | |
+| Timing guidance given? | ✓/✗ | |
+
+**Missing Risk Factors:** [List any unaddressed risks]
 
 **Risk Score:** [X/10]
+- 10: Comprehensive risk assessment
+- 8: Minor gaps
+- 5: Notable risks unaddressed
+- 0-3: Poor risk awareness
 
 ═══════════════════════════════════════════════════════════════
 ## AUDIT VERDICT
@@ -1829,9 +1883,9 @@ EV_BUY_NO = ((100 - P_YES) × 100) - no_ask = (P_NO × 100) - no_ask
 | Section | Score | Weight | Weighted Score |
 |---------|-------|--------|----------------|
 | Data Integrity | /25 | 25% | |
-| Contract Verification | /25 | 25% | |
-| EV Calculations | /25 | 25% | |
-| Logical Consistency | /15 | 15% | |
+| Math Verification | /25 | 25% | |
+| Logical Consistency | /25 | 25% | |
+| Completeness | /15 | 15% | |
 | Risk Awareness | /10 | 10% | |
 | **TOTAL** | | | **/100** |
 
@@ -1849,17 +1903,17 @@ EV_BUY_NO = ((100 - P_YES) × 100) - no_ask = (P_NO × 100) - no_ask
 
 ### Approval Status
 
-- [ ] **APPROVED** - Trades are valid and can be executed
-- [ ] **APPROVED WITH CORRECTIONS** - Usable after correcting prices/tickers below
-- [ ] **CONDITIONAL** - Significant concerns, Chairman must verify
-- [ ] **REJECTED** - Do not execute these trades (invalid tickers or prices)
+- [ ] **APPROVED** - Analysis is sound, proceed to synthesis
+- [ ] **APPROVED WITH CORRECTIONS** - Usable after applying corrections below
+- [ ] **CONDITIONAL** - Significant concerns, Chairman must address
+- [ ] **REJECTED** - Do not use this analysis
 
 ### Required Corrections (If Any)
 
-| Priority | Correction Needed | Corrected Value |
-|----------|-------------------|-----------------|
-| 1 (Critical) | [Wrong ticker/price] | [Correct value] |
-| 2 (Major) | [EV miscalculation] | [Correct EV] |
+| Priority | Correction Needed | Impact on Pick |
+|----------|-------------------|----------------|
+| 1 (Critical) | | |
+| 2 (Major) | | |
 | 3 (Minor) | | |
 
 ═══════════════════════════════════════════════════════════════
@@ -1873,16 +1927,22 @@ EV_BUY_NO = ((100 - P_YES) × 100) - no_ask = (P_NO × 100) - no_ask
 | 2 | | | | |
 | 3 | | | | |
 
-### Trade Agreement Matrix
-| Ticker | Analyst A | Analyst B | Analyst C | Consensus |
-|--------|-----------|-----------|-----------|-----------|
-| [Ticker] | BUY YES/NO | BUY YES/NO | BUY YES/NO | AGREE/SPLIT |
-| [Ticker] | BUY YES/NO | BUY YES/NO | BUY YES/NO | AGREE/SPLIT |
+### Agreement Matrix
+| Bet Type | Analyst A | Analyst B | Analyst C | Consensus |
+|----------|-----------|-----------|-----------|-----------|
+| Spread | | | | [AGREE/SPLIT] |
+| Total | | | | [AGREE/SPLIT] |
+| Confidence | | | | |
+| Units | | | | |
 
-### Best Trade Consensus
-- [X] of [Y] analysts recommend same ticker and side
-- Shared EV estimate: approximately [X]¢
-- Average confidence: [HIGH/MEDIUM/LOW]
+### Where Analysts Agree
+- [Bet type]: [X] of [Y] analysts agree on [PICK]
+- Shared reasoning: [Common factors cited]
+
+### Where Analysts Disagree
+| Disagreement | Analyst A Says | Analyst B Says | Stronger Argument |
+|--------------|----------------|----------------|-------------------|
+| | | | [A/B] because... |
 
 ═══════════════════════════════════════════════════════════════
 ## RED FLAGS FOR CHAIRMAN
@@ -1893,33 +1953,26 @@ EV_BUY_NO = ((100 - P_YES) × 100) - no_ask = (P_NO × 100) - no_ask
 | [Issue 1] | [CRITICAL/HIGH/MEDIUM] | [Action] |
 | [Issue 2] | [CRITICAL/HIGH/MEDIUM] | [Action] |
 
-**CRITICAL FLAGS (Automatic trade rejection):**
-- [ ] Ticker doesn't exist in market board
-- [ ] Price doesn't match market board (>2¢ off)
-- [ ] Spread > 10¢ (illiquid market)
-- [ ] EV calculation error > 5¢
+**Confidence Cap Recommendation:**
+Based on audit findings, maximum confidence should be: [HIGH/MEDIUM/LOW]
+Reason: [Explanation]
 
-**Maximum Position Size Recommendation:**
-Based on audit findings: [X]u maximum
+**Position Size Cap Recommendation:**
+Based on uncertainty level, maximum units should be: [X]u
 Reason: [Explanation]
 """
 
 
 # -----------------------------------------------------------------------------
-# SYNTHESIS PROMPT (The Decision Maker) - KALSHI-NATIVE VERSION
+# SYNTHESIS PROMPT (The Decision Maker) - ENHANCED
 # -----------------------------------------------------------------------------
 
-NBA_SYNTHESIS_PROMPT = """You are the Chairman/Portfolio Manager for Kalshi trading. Final authority on all trades.
-
-IMPORTANT: You are authorizing KALSHI TRADES, not sportsbook bets.
-- Each trade is a specific CONTRACT (ticker) with a YES or NO side
-- Prices are in CENTS. You BUY YES at yes_ask or BUY NO at no_ask.
-- Your output must include EXACT tickers and limit prices from the market board.
+NBA_SYNTHESIS_PROMPT = """You are the Chairman/Portfolio Manager. Final authority on all bets.
 
 RESEARCH DATA:
 {research}
 
-KALSHI MARKET BOARD:
+MARKET ODDS:
 {market_odds}
 
 ANALYST REPORTS:
@@ -1934,44 +1987,51 @@ AUDIT RESULTS:
 
 ### STEP 1: Validate Foundation
 
+Before any picks, confirm the analysis is trustworthy:
+
 | Validation Check | Status | Action if Failed |
 |------------------|--------|------------------|
 | Research data current (today's date)? | ✓/✗ | Pause for update |
+| Roster data verified (no traded players)? | ✓/✗ | CRITICAL - Re-verify rosters |
 | At least one analyst passed audit (70+)? | ✓/✗ | Extra scrutiny |
-| Tickers in recommendations exist in market board? | ✓/✗ | REJECT trades with bad tickers |
-| Prices match market board (within 2¢)? | ✓/✗ | Update to current prices |
+| No critical data gaps? | ✓/✗ | Note limitation |
 | Injury report finalized? | ✓/✗ | Reduce size or wait |
+| Line hasn't moved past key number? | ✓/✗ | Re-evaluate edge |
+
+⚠️ ROSTER VERIFICATION: Before proceeding, confirm that:
+- All players mentioned in research are CURRENTLY on their listed teams
+- Any recent trades have been accounted for
+- Kill switch players are verified as current roster members
 
 **Foundation Status:** [SOLID / CAUTION / COMPROMISED]
 
 ---
 
-### STEP 2: Synthesize Analyst Trade Recommendations
+### STEP 2: Synthesize Analyst Views
 
 **GAME: [Home Team] vs [Away Team]**
 
-| Analyst | Top Trade Ticker | Side | EV | Audit Score |
-|---------|------------------|------|-----|-------------|
-| A | | YES/NO | ¢ | /100 |
-| B | | YES/NO | ¢ | /100 |
-| C | | YES/NO | ¢ | /100 |
+| Analyst | Spread Pick | Total Pick | Confidence | Audit Score |
+|---------|-------------|------------|------------|-------------|
+| A | | | | /100 |
+| B | | | | /100 |
+| C | | | | /100 |
 
-**Consensus on Specific Contracts:**
+**Consensus Analysis:**
 
-| Ticker | # Analysts Recommend | Avg EV | Consensus Side |
-|--------|---------------------|--------|----------------|
-| | X of Y | ¢ | YES/NO |
-| | X of Y | ¢ | YES/NO |
+| Market | Unanimous | Majority | Split | Chairman Lean |
+|--------|-----------|----------|-------|---------------|
+| Spread | ✓/✗ | X-X | ✓/✗ | |
+| Total | ✓/✗ | X-X | ✓/✗ | |
 
 **Key Agreement Points:**
-1. [Which contracts most analysts agree on]
-2. [Shared EV estimates]
+1. [What all/most analysts agree on]
+2. [Shared supporting evidence]
 
 **Key Disagreement Points:**
 | Issue | Analyst A | Analyst B | Resolution |
 |-------|-----------|-----------|------------|
-| [Different strikes] | [Ticker A] | [Ticker B] | [Best choice because...] |
-| [Different sides] | BUY YES | BUY NO | [Better side because...] |
+| | | | [Whose logic is stronger] |
 
 ---
 
@@ -1981,145 +2041,136 @@ Based on audit findings and my own assessment:
 
 | Adjustment | Reason | Impact |
 |------------|--------|--------|
-| [Probability adjustment] | [Audit found error] | [New EV: X¢] |
-| [Strike selection] | [Better liquidity at different strike] | [Different ticker] |
+| [Adjustment 1] | [Audit flagged / My observation] | [New fair line / confidence change] |
+| [Adjustment 2] | | |
 
-**Final Probability Estimates:**
-| Statement | Analyst Avg P(YES) | My P(YES) | Adjustment Reason |
-|-----------|-------------------|-----------|-------------------|
-| [Team] wins | % | % | |
-| [Team] wins by over X.5 | % | % | |
-| Over X.5 total points | % | % | |
+**Adjusted Fair Lines:**
+| Market | Analyst Avg Fair | My Adjustment | Chairman Fair Line |
+|--------|------------------|---------------|-------------------|
+| Spread | | +/- | |
+| Total | | +/- | |
 
 ---
 
-### STEP 4: Position Sizing for Kalshi
+### STEP 4: Position Sizing Decision
 
-**Sizing by EV:**
-| EV per Contract | Units |
-|-----------------|-------|
-| 3-5¢ | 0.5u |
-| 5-8¢ | 1.0u |
-| 8-12¢ | 1.5u |
-| 12-15¢ | 2.0u |
-| 15¢+ | 2.5u |
+**Sizing Matrix:**
 
-**Sizing Adjustments:**
+| Factor | Spread Bet | Total Bet |
+|--------|------------|-----------|
+| Edge Size | pts | pts |
+| Base Units (from edge) | u | u |
+| Analyst Consensus Modifier | +/- | +/- |
+| Audit Score Modifier | +/- | +/- |
+| Injury Uncertainty Modifier | +/- | +/- |
+| Sharp Money Alignment | +/- | +/- |
+| **FINAL UNITS** | **u** | **u** |
+
+**Sizing Rules Applied:**
+- [ ] No bet without 3% minimum edge
 - [ ] Split analysts → reduce by 0.5u
-- [ ] Audit score <80 → reduce by 0.5u
-- [ ] Wide spread (>7¢) → reduce by 0.5u
-- [ ] Low volume (<100 contracts) → reduce by 0.5u
+- [ ] Audit score <80 → reduce by 0.5u  
 - [ ] GTD player involved → cap at 1.5u
-- [ ] Maximum 3 trades total
+- [ ] Against sharp money → reduce by 0.5u
+- [ ] Maximum 3 bets this slate
 
 ---
 
-### STEP 5: Verify Market Prices
+### STEP 5: Timing Decision
 
-BEFORE FINALIZING, confirm current prices from market board:
+| Bet | Current Line | Expected Movement | Timing Call |
+|-----|--------------|-------------------|-------------|
+| [Bet 1] | | [Public will push to X] | [NOW / WAIT / GAME-TIME] |
+| [Bet 2] | | | |
 
-| Ticker | Board yes_ask | Board no_ask | Spread | Tradeable? |
-|--------|---------------|--------------|--------|------------|
-| | ¢ | ¢ | ¢ | ✓/✗ |
-| | ¢ | ¢ | ¢ | ✓/✗ |
-
-If spread > 10¢ or prices changed significantly, REJECT that trade.
+**Timing Rules:**
+- Betting favorite → Bet early (before public)
+- Betting underdog → Can wait for value
+- Injury uncertainty → Wait for 90-min report
+- Steam move opportunity → Must act in 5 min
 
 ═══════════════════════════════════════════════════════════════
-## FINAL KALSHI TRADING CARD
+## FINAL BETTING CARD
 ═══════════════════════════════════════════════════════════════
 
-### TRADE 1: [HIGHEST PRIORITY]
+### BET 1: [HIGHEST PRIORITY]
 
 | Field | Value |
 |-------|-------|
-| **Ticker** | [EXACT TICKER FROM MARKET BOARD, e.g., KXNBASPREAD-25DEC23WASCHA-CHA5] |
-| **Statement** | [What YES means, e.g., "Charlotte wins by over 5.5 Points"] |
 | **Game** | [Home Team] vs [Away Team] |
-| **Market Type** | [WINNER / SPREAD / TOTAL] |
-| **Action** | BUY |
-| **Side** | [YES / NO] |
-| **Limit Price** | [X]¢ (from market board: yes_ask or no_ask) |
-| **Model Probability** | [X]% (your probability for the side you're buying) |
-| **Market Implied Prob** | [X]% (= limit_price for that side) |
-| **Edge** | [X]% (model_prob - implied_prob) |
-| **EV per Contract** | [X]¢ (= model_prob × 100 - limit_price) |
-| **Units** | [X.X]u |
+| **Date/Time** | [Date/Time] |
+| **Market** | [Spread / Total / ML / 1H] |
+| **Pick** | [TEAM/OVER/UNDER] [LINE] |
+| **Current Odds** | [Odds] |
+| **Your Fair Line** | [Number] |
+| **Market Line** | [Number] |
+| **Edge** | [X points / X%] |
+| **Probability (Yours)** | [X%] |
+| **Probability (Market)** | [X%] |
 | **Confidence** | [HIGH / MEDIUM / LOW] |
-| **Timing** | [TRADE NOW / WAIT FOR INJURY NEWS / WAIT FOR BETTER PRICE] |
+| **Units** | [X.X]u |
+| **Timing** | [BET NOW / WAIT FOR X] |
 
-**Why This Contract:**
-> [2-3 sentences: Why this specific ticker and strike? Why YES/NO side? What edge are we capturing?]
+**The Alpha (Why We Beat the Market):**
+> [2-3 sentences: What specific inefficiency are we exploiting? Why is the market wrong?]
 
-**The Risk:**
-> [1-2 sentences: What could make this trade lose?]
+**The Risk (What Could Go Wrong):**
+> [1-2 sentences: Primary risk factor]
 
 **Kill Switch:**
-> If [specific condition], then [CANCEL TRADE / LOWER LIMIT PRICE TO X¢]
+> [Specific condition]: If [X happens], [CANCEL BET / REDUCE TO Yu / PROCEED]
+> ⚠️ IMPORTANT: Verify the player mentioned in kill switch is CURRENTLY on the team before using
 
-**Pre-Trade Verification:**
-- [ ] Confirm [player] injury status
-- [ ] Verify price hasn't moved past [X]¢
-- [ ] Check spread is still < 10¢
-
----
-
-### TRADE 2: [SECOND PRIORITY]
-
-| Field | Value |
-|-------|-------|
-| **Ticker** | |
-| **Statement** | |
-| **Action** | BUY |
-| **Side** | [YES / NO] |
-| **Limit Price** | ¢ |
-| **Model Probability** | % |
-| **EV per Contract** | ¢ |
-| **Units** | u |
-| **Confidence** | |
-
-**Why This Contract:**
-> 
+**Pre-Game Verification:**
+- [ ] Verify all players in kill switch are still on team (check for trades)
+- [ ] [Check item 1]
+- [ ] [Check item 2]
+- [ ] [Check item 3]
 
 ---
 
-### TRADE 3: [IF APPLICABLE]
+### BET 2: [SECOND PRIORITY]
 
-[Same format]
+[Same format as Bet 1]
+
+---
+
+### BET 3: [IF APPLICABLE]
+
+[Same format as Bet 1]
 
 ---
 
 ### PASS LIST
 
-| Ticker Considered | EV | Reason for Pass |
-|-------------------|-----|-----------------|
-| | ¢ | [EV too low / Spread too wide / Correlated with Trade 1] |
-| | ¢ | |
+| Game | Reason for Pass | Edge Found | Why Not Betting |
+|------|-----------------|------------|-----------------|
+| | | [X pts] | [Too small / Too uncertain / Split analysts] |
 
 ═══════════════════════════════════════════════════════════════
-## KALSHI TRADING SUMMARY
+## PORTFOLIO SUMMARY
 ═══════════════════════════════════════════════════════════════
 
-| # | Ticker | Side | Price | EV | Units | Confidence |
-|---|--------|------|-------|-----|-------|------------|
-| 1 | | YES/NO | ¢ | ¢ | u | |
-| 2 | | YES/NO | ¢ | ¢ | u | |
-| 3 | | YES/NO | ¢ | ¢ | u | |
+| # | Game | Pick | Edge | Conf | Units | Timing |
+|---|------|------|------|------|-------|--------|
+| 1 | | | | | | |
+| 2 | | | | | | |
+| 3 | | | | | | |
 
 **Total Units at Risk:** [X]u
-**Weighted Average EV:** [X]¢ per contract
-**Portfolio Correlation:** [LOW - uncorrelated / MEDIUM - some overlap / HIGH - correlated positions]
+**Average Edge:** [X%]
+**Weighted Confidence:** [HIGH/MEDIUM/LOW]
 
-### Today's Trading Thesis
-> [One paragraph: What's our edge today? Are we fading public sentiment? Capitalizing on injury mispricing? Explain the unifying theme.]
+### Today's Strategy Summary
+> [One paragraph: What's our overall thesis today? Are we fading public favorites? Playing pace-up games for overs? Capitalizing on injury news? Explain the unifying theme if any.]
 
-### Critical Monitoring
+### Critical Monitoring List
 
 | Priority | What to Watch | Trigger | Action |
 |----------|---------------|---------|--------|
-| 1 | [Injury update] | [Player ruled out/in] | [Cancel Trade X / Add new trade] |
-| 2 | [Price movement] | [yes_ask moves to X¢] | [Lower limit / Execute now] |
-| 3 | [Spread widens] | [Spread > 10¢] | [Cancel - illiquid] |
+| 1 | [Injury update] | [Player ruled out/in] | [Cancel/Add bet] |
+| 2 | [Line movement] | [Moves to X] | [Bet now/Pass] |
+| 3 | [News item] | [Event] | [Action] |
 
 ═══════════════════════════════════════════════════════════════
 ## CHAIRMAN'S RULES VERIFICATION
@@ -2127,76 +2178,37 @@ If spread > 10¢ or prices changed significantly, REJECT that trade.
 
 Confirm all rules followed:
 
-- [ ] All tickers are EXACT matches from market board
-- [ ] All limit prices match yes_ask or no_ask from market board
-- [ ] No trade with EV < 3¢
-- [ ] No trade with spread > 10¢
-- [ ] Maximum 3 trades on this game
-- [ ] Each trade has explicit kill switch
-- [ ] No highly correlated positions (e.g., same outcome at different strikes)
+- [ ] No bet without minimum 3% edge (5% preferred)
+- [ ] Maximum 3 bets on this slate
+- [ ] Each bet has explicit kill switch
+- [ ] Each bet has pre-game checklist
 - [ ] Injury uncertainty properly reflected in sizing
+- [ ] Split analysts → reduced position or pass
+- [ ] Timing guidance provided for each bet
+- [ ] Against sharp money acknowledged if applicable
 
 ═══════════════════════════════════════════════════════════════
-## EXECUTION OUTPUT (JSON)
+## CLOSING LINE VALUE (CLV) TRACKING
 ═══════════════════════════════════════════════════════════════
 
-```json
-{{
-  "game_matchup": "[Home Team] vs [Away Team]",
-  "game_date": "[Date]",
-  "chairman_estimates": {{
-    "fair_spread": [NUMBER - positive means home favored],
-    "fair_total": [NUMBER],
-    "home_win_probability": [NUMBER 0-100]
-  }},
-  "approved_trades": [
-    {{
-      "rank": 1,
-      "ticker": "[EXACT TICKER]",
-      "market_type": "WINNER" | "SPREAD" | "TOTAL",
-      "statement": "[What YES means]",
-      "action": "BUY",
-      "side": "YES" | "NO",
-      "limit_price_cents": [NUMBER],
-      "model_probability": [NUMBER 0-100],
-      "market_implied_probability": [NUMBER 0-100],
-      "edge_percentage": [NUMBER],
-      "ev_cents": [NUMBER],
-      "units": [NUMBER 0.5-2.5],
-      "confidence": "LOW" | "MEDIUM" | "HIGH",
-      "timing": "TRADE_NOW" | "WAIT_FOR_INJURY_NEWS" | "WAIT_FOR_BETTER_PRICE",
-      "reasoning": "[Why this contract]",
-      "kill_switch": "[Condition that cancels trade]",
-      "pre_trade_checks": ["Check 1", "Check 2"]
-    }}
-  ],
-  "rejected_trades": [
-    {{
-      "ticker": "[Ticker from analyst]",
-      "reason": "[Why rejected - wrong price / illiquid / low EV / correlated]"
-    }}
-  ],
-  "portfolio_summary": {{
-    "total_units": [NUMBER],
-    "weighted_avg_ev_cents": [NUMBER],
-    "max_correlation": "LOW" | "MEDIUM" | "HIGH"
-  }},
-  "monitoring_alerts": [
-    {{
-      "priority": 1,
-      "trigger": "[Condition]",
-      "action": "[What to do]"
-    }}
-  ]
-}}
-```
+For post-game review, record:
+
+| Bet | Line Bet | Closing Line | CLV | Result |
+|-----|----------|--------------|-----|--------|
+| 1 | | [Fill post-game] | [Fill post-game] | [Fill post-game] |
+| 2 | | | | |
+| 3 | | | | |
+
+**Note:** Beating the closing line is the best predictor of long-term profitability. Track this religiously.
+
+═══════════════════════════════════════════════════════════════
 
 **CHAIRMAN SIGN-OFF:**
 
-Trades approved for execution pending pre-trade verification checks.
+Ready for execution pending pre-game verification checks.
 
 Date/Time of Decision: [TIMESTAMP]
-Next Required Action: [VERIFY X at Y time / EXECUTE NOW / WAIT FOR Z]
+Next Required Action: [VERIFY X at Y time / BET NOW / WAIT FOR Z]
 """
 
 
@@ -2208,56 +2220,13 @@ Next Required Action: [VERIFY X at Y time / EXECUTE NOW / WAIT FOR Z]
 # SYSTEM PROMPTS
 # -----------------------------------------------------------------------------
 
-SOCCER_RESEARCH_SYSTEM = """You are a Football Data Retrieval Specialist for a quantitative sports betting operation.
+SOCCER_RESEARCH_SYSTEM = """do nothing"""
 
-Your goal is NOT to predict outcomes, but to gather the statistical signals that sharp bettors use.
+SOCCER_ANALYST_SYSTEM = """do nothing"""
 
-You prioritize:
-- xG and xGA over actual goals (luck vs skill)
-- Home/Away splits (some teams are completely different)
-- Rest and fixture congestion (crucial in European football)
-- Set piece data (30% of goals come from dead balls)
+SOCCER_REVIEWER_SYSTEM = """do nothing"""
 
-You output structured data. No opinions. No predictions. Just facts."""
-
-
-SOCCER_ANALYST_SYSTEM = """You are a Football Quantitative Analyst specializing in European leagues.
-
-Core Beliefs:
-- xG regression is real: teams overperforming xG will regress
-- Home advantage varies by league (La Liga > Premier League)
-- Fixture congestion destroys even elite teams
-- The market overreacts to recent results and underweights underlying metrics
-
-You think in PROBABILITIES for three outcomes (1X2), not just "who wins."
-
-You must calculate fair odds and compare to market to find value."""
-
-
-SOCCER_REVIEWER_SYSTEM = """You are the Risk Manager for a football betting operation.
-
-Your job is to find flaws in the Analysts' reasoning before money is risked.
-
-You check for:
-1. xG misinterpretation (using wrong time periods)
-2. Ignored fixture congestion (midweek European games)
-3. Overconfidence on small edges (soccer is high variance)
-4. Correlation errors (can't bet Home Win AND Under 1.5 easily)
-
-Soccer has 3 outcomes. A 40% probability of winning is NOT a confident bet."""
-
-
-SOCCER_CHAIRMAN_SYSTEM = """You are the Portfolio Manager for football betting.
-
-Your Rules:
-1. Soccer is high variance. Require higher edges than NBA.
-2. The DRAW is where markets are most inefficient. Always consider it.
-3. Goals markets (O/U, BTTS) often have better value than match result.
-4. Minimum 7% edge for 1X2 markets, 5% for goals markets.
-5. Maximum 3 bets per matchday. Quality over quantity.
-
-Output must be actionable: Market, Selection, Odds, Size."""
-
+SOCCER_CHAIRMAN_SYSTEM = """do nothing"""
 
 # =============================================================================
 # MULTI-STAGE RESEARCH PROMPTS (SOCCER)
@@ -2265,832 +2234,31 @@ Output must be actionable: Market, Selection, Odds, Size."""
 # =============================================================================
 
 # Stage 1: Core Form & Underlying Metrics (xG-Based)
-SOCCER_STAGE_1_FORM_METRICS = """
-TASK: Gather core form and underlying performance metrics for soccer betting analysis.
-
-MATCH: {home_team} vs {away_team}
-COMPETITION: {competition}
-DATE: {match_date}
-
-EXECUTE THESE SPECIFIC SEARCHES:
-
-SEARCH 1: "{home_team} xG 2025-26 season stats"
-EXTRACT:
-- xG (Expected Goals) per game
-- xGA (Expected Goals Against) per game
-- Actual Goals vs xG difference (overperforming/underperforming?)
-- xPTS (Expected Points) vs Actual Points
-
-SEARCH 2: "{away_team} xG 2025-26 season stats"
-EXTRACT: Same metrics as above
-
-SEARCH 3: "{home_team} last 5 matches results xG"
-EXTRACT:
-- Results (W/D/L)
-- Goals scored/conceded
-- xG created/conceded each match
-- Quality of opponents faced
-
-SEARCH 4: "{away_team} last 5 matches results xG"
-EXTRACT: Same as above
-
-SEARCH 5: "{home_team} home record 2025-26"
-EXTRACT:
-- Home W-D-L record
-- Home goals scored/conceded
-- Home xG/xGA
-- Points per game at home
-
-SEARCH 6: "{away_team} away record 2025-26"
-EXTRACT:
-- Away W-D-L record
-- Away goals scored/conceded
-- Away xG/xGA
-- Points per game away
-
-OUTPUT FORMAT:
-```
-## Form & Underlying Metrics
-
-### Season Overview
-| Team | xG/90 | xGA/90 | xG Diff | Actual vs xG | xPTS vs Actual |
-|------|-------|--------|---------|--------------|----------------|
-| {home_team} |  |  |  | [Over/Under]performing |  |
-| {away_team} |  |  |  | [Over/Under]performing |  |
-
-### Last 5 Matches
-| Team | Record | GF | GA | xGF | xGA | Opponent Quality |
-|------|--------|----|----|-----|-----|------------------|
-| {home_team} |  |  |  |  |  | [Strong/Medium/Weak] |
-| {away_team} |  |  |  |  |  | [Strong/Medium/Weak] |
-
-### Venue Splits (CRITICAL)
-| Team | Venue | W-D-L | PPG | GF/Game | GA/Game | xG/Game |
-|------|-------|-------|-----|---------|---------|---------|
-| {home_team} | HOME |  |  |  |  |  |
-| {away_team} | AWAY |  |  |  |  |  |
-
-FORM VERDICT:
-- True Form Edge: [Which team, accounting for xG regression]
-- Luck Factor: [Who is due for regression?]
-```
-"""
+SOCCER_STAGE_1_FORM_METRICS = """do nothing"""
 
 # Stage 2: Betting Lines & Market Data
-SOCCER_STAGE_2_BETTING_LINES = """
-TASK: Gather current betting lines and market movement data.
+SOCCER_STAGE_2_BETTING_LINES = """do nothing"""
 
-MATCH: {home_team} vs {away_team}
-COMPETITION: {competition}
-DATE: {match_date}
-
-EXECUTE THESE SPECIFIC SEARCHES:
-
-SEARCH 1: "{home_team} vs {away_team} odds betting {match_date}"
-EXTRACT:
-- 1X2 odds (Home/Draw/Away)
-- Asian Handicap line and odds
-- Over/Under line (usually 2.5) and odds
-- Both Teams to Score (BTTS) odds
-
-SEARCH 2: "{home_team} vs {away_team} betting preview odds movement"
-EXTRACT:
-- Opening odds vs current odds
-- Which way has money moved?
-- Any significant line shifts
-
-SEARCH 3: "{home_team} over under goals record 2025-26"
-EXTRACT:
-- Over 2.5 percentage (home games)
-- Over 1.5 percentage
-- Clean sheet percentage
-- BTTS percentage
-
-SEARCH 4: "{away_team} over under goals record 2025-26"
-EXTRACT: Same metrics, focusing on away games
-
-SEARCH 5: "{competition} home win draw away percentage 2025-26"
-EXTRACT:
-- League-wide home/draw/away percentages
-- Average goals per game in competition
-- Home advantage factor
-
-OUTPUT FORMAT:
-```
-## Betting Market Analysis
-
-### Current Odds
-| Market | {home_team} | Draw | {away_team} |
-|--------|-------------|------|-------------|
-| 1X2 |  |  |  |
-| Implied Prob |  |  |  |
-
-| Market | Line | Over Odds | Under Odds |
-|--------|------|-----------|------------|
-| Total Goals |  |  |  |
-| Asian Handicap |  |  |  |
-
-| Market | Yes | No |
-|--------|-----|-----|
-| BTTS |  |  |
-
-### Line Movement
-- Opening 1X2: [ODDS]
-- Current 1X2: [ODDS]
-- Movement Direction: [Toward Home/Draw/Away]
-- Asian Handicap Move: [OPENED vs CURRENT]
-
-### Goals Markets Profile
-| Team | O2.5% | O1.5% | Clean Sheet% | BTTS% | Avg Goals |
-|------|-------|-------|--------------|-------|-----------|
-| {home_team} (Home) |  |  |  |  |  |
-| {away_team} (Away) |  |  |  |  |  |
-
-### League Context
-- {competition} Home Win Rate: [X%]
-- {competition} Draw Rate: [X%]
-- {competition} Avg Goals/Game: [X.XX]
-
-MARKET LEAN: [Where is sharp money going based on movement?]
-```
-"""
-
-# Stage 3: Injuries, Suspensions & Team News
-SOCCER_STAGE_3_TEAM_NEWS = """
-TASK: Gather injury/suspension news and assess squad impact.
-
-MATCH: {home_team} vs {away_team}
-COMPETITION: {competition}
-DATE: {match_date}
-
-EXECUTE THESE SPECIFIC SEARCHES:
-
-SEARCH 1: "{home_team} team news injuries suspensions {match_date}"
-EXTRACT:
-- Confirmed OUT players
-- Doubtful players
-- Suspended players
-- Key returnees
-
-SEARCH 2: "{away_team} team news injuries suspensions {match_date}"
-EXTRACT: Same as above
-
-SEARCH 3: "{home_team} predicted lineup vs {away_team}"
-EXTRACT:
-- Expected starting XI
-- Formation
-- Key tactical decisions
-- Rotation expected?
-
-SEARCH 4: "{away_team} predicted lineup vs {home_team}"
-EXTRACT: Same as above
-
-SEARCH 5: For any KEY player missing:
-"{home_team} without [KEY PLAYER] results record"
-EXTRACT:
-- Record without the player
-- Goals impact
-- xG difference
-
-OUTPUT FORMAT:
-```
-## Squad News & Availability
-
-### {home_team}
-| Player | Status | Position | Impact | Goals/Assists |
-|--------|--------|----------|--------|---------------|
-|  | OUT |  | [High/Med/Low] |  |
-|  | DOUBT |  |  |  |
-
-Key Absence Impact: [Quantified if possible - team record without player]
-Expected Formation: [X-X-X]
-Rotation Risk: [Yes/No - consider fixture congestion]
-
-### {away_team}
-| Player | Status | Position | Impact | Goals/Assists |
-|--------|--------|----------|--------|---------------|
-|  | OUT |  | [High/Med/Low] |  |
-|  | DOUBT |  |  |  |
-
-Key Absence Impact: [Quantified if possible]
-Expected Formation: [X-X-X]
-Rotation Risk: [Yes/No]
-
-SQUAD EDGE: [Which team has the healthier/stronger available XI?]
-GOALS IMPACT: [Do absences affect attacking or defensive output more?]
-```
-"""
+# Stage 3: Team News & Injuries
+SOCCER_STAGE_3_TEAM_NEWS = """do nothing"""
 
 # Stage 4: Situational & Motivation Factors
-SOCCER_STAGE_4_SITUATIONAL = """
-TASK: Analyze scheduling, motivation, and situational factors.
+SOCCER_STAGE_4_SITUATIONAL = """do nothing"""
 
-MATCH: {home_team} vs {away_team}
-COMPETITION: {competition}
-DATE: {match_date}
+# Stage 5: Tactical & Style Analysis
+SOCCER_STAGE_5_TACTICAL = """do nothing"""
 
-EXECUTE THESE SPECIFIC SEARCHES:
+# Research Synthesis
+SOCCER_RESEARCH_SYNTHESIS = """do nothing"""
 
-SEARCH 1: "{home_team} fixtures schedule {month} 2025-26"
-EXTRACT:
-- Days since last match
-- Days until next match
-- Is this a congested period? (Cup ties, European football)
-- Did they play midweek?
+# Analysis Prompt
+SOCCER_ANALYSIS_PROMPT = """do nothing"""
 
-SEARCH 2: "{away_team} fixtures schedule {month} 2025-26"
-EXTRACT: Same as above
+# Review Prompt
+SOCCER_REVIEW_PROMPT = """do nothing"""
 
-SEARCH 3: "{competition} table standings 2025-26"
-EXTRACT:
-- {home_team} position and points
-- {away_team} position and points
-- Gap to positions above/below
-- What are they playing for?
-
-SEARCH 4: "{home_team} league table implications motivation"
-EXTRACT:
-- Title race involvement?
-- European qualification push?
-- Relegation battle?
-- Mid-table with nothing to play for?
-
-SEARCH 5: "{away_team} league table implications motivation"
-EXTRACT: Same as above
-
-SEARCH 6: "{home_team} next match after {away_team}"
-EXTRACT:
-- Who do they play next?
-- Is it a "bigger" game? (Cup final, derby, top 4 clash)
-- Rotation/look-ahead risk?
-
-OUTPUT FORMAT:
-```
-## Situational Analysis
-
-### Fixture Congestion
-| Team | Days Rest | Last Match | Next Match | Midweek Game? | European? |
-|------|-----------|------------|------------|---------------|-----------|
-| {home_team} |  |  |  |  |  |
-| {away_team} |  |  |  |  |  |
-
-REST EDGE: [Which team, and by how much does it matter?]
-
-### League Position & Motivation
-| Team | Position | Points | Gap to Above | Gap to Below | Playing For |
-|------|----------|--------|--------------|--------------|-------------|
-| {home_team} |  |  |  |  | [Title/Europe/Survival/Nothing] |
-| {away_team} |  |  |  |  | [Title/Europe/Survival/Nothing] |
-
-MOTIVATION EDGE: [Which team needs this more?]
-
-### Look-Ahead/Letdown Spots
-- {home_team} next: [OPPONENT] - Rotation risk? [Yes/No]
-- {away_team} next: [OPPONENT] - Rotation risk? [Yes/No]
-
-TRAP GAME ALERT: [Any sandwich spot concerns?]
-```
-"""
-
-# Stage 5: Tactical & Style Matchup
-SOCCER_STAGE_5_TACTICAL = """
-TASK: Analyze tactical approaches and style matchup.
-
-MATCH: {home_team} vs {away_team}
-COMPETITION: {competition}
-DATE: {match_date}
-
-EXECUTE THESE SPECIFIC SEARCHES:
-
-SEARCH 1: "{home_team} tactics formation playing style 2025-26"
-EXTRACT:
-- Primary formation
-- Playing style (Possession/Counter/Direct/High press)
-- Defensive line height (High/Medium/Low)
-- Where do their goals come from?
-
-SEARCH 2: "{away_team} tactics formation playing style 2025-26"
-EXTRACT: Same as above
-
-SEARCH 3: "{home_team} vs {away_team} tactical preview analysis"
-EXTRACT:
-- Expected tactical battle
-- Key matchups
-- Analyst predictions
-
-SEARCH 4: "{home_team} set piece goals corners 2025-26"
-EXTRACT:
-- Goals from corners
-- Goals from free kicks
-- Set piece threat rating
-
-SEARCH 5: "{away_team} set piece goals corners 2025-26"
-EXTRACT: Same as above
-
-SEARCH 6: "{home_team} vs {away_team} head to head last 5"
-EXTRACT:
-- Results of last 5 meetings
-- Scorelines
-- Patterns (high scoring? One-sided?)
-
-OUTPUT FORMAT:
-```
-## Tactical & Style Analysis
-
-### Playing Styles
-| Team | Formation | Style | Pressing | Def Line | Attack Focus |
-|------|-----------|-------|----------|----------|--------------|
-| {home_team} |  |  | [High/Med/Low] | [High/Med/Low] | [Wing/Central/Direct] |
-| {away_team} |  |  |  |  |  |
-
-### Style Matchup Implications
-- High line vs Counter threat? [Yes/No - Impact on goals]
-- Possession battle expected? [Who wins midfield]
-- Set piece differential: [Which team has edge]
-
-### Set Piece Threat
-| Team | Corner Goals | FK Goals | Set Piece % of Goals |
-|------|--------------|----------|----------------------|
-| {home_team} |  |  |  |
-| {away_team} |  |  |  |
-
-### Head-to-Head (Last 5 Meetings)
-| Date | Home | Score | Away | Total Goals | Notes |
-|------|------|-------|------|-------------|-------|
-|  |  |  |  |  |  |
-
-H2H SUMMARY:
-- Average Goals in H2H: [X.XX]
-- {home_team} Wins: [X]
-- Draws: [X]
-- {away_team} Wins: [X]
-- Pattern: [High scoring/Tight/One-sided]
-
-TACTICAL EDGE: [How does the style matchup favor?]
-GOALS IMPLICATION: [Does matchup suggest Over or Under?]
-```
-"""
-
-# Soccer Research Synthesis Prompt - Combines all stage outputs
-SOCCER_RESEARCH_SYNTHESIS = """
-TASK: Synthesize all research into actionable betting recommendations.
-
-MATCH: {home_team} vs {away_team}
-COMPETITION: {competition}
-
-You have gathered the following data:
-
-{all_stage_outputs}
-
-GENERATE A FINAL ANALYSIS:
-
-## Executive Summary
-[2-3 sentences capturing the key narrative for this match]
-
-## Edge Matrix
-| Factor | Advantage | Magnitude | Confidence |
-|--------|-----------|-----------|------------|
-| Form (xG-based) | [Team/Even] | [Significant/Marginal/None] | [High/Med/Low] |
-| Home/Away Splits | [Team/Even] | [Significant/Marginal/None] | [High/Med/Low] |
-| Squad Availability | [Team/Even] | [Significant/Marginal/None] | [High/Med/Low] |
-| Motivation | [Team/Even] | [Significant/Marginal/None] | [High/Med/Low] |
-| Rest/Congestion | [Team/Even] | [Significant/Marginal/None] | [High/Med/Low] |
-| Tactical Matchup | [Team/Even] | [Significant/Marginal/None] | [High/Med/Low] |
-| H2H History | [Team/Even] | [Significant/Marginal/None] | [High/Med/Low] |
-
-## Fair Odds Calculation
-Based on xG, form, and situational factors:
-- Fair {home_team} Win Probability: [X%]
-- Fair Draw Probability: [X%]
-- Fair {away_team} Win Probability: [X%]
-
-Market Odds Implied:
-- {home_team}: [X%]
-- Draw: [X%]
-- {away_team}: [X%]
-
-VALUE IDENTIFIED: [Where market is mispriced]
-
-## Goals Analysis
-| Factor | Suggests |
-|--------|----------|
-| Combined xG | [Over/Under] |
-| H2H Average | [Over/Under] |
-| Defensive Injuries | [Over/Under] |
-| Tactical Matchup | [Over/Under] |
-
-GOALS VERDICT: [Over/Under X.5 and why]
-
-## Betting Recommendations
-
-### Match Result (1X2 / Double Chance / Draw No Bet)
-- Selection: [PICK]
-- Confidence: [1-5]
-- Edge: [X% vs market]
-- Reasoning: [1-2 sentences]
-
-### Asian Handicap
-- Selection: [TEAM +/- LINE]
-- Confidence: [1-5]
-- Reasoning: [1-2 sentences]
-
-### Goals Market
-- Selection: [Over/Under X.5]
-- Confidence: [1-5]
-- Reasoning: [1-2 sentences]
-
-### BTTS
-- Selection: [Yes/No]
-- Confidence: [1-5]
-- Reasoning: [1-2 sentences]
-
-### Best Bet (Highest Confidence)
-[Your #1 play with full reasoning]
-
-### Longshot/Value Play (Optional)
-[Higher odds play if value exists]
-
-## Risk Factors & What Could Go Wrong
-- [Key uncertainty #1]
-- [Key uncertainty #2]
-- [Late news to monitor]
-
-## Pre-Match Checklist
-- Confirm starting lineups when released
-- Check for late injury news
-- Verify weather hasn't changed
-- Check line movement direction
-"""
-
-
-# -----------------------------------------------------------------------------
-# ANALYSIS PROMPT (The Edge Finder)
-# -----------------------------------------------------------------------------
-
-SOCCER_ANALYSIS_PROMPT = """You are analyzing football matches for betting value.
-
-RESEARCH DATA:
-{research}
-
-MARKET ODDS:
-{market_odds}
-
----
-
-## YOUR TASK: Apply the 5-Lens Framework
-
-For EACH match, analyze through these 5 lenses. They may disagree.
-
-### LENS 1: THE XG ANALYST (Underlying Quality)
-
-| Metric | Home Team | Away Team |
-|--------|-----------|-----------|
-| xG/90 (Season) | [from research] | [from research] |
-| xGA/90 (Season) | [from research] | [from research] |
-| Actual vs xG | [Over/Under]performing by [X] | [Over/Under]performing by [X] |
-| Last 5 xG | [from research] | [from research] |
-
-**Regression Alert:** 
-- Home Team: [Due for positive/negative regression? Why?]
-- Away Team: [Due for positive/negative regression? Why?]
-
-**xG Verdict:** True quality favors [TEAM]. Expected scoreline: [X.X - X.X]
-
-### LENS 2: THE VENUE SPECIALIST (Home/Away Splits)
-
-| Metric | Home Team (HOME) | Away Team (AWAY) |
-|--------|------------------|------------------|
-| Record | [from research] | [from research] |
-| PPG | [from research] | [from research] |
-| Goals/Game | [from research] | [from research] |
-| xG/Game | [from research] | [from research] |
-
-**Venue Edge:** [TEAM] is significantly [better/worse] at this venue.
-**Points Implication:** Venue factor worth approximately [X] goal swing.
-
-### LENS 3: THE SITUATIONALIST (Context & Motivation)
-
-| Factor | Home Team | Away Team |
-|--------|-----------|-----------|
-| League Position | [from research] | [from research] |
-| Playing For | [Title/Europe/Survival/Nothing] | [Title/Europe/Survival/Nothing] |
-| Days Rest | [from research] | [from research] |
-| Midweek Game? | [Yes/No - opponent] | [Yes/No - opponent] |
-| Next Match | [Opponent - rotation risk?] | [Opponent - rotation risk?] |
-
-**Motivation Edge:** [TEAM] needs this more because [reason].
-**Fatigue Factor:** [TEAM] has rest advantage worth ~[X]%.
-**Trap Game Alert:** [Yes/No - explanation]
-
-### LENS 4: THE TACTICIAN (Style Matchup)
-
-**Home Team Style:** [Formation] - [Possession/Counter/Direct] - [High/Low press]
-**Away Team Style:** [Formation] - [Possession/Counter/Direct] - [High/Low press]
-
-**Style Clash Implications:**
-- [How do these styles interact?]
-- [Does this favor goals or a tight game?]
-- [Set piece differential: which team has edge?]
-
-**H2H Pattern:** Last 5 meetings averaged [X.X] goals. [TEAM] won [X], Drew [X].
-
-**Tactical Verdict:** Matchup suggests [OVER/UNDER] and favors [TEAM/DRAW].
-
-### LENS 5: THE SQUAD DOCTOR (Injuries & Lineups)
-
-**Home Team Absences:**
-| Player | Status | Position | Goals/Assists | Impact |
-|--------|--------|----------|---------------|--------|
-| [name] | [OUT/DOUBT] | [POS] | [X/X] | [HIGH/MED/LOW] |
-
-**Away Team Absences:**
-| Player | Status | Position | Goals/Assists | Impact |
-|--------|--------|----------|---------------|--------|
-| [name] | [OUT/DOUBT] | [POS] | [X/X] | [HIGH/MED/LOW] |
-
-**Net Squad Impact:** [TEAM] has healthier XI. Worth approximately [X]% adjustment.
-
----
-
-## PROBABILITY CALCULATION
-
-### Match Result (1X2)
-Based on all lenses, my probability estimates:
-
-| Outcome | My Probability | Market Implied | Edge |
-|---------|----------------|----------------|------|
-| Home Win | [X]% | [X]% | [+/- X]% |
-| Draw | [X]% | [X]% | [+/- X]% |
-| Away Win | [X]% | [X]% | [+/- X]% |
-
-**Value Identified:** [Which outcome has the biggest edge?]
-
-### Goals Markets
-| Market | My Probability | Market Implied | Edge |
-|--------|----------------|----------------|------|
-| Over 2.5 | [X]% | [X]% | [+/- X]% |
-| Under 2.5 | [X]% | [X]% | [+/- X]% |
-| BTTS Yes | [X]% | [X]% | [+/- X]% |
-| BTTS No | [X]% | [X]% | [+/- X]% |
-
-**Projected Scoreline:** [X-X] (Most likely)
-**Goals Value:** [Best edge in goals markets]
-
----
-
-## FINAL RECOMMENDATIONS
-
-### PRIMARY BET (Best Value)
-- **Market:** [1X2 / Asian Handicap / Over-Under / BTTS]
-- **Selection:** [Specific pick]
-- **Odds:** [Current odds]
-- **My Probability:** [X]%
-- **Market Probability:** [X]%
-- **Edge:** [X]%
-- **Confidence:** [1-10]
-- **Primary Driver:** [Which lens?]
-
-### SECONDARY BET (If Applicable)
-- **Market:** [Type]
-- **Selection:** [Pick]
-- **Edge:** [X]%
-- **Confidence:** [1-10]
-
-### PASS RECOMMENDATION
-If edge < 5% on all markets: **PASS - No value identified**
-
-### KILL SWITCH
-- [What would make you pull this bet?]
-- [Late news to monitor]
-
----
-
-**CRITICAL RULES:**
-1. Probabilities for 1X2 must sum to 100%
-2. You MUST cite specific numbers from research
-3. Do NOT invent statistics
-4. If edge < 5% on goals markets or < 7% on 1X2, recommend PASS
-5. Always consider the DRAW - it's where value often hides
-"""
-
-
-# -----------------------------------------------------------------------------
-# REVIEW PROMPT (The Auditor)  
-# -----------------------------------------------------------------------------
-
-SOCCER_REVIEW_PROMPT = """You are auditing the football betting analysis.
-
-ORIGINAL RESEARCH DATA:
-{research}
-
-MARKET ODDS:
-{market_odds}
-
-ANALYSES TO AUDIT:
-{analyses}
-
----
-
-## YOUR TASK: Systematic Audit
-
-### AUDIT SECTION 1: Data Verification
-
-| Stat Cited | In Research? | Accurate? | Notes |
-|------------|--------------|-----------|-------|
-| xG figures | [YES/NO] | [YES/NO] | |
-| Home/Away splits | [YES/NO] | [YES/NO] | |
-| Injury list | [YES/NO] | [YES/NO] | |
-| H2H results | [YES/NO] | [YES/NO] | |
-| League position | [YES/NO] | [YES/NO] | |
-
-**Data Integrity Score:** [X/10]
-**Hallucinations Found:** [List any invented stats]
-
-### AUDIT SECTION 2: Probability Check
-
-**Do the 1X2 probabilities sum to 100%?** [YES/NO]
-**Are probability estimates reasonable given the data?** [YES/NO]
-
-| Analyst Estimate | Sanity Check |
-|------------------|--------------|
-| Home Win: [X]% | [Reasonable / Too High / Too Low] - Because: |
-| Draw: [X]% | [Reasonable / Too High / Too Low] - Because: |
-| Away Win: [X]% | [Reasonable / Too High / Too Low] - Because: |
-
-**Probability Score:** [X/10]
-
-### AUDIT SECTION 3: Logic Check
-
-| Check | Pass/Fail | Issue |
-|-------|-----------|-------|
-| xG interpretation correct? | | |
-| Venue splits properly weighted? | | |
-| Fixture congestion considered? | | |
-| Correlation errors? (e.g., Home Win + Under 1.5) | | |
-| Draw properly considered? | | |
-
-**Logic Score:** [X/10]
-
-### AUDIT SECTION 4: Completeness
-
-| Research Section | Used? | Impact if Ignored |
-|------------------|-------|-------------------|
-| xG Metrics | [YES/NO] | [HIGH/MED/LOW] |
-| Home/Away Form | [YES/NO] | [HIGH/MED/LOW] |
-| Injuries | [YES/NO] | [HIGH/MED/LOW] |
-| Fixture Congestion | [YES/NO] | [HIGH/MED/LOW] |
-| H2H History | [YES/NO] | [HIGH/MED/LOW] |
-| Tactical Matchup | [YES/NO] | [HIGH/MED/LOW] |
-
-**Completeness Score:** [X/10]
-
----
-
-## AUDIT VERDICT
-
-**Overall Grade:** [A/B/C/D/F]
-**Composite Score:** [X/40]
-
-**Status:**
-- [ ] APPROVED
-- [ ] APPROVED WITH CORRECTIONS
-- [ ] REJECTED
-
-**Required Corrections:**
-1. [Specific fix]
-2. [Specific fix]
-
----
-
-## CONSENSUS CHECK
-
-**1X2 Market:**
-- Analysts agree on: [Home/Draw/Away/No consensus]
-- Confidence spread: [Range]
-
-**Goals Market:**
-- Analysts agree on: [Over/Under/BTTS Yes/No/No consensus]
-
-**Red Flags for Chairman:**
-- [Critical concerns]
-"""
-
-
-# -----------------------------------------------------------------------------
-# SYNTHESIS PROMPT (The Decision Maker)
-# -----------------------------------------------------------------------------
-
-SOCCER_SYNTHESIS_PROMPT = """You are the Chairman. Time to make final decisions.
-
-RESEARCH DATA:
-{research}
-
-MARKET ODDS:
-{market_odds}
-
-ANALYST REPORTS:
-{analyses}
-
-AUDIT RESULTS:
-{reviews}
-
----
-
-## STEP 1: Validate Foundation
-
-| Check | Status |
-|-------|--------|
-| Research data current? | [YES/CONCERN] |
-| Analyst passed audit? | [YES/NO] |
-| 1X2 probabilities valid? | [YES/NO] |
-
----
-
-## STEP 2: Synthesize Views
-
-**MATCH: [Home Team] vs [Away Team]**
-
-| Analyst | 1X2 Pick | Goals Pick | Edge Claimed | Audit Grade |
-|---------|----------|------------|--------------|-------------|
-| A | | | | |
-| B | | | | |
-
-**Consensus:**
-- 1X2: [UNANIMOUS / MAJORITY / SPLIT]
-- Goals: [UNANIMOUS / MAJORITY / SPLIT]
-
----
-
-## FINAL BETTING CARD
-
-### BET 1: [HIGHEST CONFIDENCE]
-
-| Field | Value |
-|-------|-------|
-| **Match** | [Home Team] vs [Away Team] |
-| **Market** | [1X2 / Asian Handicap / O/U / BTTS] |
-| **Selection** | [Specific pick] |
-| **Odds** | [Current] |
-| **Your Probability** | [X]% |
-| **Market Implied** | [X]% |
-| **Edge** | [X]% |
-| **Confidence** | [HIGH/MEDIUM/LOW] |
-| **Size** | [0.5u / 1u / 1.5u] |
-
-**The Alpha:**
-> [Why we beat the market - one sentence]
-
-**The Risk:**
-> [What kills this bet - one sentence]
-
-**Pre-Match Check:**
-> [Lineups, late injuries, weather]
-
----
-
-### BET 2: [IF APPLICABLE]
-[Same format]
-
----
-
-### BET 3: [IF APPLICABLE]
-[Same format]
-
----
-
-### PASS LIST
-
-| Match | Reason |
-|-------|--------|
-| [Match] | [No edge / Too uncertain / Market efficient] |
-
----
-
-## PORTFOLIO SUMMARY
-
-| Bet | Selection | Market | Edge | Size |
-|-----|-----------|--------|------|------|
-| 1 | | | | |
-| 2 | | | | |
-| 3 | | | | |
-
-**Total Exposure:** [X units]
-
-**Today's Strategy:**
-> [Overall approach - fading favorites? Playing draws? Backing unders?]
-
----
-
-## CHAIRMAN'S RULES APPLIED
-
-- [x] Minimum 7% edge for 1X2, 5% for goals
-- [x] Maximum 3 bets
-- [x] Draw always considered
-- [x] Fixture congestion weighted
-- [x] Every bet has kill switch
-
-**Sign-off:** Ready for execution pending lineup confirmation.
-"""
+# Synthesis Prompt
+SOCCER_SYNTHESIS_PROMPT = """do nothing"""
 
 
 # =============================================================================
