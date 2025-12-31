@@ -108,6 +108,7 @@ def generate_markdown_report(
     sport: str,
     markets_text: str,
     selected_markets: list,
+    research_only: bool = False,
 ) -> str:
     """Generate a markdown report from the analysis result."""
     sport_emoji = "🏀" if sport == "basketball" else "⚽"
@@ -119,23 +120,33 @@ def generate_markdown_report(
     md.append("")
     md.append(f"**Sport:** {sport.title()}")
     md.append(f"**Generated:** {timestamp}")
-    md.append(f"**Markets Analyzed:** {len(selected_markets)}")
+    md.append(f"**Markets:** {len(selected_markets)}")
+    if research_only:
+        md.append("**Mode:** Research Only")
     md.append("")
     
-    md.append("## Table of Contents")
-    md.append("- [Final Recommendation](#final-recommendation)")
-    md.append("- [Research Findings](#research-findings)")
-    md.append("- [Individual Analyses](#individual-analyses)")
-    md.append("- [Peer Reviews](#peer-reviews)")
-    md.append("- [Market Data](#market-data)")
-    md.append("")
+    if research_only:
+        # Simplified TOC for research-only
+        md.append("## Table of Contents")
+        md.append("- [Research Findings](#research-findings)")
+        md.append("- [Market Data](#market-data)")
+        md.append("")
+    else:
+        md.append("## Table of Contents")
+        md.append("- [Final Recommendation](#final-recommendation)")
+        md.append("- [Research Findings](#research-findings)")
+        md.append("- [Individual Analyses](#individual-analyses)")
+        md.append("- [Peer Reviews](#peer-reviews)")
+        md.append("- [Market Data](#market-data)")
+        md.append("")
     
-    md.append("---")
-    md.append("")
-    md.append("## Final Recommendation")
-    md.append("")
-    md.append(result.final_recommendation)
-    md.append("")
+    if not research_only:
+        md.append("---")
+        md.append("")
+        md.append("## Final Recommendation")
+        md.append("")
+        md.append(result.final_recommendation)
+        md.append("")
     
     md.append("---")
     md.append("")
@@ -146,29 +157,30 @@ def generate_markdown_report(
     md.append(result.research)
     md.append("")
     
-    md.append("---")
-    md.append("")
-    md.append("## Individual Analyses")
-    md.append("")
-    
-    for model, analysis in result.analyses.items():
-        model_display = model.split("/")[-1] if "/" in model else model
-        md.append(f"### {model_display}")
+    if not research_only:
+        md.append("---")
         md.append("")
-        md.append(analysis)
+        md.append("## Individual Analyses")
         md.append("")
-    
-    md.append("---")
-    md.append("")
-    md.append("## Peer Reviews")
-    md.append("")
-    
-    for model, review in result.reviews.items():
-        model_display = model.split("/")[-1] if "/" in model else model
-        md.append(f"### Review by {model_display}")
+        
+        for model, analysis in result.analyses.items():
+            model_display = model.split("/")[-1] if "/" in model else model
+            md.append(f"### {model_display}")
+            md.append("")
+            md.append(analysis)
+            md.append("")
+        
+        md.append("---")
         md.append("")
-        md.append(review)
+        md.append("## Peer Reviews")
         md.append("")
+        
+        for model, review in result.reviews.items():
+            model_display = model.split("/")[-1] if "/" in model else model
+            md.append(f"### Review by {model_display}")
+            md.append("")
+            md.append(review)
+            md.append("")
     
     md.append("---")
     md.append("")
@@ -184,10 +196,13 @@ def generate_markdown_report(
     md.append("## Metadata")
     md.append("")
     md.append(f"- **Research Model:** {result.metadata.get('research_model', 'N/A')}")
-    md.append(f"- **Council Models:** {', '.join(result.metadata.get('council_models', []))}")
-    md.append(f"- **Chairman Model:** {result.metadata.get('chairman_model', 'N/A')}")
+    if not research_only:
+        council_models = result.metadata.get('council_models', [])
+        md.append(f"- **Council Models:** {', '.join(council_models) if council_models else 'N/A'}")
+        md.append(f"- **Chairman Model:** {result.metadata.get('chairman_model', 'N/A')}")
     md.append(f"- **Sport:** {result.metadata.get('sport', sport)}")
     md.append(f"- **Prompt Version:** {result.metadata.get('prompt_version', 'v1').upper()}")
+    md.append(f"- **Mode:** {'Research Only' if research_only else 'Full Analysis'}")
     md.append("")
     
     return "\n".join(md)
@@ -349,6 +364,40 @@ async def run_analysis_async(
         )
 
 
+async def run_research_async(
+    settings,
+    sport: str,
+    markets_text: str,
+    prompt_version: str,
+    home_team: Optional[str],
+    away_team: Optional[str],
+    match_date_str: str,
+    competition: Optional[str] = None,
+):
+    """Run research-only asynchronously (Stage 0 only, no analysis/review/synthesis)."""
+    from src.llm_council import run_basketball_research, run_soccer_research
+    
+    if sport == "basketball":
+        return await run_basketball_research(
+            settings=settings,
+            markets_text=markets_text,
+            prompt_version=prompt_version,
+            home_team=home_team,
+            away_team=away_team,
+            game_date=match_date_str,
+        )
+    else:
+        return await run_soccer_research(
+            settings=settings,
+            markets_text=markets_text,
+            prompt_version=prompt_version,
+            home_team=home_team,
+            away_team=away_team,
+            competition=competition,
+            match_date=match_date_str,
+        )
+
+
 def main():
     # Header
     st.title("🎯 Kalshi Sports Research")
@@ -363,10 +412,8 @@ def main():
         st.info("Make sure environment variables are set: OPENROUTER_API_KEY, GOOGLE_API_KEY, KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PEM")
         return
     
-    # Validate required settings
+    # Validate required settings (OPENROUTER_API_KEY optional - only needed for full analysis)
     missing = []
-    if not settings.openrouter_api_key:
-        missing.append("OPENROUTER_API_KEY")
     if not settings.google_api_key:
         missing.append("GOOGLE_API_KEY")
     if not settings.kalshi_api_key_id:
@@ -375,6 +422,9 @@ def main():
     if missing:
         st.error(f"Missing required environment variables: {', '.join(missing)}")
         return
+    
+    # Track if analysis mode is available (requires OPENROUTER_API_KEY)
+    analysis_available = bool(settings.openrouter_api_key)
     
     # Sidebar for configuration
     with st.sidebar:
@@ -553,8 +603,24 @@ def main():
         
         st.markdown("---")
         
-        # Run analysis button
-        if st.button("🎯 Run Analysis", type="primary", use_container_width=True):
+        # Research-only toggle
+        # Default to ON if OPENROUTER_API_KEY is missing (analysis unavailable)
+        research_only_default = not analysis_available
+        research_only = st.toggle(
+            "🔍 Research only",
+            value=research_only_default,
+            disabled=not analysis_available,  # Force on if no OpenRouter key
+            help="Run only Stage 0 research (Gemini + Google Search). Skip LLM Council analysis/review/synthesis." if analysis_available else "Analysis unavailable: OPENROUTER_API_KEY not set. Research-only mode is enabled.",
+        )
+        
+        if not analysis_available:
+            st.caption("⚠️ Full analysis requires `OPENROUTER_API_KEY`")
+        
+        # Dynamic button label
+        button_label = "🔍 Run Research" if research_only else "🎯 Run Analysis"
+        
+        # Run button
+        if st.button(button_label, type="primary", use_container_width=True):
             from src.kalshi_api import format_markets_for_analysis, format_basketball_markets_for_analysis
             
             # Format markets
@@ -563,28 +629,57 @@ def main():
             else:
                 markets_text = format_markets_for_analysis(selected_markets)
             
-            # Run analysis with status updates
-            with st.status("🔬 Running LLM Council Analysis...", expanded=True) as status:
+            # Determine mode and status label
+            if research_only:
+                status_label = "🔍 Running Research..."
+                complete_label = "✅ Research Complete!"
+            else:
+                status_label = "🔬 Running LLM Council Analysis..."
+                complete_label = "✅ Analysis Complete!"
+            
+            # Run with status updates
+            with st.status(status_label, expanded=True) as status:
                 try:
-                    if prompt_version == "v2":
-                        st.write("📊 Stage 0: Multi-stage research (5 stages)...")
+                    if research_only:
+                        # Research-only mode
+                        if prompt_version == "v2":
+                            st.write("📊 Multi-stage research (5 stages)...")
+                        else:
+                            st.write("🔍 Single-stage research with Gemini...")
+                        
+                        result = asyncio.run(run_research_async(
+                            settings=settings,
+                            sport=sport,
+                            markets_text=markets_text,
+                            prompt_version=prompt_version,
+                            home_team=home_team,
+                            away_team=away_team,
+                            match_date_str=match_date_str,
+                            competition=competition,
+                        ))
+                        
+                        st.write("✅ Research complete!")
                     else:
-                        st.write("🔍 Stage 1: Research with Gemini...")
+                        # Full analysis mode
+                        if prompt_version == "v2":
+                            st.write("📊 Stage 0: Multi-stage research (5 stages)...")
+                        else:
+                            st.write("🔍 Stage 1: Research with Gemini...")
+                        
+                        result = asyncio.run(run_analysis_async(
+                            settings=settings,
+                            sport=sport,
+                            markets_text=markets_text,
+                            prompt_version=prompt_version,
+                            home_team=home_team,
+                            away_team=away_team,
+                            match_date_str=match_date_str,
+                            competition=competition,
+                        ))
+                        
+                        st.write("✅ Analysis complete!")
                     
-                    # Run async analysis
-                    result = asyncio.run(run_analysis_async(
-                        settings=settings,
-                        sport=sport,
-                        markets_text=markets_text,
-                        prompt_version=prompt_version,
-                        home_team=home_team,
-                        away_team=away_team,
-                        match_date_str=match_date_str,
-                        competition=competition,
-                    ))
-                    
-                    st.write("✅ Analysis complete!")
-                    status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
+                    status.update(label=complete_label, state="complete", expanded=False)
                     
                     # Store result in session state
                     st.session_state.result = result
@@ -592,10 +687,12 @@ def main():
                     st.session_state.sport = sport
                     st.session_state.markets_text = markets_text
                     st.session_state.selected_markets = selected_markets
+                    st.session_state.result_mode = "research_only" if research_only else "full"
                     
                 except Exception as e:
-                    status.update(label="❌ Analysis Failed", state="error")
-                    st.error(f"Error during analysis: {e}")
+                    fail_label = "❌ Research Failed" if research_only else "❌ Analysis Failed"
+                    status.update(label=fail_label, state="error")
+                    st.error(f"Error during {'research' if research_only else 'analysis'}: {e}")
                     import traceback
                     st.code(traceback.format_exc())
                     return
@@ -603,70 +700,117 @@ def main():
     # Results section
     if hasattr(st.session_state, 'result') and st.session_state.result:
         st.markdown("---")
-        st.header("📊 Analysis Results")
         
         result = st.session_state.result
+        is_research_only = getattr(st.session_state, 'result_mode', 'full') == 'research_only'
         
-        # Tabs for different sections
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "🎯 Recommendation",
-            "🔍 Research",
-            "🧠 Analyses",
-            "👥 Reviews",
-            "📥 Download"
-        ])
-        
-        with tab1:
-            st.markdown("## Final Recommendation")
-            st.markdown(result.final_recommendation)
-        
-        with tab2:
-            st.markdown("## Research Findings")
-            st.markdown("*Data gathered via Gemini with Google Search grounding*")
-            st.markdown(result.research)
-        
-        with tab3:
-            st.markdown("## Individual Analyses")
-            for model, analysis in result.analyses.items():
-                model_display = model.split("/")[-1] if "/" in model else model
-                with st.expander(f"📝 {model_display}", expanded=False):
-                    st.markdown(analysis)
-        
-        with tab4:
-            st.markdown("## Peer Reviews")
-            for model, review in result.reviews.items():
-                model_display = model.split("/")[-1] if "/" in model else model
-                with st.expander(f"👁️ Review by {model_display}", expanded=False):
-                    st.markdown(review)
-        
-        with tab5:
-            st.markdown("## Download Report")
+        if is_research_only:
+            st.header("📊 Research Results")
             
-            # Generate markdown
-            markdown_content = generate_markdown_report(
-                result=result,
-                match_title=st.session_state.match_title,
-                sport=st.session_state.sport,
-                markets_text=st.session_state.markets_text,
-                selected_markets=st.session_state.selected_markets,
-            )
+            # Simplified tabs for research-only mode
+            tab1, tab2 = st.tabs([
+                "🔍 Research",
+                "📥 Download"
+            ])
             
-            # Generate filename
-            date_str = datetime.now().strftime("%Y%m%d")
-            safe_title = sanitize_filename(st.session_state.match_title)
-            filename = f"{safe_title}_{prompt_version}_{date_str}.md"
+            with tab1:
+                st.markdown("## Research Findings")
+                st.markdown("*Data gathered via Gemini with Google Search grounding*")
+                st.markdown(result.research)
             
-            st.download_button(
-                label="📥 Download Markdown Report",
-                data=markdown_content,
-                file_name=filename,
-                mime="text/markdown",
-                use_container_width=True,
-            )
+            with tab2:
+                st.markdown("## Download Report")
+                
+                # Generate markdown (research-only)
+                markdown_content = generate_markdown_report(
+                    result=result,
+                    match_title=st.session_state.match_title,
+                    sport=st.session_state.sport,
+                    markets_text=st.session_state.markets_text,
+                    selected_markets=st.session_state.selected_markets,
+                    research_only=True,
+                )
+                
+                # Generate filename
+                date_str = datetime.now().strftime("%Y%m%d")
+                safe_title = sanitize_filename(st.session_state.match_title)
+                filename = f"{safe_title}_research_{prompt_version}_{date_str}.md"
+                
+                st.download_button(
+                    label="📥 Download Research Report",
+                    data=markdown_content,
+                    file_name=filename,
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+                
+                # Preview
+                with st.expander("📄 Preview Report", expanded=False):
+                    st.code(markdown_content[:3000] + "..." if len(markdown_content) > 3000 else markdown_content)
+        else:
+            st.header("📊 Analysis Results")
             
-            # Preview
-            with st.expander("📄 Preview Report", expanded=False):
-                st.code(markdown_content[:3000] + "..." if len(markdown_content) > 3000 else markdown_content)
+            # Full tabs for analysis mode
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "🎯 Recommendation",
+                "🔍 Research",
+                "🧠 Analyses",
+                "👥 Reviews",
+                "📥 Download"
+            ])
+            
+            with tab1:
+                st.markdown("## Final Recommendation")
+                st.markdown(result.final_recommendation)
+            
+            with tab2:
+                st.markdown("## Research Findings")
+                st.markdown("*Data gathered via Gemini with Google Search grounding*")
+                st.markdown(result.research)
+            
+            with tab3:
+                st.markdown("## Individual Analyses")
+                for model, analysis in result.analyses.items():
+                    model_display = model.split("/")[-1] if "/" in model else model
+                    with st.expander(f"📝 {model_display}", expanded=False):
+                        st.markdown(analysis)
+            
+            with tab4:
+                st.markdown("## Peer Reviews")
+                for model, review in result.reviews.items():
+                    model_display = model.split("/")[-1] if "/" in model else model
+                    with st.expander(f"👁️ Review by {model_display}", expanded=False):
+                        st.markdown(review)
+            
+            with tab5:
+                st.markdown("## Download Report")
+                
+                # Generate markdown (full analysis)
+                markdown_content = generate_markdown_report(
+                    result=result,
+                    match_title=st.session_state.match_title,
+                    sport=st.session_state.sport,
+                    markets_text=st.session_state.markets_text,
+                    selected_markets=st.session_state.selected_markets,
+                    research_only=False,
+                )
+                
+                # Generate filename
+                date_str = datetime.now().strftime("%Y%m%d")
+                safe_title = sanitize_filename(st.session_state.match_title)
+                filename = f"{safe_title}_{prompt_version}_{date_str}.md"
+                
+                st.download_button(
+                    label="📥 Download Markdown Report",
+                    data=markdown_content,
+                    file_name=filename,
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+                
+                # Preview
+                with st.expander("📄 Preview Report", expanded=False):
+                    st.code(markdown_content[:3000] + "..." if len(markdown_content) > 3000 else markdown_content)
 
 
 if __name__ == "__main__":
