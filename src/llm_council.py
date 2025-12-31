@@ -1097,3 +1097,173 @@ Focus on:
     finally:
         await council.close()
 
+
+async def run_soccer_research(
+    settings: Settings,
+    markets_text: str,
+    prompt_version: str = "v1",
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+    competition: Optional[str] = None,
+    match_date: Optional[str] = None,
+) -> CouncilResult:
+    """
+    Run soccer research only (Stage 0), skipping analysis/review/synthesis.
+    
+    Args:
+        settings: Application settings with API keys
+        markets_text: Formatted market data for context
+        prompt_version: Prompt version to use ("v1", "v2", or "v3", default "v1")
+        home_team: Home team name (required for v2 multi-stage research)
+        away_team: Away team name (required for v2 multi-stage research)
+        competition: Competition/league name (required for v2 multi-stage research)
+        match_date: Match date string (required for v2 multi-stage research)
+        
+    Returns:
+        CouncilResult with research only (no analyses/reviews/recommendation)
+    """
+    if not settings.google_api_key:
+        raise ValueError("GOOGLE_API_KEY is required for research (Gemini grounding)")
+    
+    council = LLMCouncil(
+        openrouter_api_key=settings.openrouter_api_key or "",  # Not required for research-only
+        google_api_key=settings.google_api_key,
+        sport="soccer",
+        prompt_version=prompt_version,
+    )
+    
+    try:
+        # V2 uses multi-stage research if match info is provided
+        if prompt_version == "v2" and home_team and away_team and competition and match_date:
+            logger.info(f"Using multi-stage research for {home_team} vs {away_team} (research-only)")
+            
+            research = await council.stage_0_research_multistage_soccer(
+                home_team=home_team,
+                away_team=away_team,
+                competition=competition,
+                match_date=match_date,
+            )
+        else:
+            # V1, V3, or V2 without match info: use single-call research
+            matches_for_research = f"""
+Based on these Kalshi soccer markets, research the following matches:
+
+{markets_text}
+
+Focus on:
+- La Liga matches
+- Premier League matches
+"""
+            research = await council.stage_0_research(matches_for_research)
+        
+        logger.info("Soccer research-only complete")
+        
+        return CouncilResult(
+            research=research,
+            analyses={},
+            reviews={},
+            final_recommendation="(Research-only mode: no recommendation generated)",
+            metadata={
+                "sport": "soccer",
+                "prompt_version": prompt_version,
+                "research_model": RESEARCH_MODEL,
+                "council_models": [],
+                "chairman_model": None,
+                "mode": "research_only",
+                "home_team": home_team,
+                "away_team": away_team,
+                "competition": competition,
+                "match_date": match_date,
+            },
+        )
+        
+    finally:
+        await council.close()
+
+
+async def run_basketball_research(
+    settings: Settings,
+    markets_text: str,
+    prompt_version: str = "v1",
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+    game_date: Optional[str] = None,
+    include_props: bool = True,
+    players: Optional[List[str]] = None,
+) -> CouncilResult:
+    """
+    Run NBA basketball research only (Stage 0), skipping analysis/review/synthesis.
+    
+    Args:
+        settings: Application settings with API keys
+        markets_text: Formatted market data for context
+        prompt_version: Prompt version to use ("v1" or "v2", default "v1")
+        home_team: Home team name (required for v2 multi-stage research)
+        away_team: Away team name (required for v2 multi-stage research)
+        game_date: Game date string (required for v2 multi-stage research)
+        include_props: Whether to include player props research (v2 only)
+        players: List of player names for props research (v2 only)
+        
+    Returns:
+        CouncilResult with research only (no analyses/reviews/recommendation)
+    """
+    if not settings.google_api_key:
+        raise ValueError("GOOGLE_API_KEY is required for research (Gemini grounding)")
+    
+    council = LLMCouncil(
+        openrouter_api_key=settings.openrouter_api_key or "",  # Not required for research-only
+        google_api_key=settings.google_api_key,
+        sport="basketball",
+        prompt_version=prompt_version,
+    )
+    
+    try:
+        # V2 uses multi-stage research if team info is provided
+        if prompt_version == "v2" and home_team and away_team and game_date:
+            logger.info(f"Using multi-stage research for {home_team} vs {away_team} (research-only)")
+            
+            research = await council.stage_0_research_multistage(
+                home_team=home_team,
+                away_team=away_team,
+                game_date=game_date,
+                include_props=include_props,
+                players=players,
+            )
+        else:
+            # V1 or V2 without team info: use single-call research
+            matches_for_research = f"""
+Based on these Kalshi NBA basketball markets, research the following games:
+
+{markets_text}
+
+Focus on:
+- NBA regular season games
+- Injury reports (CRITICAL for NBA)
+- Back-to-back scheduling
+- Recent team performance
+"""
+            research = await council.stage_0_research(matches_for_research)
+        
+        logger.info("Basketball research-only complete")
+        
+        return CouncilResult(
+            research=research,
+            analyses={},
+            reviews={},
+            final_recommendation="(Research-only mode: no recommendation generated)",
+            metadata={
+                "sport": "basketball",
+                "prompt_version": prompt_version,
+                "research_model": RESEARCH_MODEL,
+                "council_models": [],
+                "chairman_model": None,
+                "mode": "research_only",
+                "home_team": home_team,
+                "away_team": away_team,
+                "game_date": game_date,
+            },
+        )
+        
+    finally:
+        await council.close()
+
