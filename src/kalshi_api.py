@@ -1148,6 +1148,150 @@ def format_basketball_markets_for_kalshi_trading(markets: List[Dict[str, Any]]) 
 
 
 # =============================================================================
+# TOTALS FILTERING FOR DEEP RESEARCH
+# =============================================================================
+
+def select_total_extremes(markets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filter markets to TOTAL type only and keep only extreme strikes (min + max).
+    
+    For NBA combo research, we only want the lowest and highest strike totals
+    for each game to focus on the "far left" and "far right" of the spread.
+    
+    Args:
+        markets: List of market dictionaries for a single game
+        
+    Returns:
+        List containing at most 2 markets: the lowest and highest strike totals
+    """
+    # Filter to totals only
+    totals = [m for m in markets if m.get("market_type") == "total"]
+    
+    if not totals:
+        return []
+    
+    # Parse strikes and pair with markets
+    markets_with_strikes = []
+    for market in totals:
+        ticker = market.get("ticker", "")
+        strike = _parse_strike_from_ticker(ticker)
+        if strike is not None:
+            markets_with_strikes.append((strike, market))
+    
+    # If no strikes could be parsed, fall back to returning first 1-2 totals
+    if not markets_with_strikes:
+        return totals[:2]
+    
+    # Sort by strike
+    markets_with_strikes.sort(key=lambda x: x[0])
+    
+    # Get min and max strike markets
+    result = []
+    
+    # Min strike (lowest total line)
+    result.append(markets_with_strikes[0][1])
+    
+    # Max strike (highest total line) - only add if different from min
+    if len(markets_with_strikes) > 1:
+        max_market = markets_with_strikes[-1][1]
+        if max_market["ticker"] != result[0]["ticker"]:
+            result.append(max_market)
+    
+    return result
+
+
+def format_totals_for_deep_research(
+    markets: List[Dict[str, Any]],
+    games_metadata: List[Dict[str, Any]],
+) -> str:
+    """
+    Format filtered TOTAL markets for Gemini Deep Research prompt.
+    
+    Provides a clean, structured view of the extreme strike totals
+    for each selected game in the combo.
+    
+    Args:
+        markets: List of filtered total market dictionaries (extreme strikes only)
+        games_metadata: List of game metadata dicts with title, date, teams, filtered_markets
+        
+    Returns:
+        Formatted string for Deep Research input
+    """
+    output = []
+    output.append("=" * 70)
+    output.append("KALSHI NBA TOTALS - EXTREME STRIKES ONLY")
+    output.append("=" * 70)
+    output.append("")
+    output.append("MARKET GUIDE:")
+    output.append("  • These are TOTAL (Over/Under) markets only")
+    output.append("  • Showing lowest and highest strike for each game")
+    output.append("  • YES = Over the strike | NO = Under the strike")
+    output.append("  • Prices in cents (e.g., 45¢ = 45% implied probability)")
+    output.append("")
+    
+    for game in games_metadata:
+        title = game.get("title", "Unknown")
+        date = game.get("date")
+        date_str = date.strftime("%B %d, %Y") if date else "TBD"
+        away_team = game.get("away_team", "Away")
+        home_team = game.get("home_team", "Home")
+        filtered_markets = game.get("filtered_markets", [])
+        
+        output.append(f"\n{'='*70}")
+        output.append(f"🏀 {title}")
+        output.append(f"   Date: {date_str}")
+        output.append(f"   {away_team} @ {home_team}")
+        output.append("-" * 70)
+        
+        if not filtered_markets:
+            output.append("  No total markets available for this game")
+            continue
+        
+        for market in filtered_markets:
+            ticker = market.get("ticker", "N/A")
+            strike = _parse_strike_from_ticker(ticker)
+            yes_bid = market.get("yes_bid")
+            yes_ask = market.get("yes_ask")
+            yes_sub = market.get("yes_sub_title", "Over")
+            no_sub = market.get("no_sub_title", "Under")
+            volume = market.get("volume", 0) or 0
+            
+            output.append(f"\n  Ticker: {ticker}")
+            if strike is not None:
+                output.append(f"  Strike: {strike} total points")
+            
+            # YES side (Over)
+            if yes_bid is not None and yes_ask is not None:
+                yes_mid = (yes_bid + yes_ask) / 2
+                output.append(f"  OVER {strike if strike else 'N/A'}:")
+                output.append(f"    Bid: {yes_bid}¢ | Ask: {yes_ask}¢ | Mid: {yes_mid:.0f}¢")
+            elif yes_bid is not None:
+                output.append(f"  OVER: Bid {yes_bid}¢")
+            elif yes_ask is not None:
+                output.append(f"  OVER: Ask {yes_ask}¢")
+            else:
+                last_price = market.get("last_price")
+                if last_price is not None:
+                    output.append(f"  OVER: Last price {last_price}¢")
+            
+            # UNDER (implied from YES)
+            if yes_bid is not None and yes_ask is not None:
+                under_mid = 100 - yes_mid
+                output.append(f"  UNDER {strike if strike else 'N/A'}:")
+                output.append(f"    Implied mid: {under_mid:.0f}¢")
+            
+            output.append(f"  Volume: {volume} contracts")
+        
+        output.append("")
+    
+    output.append("=" * 70)
+    output.append("END OF TOTALS BOARD")
+    output.append("=" * 70)
+    
+    return "\n".join(output)
+
+
+# =============================================================================
 # SHARED UTILITY FUNCTIONS
 # =============================================================================
 

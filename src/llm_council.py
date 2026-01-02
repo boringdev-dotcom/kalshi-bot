@@ -1267,3 +1267,324 @@ Focus on:
     finally:
         await council.close()
 
+
+# =============================================================================
+# GEMINI DEEP RESEARCH AGENT (Interactions API)
+# =============================================================================
+
+DEEP_RESEARCH_AGENT = "deep-research-pro-preview-12-2025"
+DEEP_RESEARCH_POLL_INTERVAL = 10  # seconds
+DEEP_RESEARCH_MAX_WAIT = 60 * 20  # 20 minutes max
+
+
+def _build_deep_research_analysis_prompt(
+    compiled_research: str,
+    markets_text: str,
+    games_metadata: List[Dict[str, Any]],
+) -> str:
+    """
+    Build the prompt for Deep Research to analyze pre-gathered research data.
+    
+    This is the SECOND stage - Deep Research analyzes the research we already
+    gathered (via Gemini grounding) and produces combo recommendations.
+    
+    Args:
+        compiled_research: All research data gathered from multi-stage research
+        markets_text: Formatted totals market data (extreme strikes only)
+        games_metadata: List of game metadata dicts with title, date, teams
+        
+    Returns:
+        Complete prompt for Deep Research analysis
+    """
+    # Build games list
+    games_list = []
+    for game in games_metadata:
+        title = game.get("title", "Unknown")
+        date = game.get("date")
+        date_str = date.strftime("%B %d, %Y") if date else "TBD"
+        away_team = game.get("away_team", "Away")
+        home_team = game.get("home_team", "Home")
+        games_list.append(f"- {title} ({date_str}): {away_team} @ {home_team}")
+    
+    games_section = "\n".join(games_list)
+    
+    prompt = f"""You are an expert NBA sports betting analyst. I have already gathered detailed research data for the following NBA games. Your job is to ANALYZE this research and provide COMBO betting recommendations focused on TOTAL (over/under) markets.
+
+## GAMES IN THIS COMBO
+
+{games_section}
+
+## KALSHI TOTAL MARKETS (Extreme Strikes Only)
+
+{markets_text}
+
+## PRE-GATHERED RESEARCH DATA
+
+The following research has been gathered via web search. Analyze this data to make your recommendations:
+
+{compiled_research}
+
+## YOUR ANALYSIS TASK
+
+Based on the research data above, analyze each game and provide:
+
+### Executive Summary
+Brief overview of the combo opportunity and overall recommendation.
+
+### Game-by-Game Total Analysis
+For each game, synthesize the research to determine:
+- **Projected Total Range**: Your estimate based on pace, efficiency, injuries
+- **Key Factors**: The 2-3 most important factors affecting this total
+- **Market Assessment**: Is the extreme strike (low or high) offering value?
+- **Recommendation**: OVER or UNDER on which strike, and why
+- **Confidence**: High/Medium/Low with reasoning
+
+### Combo Betting Strategy
+- Which games have the strongest edge on totals?
+- Recommended combo structure (which contracts to combine)
+- Correlation analysis (are the games independent or correlated?)
+- Risk factors that could blow up the combo
+
+### Actionable Betting Recommendations
+
+**PRIMARY COMBO:**
+- Game 1: [Ticker] - [OVER/UNDER] @ [price]
+- Game 2: [Ticker] - [OVER/UNDER] @ [price]
+- etc.
+- Combined implied probability
+- Recommended stake
+
+**ALTERNATIVE PLAYS:**
+- Single-game plays if combo is too risky
+- Hedge suggestions
+
+### Risk Assessment
+- What could go wrong?
+- Key injuries/news to monitor before tip-off
+- When to pass on this combo
+
+Be specific with contract tickers and prices from the market data. Make decisive recommendations."""
+
+    return prompt
+
+
+def _run_deep_research_sync(
+    google_api_key: str,
+    prompt: str,
+) -> str:
+    """
+    Synchronous function to run Gemini Deep Research Agent.
+    
+    Uses the Interactions API with background execution and polling.
+    
+    Args:
+        google_api_key: Google API key
+        prompt: The research prompt
+        
+    Returns:
+        Final research output text
+    """
+    import time
+    
+    client = genai.Client(api_key=google_api_key)
+    
+    logger.info("Starting Gemini Deep Research Agent...")
+    
+    # Create the interaction (background execution)
+    interaction = client.interactions.create(
+        input=prompt,
+        agent=DEEP_RESEARCH_AGENT,
+        background=True,
+    )
+    
+    interaction_id = interaction.id
+    logger.info(f"Deep Research started: {interaction_id}")
+    
+    # Poll for completion
+    start_time = time.time()
+    while True:
+        elapsed = time.time() - start_time
+        
+        if elapsed > DEEP_RESEARCH_MAX_WAIT:
+            raise TimeoutError(f"Deep Research timed out after {DEEP_RESEARCH_MAX_WAIT} seconds")
+        
+        interaction = client.interactions.get(interaction_id)
+        status = interaction.status
+        
+        logger.info(f"Deep Research status: {status} (elapsed: {elapsed:.0f}s)")
+        
+        if status == "completed":
+            # Get the final output
+            if interaction.outputs:
+                result = interaction.outputs[-1].text
+                logger.info(f"Deep Research completed ({len(result)} chars)")
+                return result
+            else:
+                raise ValueError("Deep Research completed but no outputs found")
+        
+        elif status == "failed":
+            error_msg = getattr(interaction, 'error', 'Unknown error')
+            raise RuntimeError(f"Deep Research failed: {error_msg}")
+        
+        # Wait before next poll
+        time.sleep(DEEP_RESEARCH_POLL_INTERVAL)
+
+
+async def run_nba_combo_deep_research(
+    settings: Settings,
+    markets_text: str,
+    games_metadata: List[Dict[str, Any]],
+    progress_callback=None,
+) -> CouncilResult:
+    """
+    Run two-stage NBA combo analysis:
+    1. Multi-stage research for each game (Gemini + Google Search grounding)
+    2. Deep Research Agent analyzes all research and produces combo recommendations
+    
+    Args:
+        settings: Application settings with API keys
+        markets_text: Formatted totals market data (extreme strikes only)
+        games_metadata: List of game metadata dicts with title, date, teams
+        progress_callback: Optional callback(message) for progress updates
+        
+    Returns:
+        CouncilResult with research and Deep Research analysis
+    """
+    if not settings.google_api_key:
+        raise ValueError("GOOGLE_API_KEY is required for Gemini Deep Research")
+    
+    def log_progress(msg):
+        logger.info(msg)
+        if progress_callback:
+            progress_callback(msg)
+    
+    # =========================================================================
+    # STAGE 1: Multi-stage research for each game (IN PARALLEL)
+    # =========================================================================
+    log_progress(f"Stage 1: Gathering research for {len(games_metadata)} games in parallel...")
+    
+    # Use today's date for research (Kalshi dates can be unreliable)
+    from datetime import datetime
+    today_str = datetime.now().strftime("%B %d, %Y")
+    
+    async def research_single_game(game: Dict[str, Any], game_index: int) -> Dict[str, str]:
+        """Research a single game using a dedicated council instance."""
+        title = game.get("title", "Unknown")
+        home_team = game.get("home_team") or "Home"
+        away_team = game.get("away_team") or "Away"
+        game_date = today_str  # Use today's date for all research
+        
+        log_progress(f"  [Game {game_index}] Starting: {away_team} @ {home_team}")
+        
+        # Each game gets its own council instance for parallel execution
+        council = LLMCouncil(
+            openrouter_api_key=settings.openrouter_api_key or "",
+            google_api_key=settings.google_api_key,
+            sport="basketball",
+            prompt_version="v2",
+        )
+        
+        try:
+            research = await council.stage_0_research_multistage(
+                home_team=home_team,
+                away_team=away_team,
+                game_date=game_date,
+                include_props=False,  # Skip props for totals-focused analysis
+            )
+            
+            log_progress(f"  [Game {game_index}] Complete: {away_team} @ {home_team} ({len(research)} chars)")
+            
+            return {
+                "game": title,
+                "research": research,
+            }
+        finally:
+            await council.close()
+    
+    # Run all game research in parallel
+    research_tasks = [
+        research_single_game(game, i + 1)
+        for i, game in enumerate(games_metadata)
+    ]
+    
+    all_research = await asyncio.gather(*research_tasks)
+    
+    # Compile all research into one document
+    compiled_research = _compile_combo_research(list(all_research))
+    log_progress(f"Stage 1 complete: {len(compiled_research)} chars of research gathered")
+    
+    # =========================================================================
+    # STAGE 2: Deep Research analyzes and produces combo recommendations
+    # =========================================================================
+    log_progress("Stage 2: Deep Research analyzing data for combo recommendations...")
+    
+    # Build the analysis prompt
+    prompt = _build_deep_research_analysis_prompt(
+        compiled_research=compiled_research,
+        markets_text=markets_text,
+        games_metadata=games_metadata,
+    )
+    
+    try:
+        # Run the sync Deep Research call in executor
+        loop = asyncio.get_event_loop()
+        result_text = await loop.run_in_executor(
+            None,
+            partial(_run_deep_research_sync, settings.google_api_key, prompt)
+        )
+        
+        log_progress("Stage 2 complete: Deep Research analysis finished")
+        
+        return CouncilResult(
+            research=compiled_research,
+            analyses={},
+            reviews={},
+            final_recommendation=result_text,
+            metadata={
+                "sport": "basketball",
+                "mode": "combo_deep_research",
+                "research_model": "gemini-3-pro-preview (grounding)",
+                "analysis_model": DEEP_RESEARCH_AGENT,
+                "council_models": [],
+                "chairman_model": None,
+                "games_count": len(games_metadata),
+                "games": [g.get("title") for g in games_metadata],
+            },
+        )
+        
+    except Exception as e:
+        logger.error(f"Deep Research analysis failed: {e}")
+        raise
+
+
+def _compile_combo_research(all_research: List[Dict[str, str]]) -> str:
+    """
+    Compile research from multiple games into a single document.
+    
+    Args:
+        all_research: List of {"game": title, "research": research_text}
+        
+    Returns:
+        Compiled research document
+    """
+    sections = [
+        "# NBA COMBO RESEARCH REPORT",
+        f"**Games Analyzed:** {len(all_research)}",
+        "",
+        "=" * 70,
+        "",
+    ]
+    
+    for i, item in enumerate(all_research, 1):
+        game = item.get("game", f"Game {i}")
+        research = item.get("research", "(No research)")
+        
+        sections.append(f"# GAME {i}: {game}")
+        sections.append("=" * 70)
+        sections.append("")
+        sections.append(research)
+        sections.append("")
+        sections.append("=" * 70)
+        sections.append("")
+    
+    return "\n".join(sections)
