@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Streamlit web app for Kalshi sports betting research."""
+"""Streamlit web app for Kalshi NBA Combo Deep Research."""
 import asyncio
 import re
 from collections import defaultdict
@@ -10,8 +10,8 @@ import streamlit as st
 
 # Page config must be first Streamlit command
 st.set_page_config(
-    page_title="Kalshi Sports Research",
-    page_icon="🎯",
+    page_title="Kalshi NBA Combo Research",
+    page_icon="🏀",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -102,107 +102,82 @@ def sanitize_filename(text: str) -> str:
     return text[:50].strip('_').lower()
 
 
-def generate_markdown_report(
+def generate_combo_markdown_report(
     result,
-    match_title: str,
-    sport: str,
+    selected_games: List[Dict],
     markets_text: str,
     selected_markets: list,
-    research_only: bool = False,
 ) -> str:
-    """Generate a markdown report from the analysis result."""
-    sport_emoji = "🏀" if sport == "basketball" else "⚽"
+    """Generate a markdown report from the two-stage combo analysis."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     md = []
     
-    md.append(f"# {sport_emoji} {match_title}")
+    # Title
+    game_count = len(selected_games)
+    md.append(f"# 🏀 NBA Combo Analysis ({game_count} games)")
     md.append("")
-    md.append(f"**Sport:** {sport.title()}")
     md.append(f"**Generated:** {timestamp}")
-    md.append(f"**Markets:** {len(selected_markets)}")
-    if research_only:
-        md.append("**Mode:** Research Only")
+    md.append(f"**Games:** {game_count}")
+    md.append(f"**Total Markets (filtered):** {len(selected_markets)}")
+    md.append("**Mode:** Two-Stage (Research + Deep Research Analysis)")
     md.append("")
     
-    if research_only:
-        # Simplified TOC for research-only
-        md.append("## Table of Contents")
-        md.append("- [Research Findings](#research-findings)")
-        md.append("- [Market Data](#market-data)")
-        md.append("")
-    else:
-        md.append("## Table of Contents")
-        md.append("- [Final Recommendation](#final-recommendation)")
-        md.append("- [Research Findings](#research-findings)")
-        md.append("- [Individual Analyses](#individual-analyses)")
-        md.append("- [Peer Reviews](#peer-reviews)")
-        md.append("- [Market Data](#market-data)")
-        md.append("")
+    # List selected games
+    md.append("## Selected Games")
+    md.append("")
+    for game in selected_games:
+        date_str = game.get("date").strftime("%b %d") if game.get("date") else "TBD"
+        md.append(f"- **{game['title']}** ({date_str})")
+    md.append("")
     
-    if not research_only:
-        md.append("---")
-        md.append("")
-        md.append("## Final Recommendation")
-        md.append("")
-        md.append(result.final_recommendation)
-        md.append("")
+    # TOC
+    md.append("## Table of Contents")
+    md.append("- [Combo Recommendations](#combo-recommendations)")
+    md.append("- [Research Data](#research-data)")
+    md.append("- [Market Data](#market-data)")
+    md.append("")
     
+    # Deep Research analysis (the combo recommendations)
     md.append("---")
     md.append("")
-    md.append("## Research Findings")
+    md.append("## Combo Recommendations")
     md.append("")
-    md.append("*Data gathered via Gemini with Google Search grounding*")
+    md.append("*Analysis by Gemini Deep Research Agent*")
+    md.append("")
+    md.append(result.final_recommendation)
+    md.append("")
+    
+    # Research data gathered in Stage 1
+    md.append("---")
+    md.append("")
+    md.append("## Research Data")
+    md.append("")
+    md.append("*Gathered via Gemini with Google Search grounding (Stage 1)*")
     md.append("")
     md.append(result.research)
     md.append("")
     
-    if not research_only:
-        md.append("---")
-        md.append("")
-        md.append("## Individual Analyses")
-        md.append("")
-        
-        for model, analysis in result.analyses.items():
-            model_display = model.split("/")[-1] if "/" in model else model
-            md.append(f"### {model_display}")
-            md.append("")
-            md.append(analysis)
-            md.append("")
-        
-        md.append("---")
-        md.append("")
-        md.append("## Peer Reviews")
-        md.append("")
-        
-        for model, review in result.reviews.items():
-            model_display = model.split("/")[-1] if "/" in model else model
-            md.append(f"### Review by {model_display}")
-            md.append("")
-            md.append(review)
-            md.append("")
-    
+    # Market Data
     md.append("---")
     md.append("")
     md.append("## Market Data")
+    md.append("")
+    md.append("*Kalshi TOTAL markets (extreme strikes only)*")
     md.append("")
     md.append("```")
     md.append(markets_text)
     md.append("```")
     md.append("")
     
+    # Metadata
     md.append("---")
     md.append("")
     md.append("## Metadata")
     md.append("")
-    md.append(f"- **Research Model:** {result.metadata.get('research_model', 'N/A')}")
-    if not research_only:
-        council_models = result.metadata.get('council_models', [])
-        md.append(f"- **Council Models:** {', '.join(council_models) if council_models else 'N/A'}")
-        md.append(f"- **Chairman Model:** {result.metadata.get('chairman_model', 'N/A')}")
-    md.append(f"- **Sport:** {result.metadata.get('sport', sport)}")
-    md.append(f"- **Prompt Version:** {result.metadata.get('prompt_version', 'v1').upper()}")
-    md.append(f"- **Mode:** {'Research Only' if research_only else 'Full Analysis'}")
+    md.append(f"- **Research Model:** {result.metadata.get('research_model', 'Gemini Deep Research')}")
+    md.append(f"- **Sport:** NBA Basketball")
+    md.append(f"- **Mode:** Deep Research (single agent)")
     md.append("")
     
     return "\n".join(md)
@@ -283,19 +258,6 @@ def format_date_header(d: Optional[datetime]) -> str:
     return f"📅 {d.strftime('%A, %b %d')}"
 
 
-def get_league_emoji(sport: str, league: str) -> str:
-    """Get emoji for league."""
-    if sport == "basketball":
-        return "🏀"
-    return {
-        "la_liga": "🇪🇸",
-        "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-        "mls": "🇺🇸",
-        "ucl": "🏆",
-        "bundesliga": "🇩🇪",
-    }.get(league, "⚽")
-
-
 def parse_teams_from_title(title: str) -> Tuple[Optional[str], Optional[str]]:
     """Parse away and home teams from match title."""
     clean_title = title
@@ -311,97 +273,21 @@ def parse_teams_from_title(title: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 @st.cache_data(ttl=300)
-def fetch_markets(_settings, sport: str, leagues: Optional[List[str]] = None) -> List[Dict]:
-    """Fetch markets from Kalshi (cached for 5 minutes)."""
-    from src.kalshi_api import get_soccer_markets, get_basketball_markets
+def fetch_nba_markets(_settings) -> List[Dict]:
+    """Fetch NBA basketball markets from Kalshi (cached for 5 minutes)."""
+    from src.kalshi_api import get_basketball_markets
     
-    if sport == "basketball":
-        return get_basketball_markets(
-            key_id=_settings.kalshi_api_key_id,
-            private_key_pem=_settings.kalshi_private_key_pem,
-            ws_url=_settings.kalshi_ws_url,
-        )
-    else:
-        return get_soccer_markets(
-            key_id=_settings.kalshi_api_key_id,
-            private_key_pem=_settings.kalshi_private_key_pem,
-            ws_url=_settings.kalshi_ws_url,
-            leagues=leagues,
-        )
-
-
-async def run_analysis_async(
-    settings,
-    sport: str,
-    markets_text: str,
-    prompt_version: str,
-    home_team: Optional[str],
-    away_team: Optional[str],
-    match_date_str: str,
-    competition: Optional[str] = None,
-):
-    """Run analysis asynchronously."""
-    from src.llm_council import run_basketball_analysis, run_soccer_analysis
-    
-    if sport == "basketball":
-        return await run_basketball_analysis(
-            settings=settings,
-            markets_text=markets_text,
-            prompt_version=prompt_version,
-            home_team=home_team,
-            away_team=away_team,
-            game_date=match_date_str,
-        )
-    else:
-        return await run_soccer_analysis(
-            settings=settings,
-            markets_text=markets_text,
-            prompt_version=prompt_version,
-            home_team=home_team,
-            away_team=away_team,
-            competition=competition,
-            match_date=match_date_str,
-        )
-
-
-async def run_research_async(
-    settings,
-    sport: str,
-    markets_text: str,
-    prompt_version: str,
-    home_team: Optional[str],
-    away_team: Optional[str],
-    match_date_str: str,
-    competition: Optional[str] = None,
-):
-    """Run research-only asynchronously (Stage 0 only, no analysis/review/synthesis)."""
-    from src.llm_council import run_basketball_research, run_soccer_research
-    
-    if sport == "basketball":
-        return await run_basketball_research(
-            settings=settings,
-            markets_text=markets_text,
-            prompt_version=prompt_version,
-            home_team=home_team,
-            away_team=away_team,
-            game_date=match_date_str,
-        )
-    else:
-        return await run_soccer_research(
-            settings=settings,
-            markets_text=markets_text,
-            prompt_version=prompt_version,
-            home_team=home_team,
-            away_team=away_team,
-            competition=competition,
-            match_date=match_date_str,
-        )
+    return get_basketball_markets(
+        key_id=_settings.kalshi_api_key_id,
+        private_key_pem=_settings.kalshi_private_key_pem,
+        ws_url=_settings.kalshi_ws_url,
+    )
 
 
 def main():
     # Header
-    st.title("🎯 Kalshi Sports Research")
-    st.markdown("*AI-powered sports betting analysis using LLM Council*")
+    st.title("🏀 Kalshi NBA Combo Research")
+    st.markdown("*Gemini Deep Research for NBA totals betting analysis*")
     
     # Load settings
     try:
@@ -409,10 +295,10 @@ def main():
         settings = Settings()
     except Exception as e:
         st.error(f"Failed to load settings: {e}")
-        st.info("Make sure environment variables are set: OPENROUTER_API_KEY, GOOGLE_API_KEY, KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PEM")
+        st.info("Make sure environment variables are set: GOOGLE_API_KEY, KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PEM")
         return
     
-    # Validate required settings (OPENROUTER_API_KEY optional - only needed for full analysis)
+    # Validate required settings
     missing = []
     if not settings.google_api_key:
         missing.append("GOOGLE_API_KEY")
@@ -423,98 +309,49 @@ def main():
         st.error(f"Missing required environment variables: {', '.join(missing)}")
         return
     
-    # Track if analysis mode is available (requires OPENROUTER_API_KEY)
-    analysis_available = bool(settings.openrouter_api_key)
-    
     # Sidebar for configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # Sport selection
-        sport = st.selectbox(
-            "🏆 Select Sport",
-            options=["basketball", "soccer"],
-            format_func=lambda x: "🏀 Basketball (NBA)" if x == "basketball" else "⚽ Soccer",
-            index=0,
-        )
-        
-        # League selection for soccer
-        selected_leagues = None
-        if sport == "soccer":
-            league_options = {
-                "la_liga": "🇪🇸 La Liga",
-                "premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League",
-                "ucl": "🏆 Champions League",
-                "mls": "🇺🇸 MLS",
-                "bundesliga": "🇩🇪 Bundesliga",
-            }
-            selected_leagues = st.multiselect(
-                "🌍 Select Leagues",
-                options=list(league_options.keys()),
-                default=["la_liga", "premier_league", "ucl"],
-                format_func=lambda x: league_options[x],
-            )
-            if not selected_leagues:
-                selected_leagues = list(league_options.keys())
-        
-        # Prompt version
-        st.markdown("---")
-        if sport == "soccer":
-            version_options = {
-                "v1": "V1 - Standard analytical",
-                "v2": "V2 - xG/PPDA focus",
-                "v3": "V3 - UCL specific",
-            }
-        else:
-            version_options = {
-                "v1": "V1 - Standard analytical",
-                "v2": "V2 - Four Factors analysis",
-            }
-        
-        prompt_version = st.selectbox(
-            "📝 Prompt Version",
-            options=list(version_options.keys()),
-            format_func=lambda x: version_options[x],
-            index=1,  # Default to v2
-        )
+        st.markdown("### 🏀 NBA Only")
+        st.info("This tool is focused on NBA games with TOTAL markets only.")
         
         st.markdown("---")
         st.markdown("### ℹ️ About")
         st.markdown("""
-        This tool uses a **4-stage LLM Council** pipeline:
-        1. 🔍 Research (Gemini + Google Search)
-        2. 🧠 Analysis (4 LLMs in parallel)
-        3. 👥 Peer Review
-        4. 🎯 Final Synthesis
+        This tool uses **Gemini Deep Research Agent** to:
+        1. 🔍 Research selected NBA games via web search
+        2. 📊 Analyze TOTAL (over/under) markets
+        3. 🎯 Generate combo betting recommendations
+        
+        **Market Filter:** Only extreme strike totals (lowest + highest per game)
         """)
         
-        if prompt_version == "v2":
-            st.info("V2 uses 5-stage research for deeper analysis. Takes 4-6 minutes.")
-        else:
-            st.info("V1 uses single-stage research. Takes 2-3 minutes.")
+        st.markdown("---")
+        st.caption("Powered by Gemini Deep Research Agent")
     
     # Main content area
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.header("📊 Available Games")
+        st.header("📊 Available NBA Games")
         
         # Fetch markets button
         if st.button("🔄 Refresh Markets", use_container_width=True):
             st.cache_data.clear()
         
-        with st.spinner("Fetching markets from Kalshi..."):
+        with st.spinner("Fetching NBA markets from Kalshi..."):
             try:
-                markets = fetch_markets(settings, sport, selected_leagues)
+                markets = fetch_nba_markets(settings)
             except Exception as e:
                 st.error(f"Failed to fetch markets: {e}")
                 return
         
         if not markets:
-            st.warning(f"No {sport} markets found on Kalshi right now.")
+            st.warning("No NBA markets found on Kalshi right now.")
             return
         
-        st.success(f"Found {len(markets)} {sport} markets")
+        st.success(f"Found {len(markets)} NBA markets")
         
         # Group markets by match
         matches = group_markets_by_match(markets)
@@ -531,168 +368,132 @@ def main():
             key=lambda d: (d is None, d if d else datetime.max.date())
         )
         
-        # Build options for selectbox
-        game_options = []
+        # Build options for multiselect
+        game_options = {}  # match_id -> (match_data, label)
         for date_key in sorted_dates:
             date_matches = matches_by_date[date_key]
-            date_matches.sort(key=lambda x: x[1].get("league", "zzz"))
+            date_matches.sort(key=lambda x: x[1].get("title", ""))
             
             for match_id, match_data in date_matches:
-                league = match_data["league"]
-                emoji = get_league_emoji(sport, league)
                 date_str = format_date_header(match_data.get("date"))
-                label = f"{emoji} {match_data['title']} | {date_str} | {len(match_data['markets'])} markets"
-                game_options.append((match_id, match_data, label))
+                # Count total markets for this game
+                total_market_count = len([m for m in match_data["markets"] if m.get("market_type") == "total"])
+                label = f"🏀 {match_data['title']} | {date_str} | {total_market_count} totals"
+                game_options[match_id] = (match_data, label)
         
-        # Game selector
-        selected_idx = st.selectbox(
-            "🎮 Select Game to Analyze",
-            options=range(len(game_options)),
-            format_func=lambda i: game_options[i][2],
+        # Multi-select for games
+        selected_match_ids = st.multiselect(
+            "🎮 Select Games for Combo Analysis",
+            options=list(game_options.keys()),
+            format_func=lambda mid: game_options[mid][1],
+            help="Select multiple games to analyze as a combo bet",
         )
         
-        if selected_idx is not None:
-            match_id, match_data, _ = game_options[selected_idx]
-            selected_markets = match_data["markets"]
-            match_title = match_data["title"]
+        # Show selected games info
+        if selected_match_ids:
+            selected_games = [game_options[mid][0] for mid in selected_match_ids]
             
-            # Show selected game info
-            with st.expander("📋 Selected Game Details", expanded=True):
-                col_a, col_b, col_c = st.columns(3)
+            with st.expander("📋 Selected Games", expanded=True):
+                col_a, col_b = st.columns(2)
                 with col_a:
-                    st.metric("Game", match_title)
+                    st.metric("Games Selected", len(selected_match_ids))
                 with col_b:
-                    st.metric("Markets", len(selected_markets))
-                with col_c:
-                    league_display = match_data["league"].replace("_", " ").title()
-                    st.metric("League", league_display)
+                    # Count filtered markets (totals only, will be filtered to extremes)
+                    all_totals = []
+                    for game in selected_games:
+                        totals = [m for m in game["markets"] if m.get("market_type") == "total"]
+                        all_totals.extend(totals)
+                    st.metric("Total Markets", len(all_totals))
+                
+                st.markdown("**Selected:**")
+                for game in selected_games:
+                    date_str = game.get("date").strftime("%b %d") if game.get("date") else "TBD"
+                    st.markdown(f"- {game['title']} ({date_str})")
+        else:
+            st.info("👆 Select one or more games above to analyze")
     
     with col2:
-        st.header("🚀 Run Analysis")
+        st.header("🚀 Run Deep Research")
         
-        if selected_idx is None:
-            st.info("Select a game to analyze")
+        if not selected_match_ids:
+            st.info("Select games to analyze")
             return
         
-        # Parse team info
-        away_team, home_team = parse_teams_from_title(match_title)
+        # Show games summary
+        st.markdown(f"**{len(selected_match_ids)} game(s) selected**")
         
-        if away_team and home_team:
-            st.markdown(f"**Away:** {away_team}")
-            st.markdown(f"**Home:** {home_team}")
-        
-        # Competition for soccer
-        competition = None
-        if sport == "soccer":
-            league = match_data.get("league", "unknown")
-            competition_map = {
-                "la_liga": "La Liga",
-                "premier_league": "Premier League",
-                "ucl": "UEFA Champions League",
-                "mls": "MLS",
-                "bundesliga": "Bundesliga",
-            }
-            competition = competition_map.get(league, league.replace("_", " ").title())
-            st.markdown(f"**Competition:** {competition}")
-        
-        # Game date
-        today = datetime.now().date()
-        game_date = match_data.get("date") or today
-        match_date_str = datetime.now().strftime("%B %d, %Y")
-        st.markdown(f"**Date:** {datetime.now().strftime('%B %d, %Y')}")
+        for mid in selected_match_ids:
+            game = game_options[mid][0]
+            away_team, home_team = parse_teams_from_title(game["title"])
+            if away_team and home_team:
+                st.markdown(f"- {away_team} @ {home_team}")
         
         st.markdown("---")
         
-        # Research-only toggle
-        # Default to ON if OPENROUTER_API_KEY is missing (analysis unavailable)
-        research_only_default = not analysis_available
-        research_only = st.toggle(
-            "🔍 Research only",
-            value=research_only_default,
-            disabled=not analysis_available,  # Force on if no OpenRouter key
-            help="Run only Stage 0 research (Gemini + Google Search). Skip LLM Council analysis/review/synthesis." if analysis_available else "Analysis unavailable: OPENROUTER_API_KEY not set. Research-only mode is enabled.",
-        )
-        
-        if not analysis_available:
-            st.caption("⚠️ Full analysis requires `OPENROUTER_API_KEY`")
-        
-        # Dynamic button label
-        button_label = "🔍 Run Research" if research_only else "🎯 Run Analysis"
-        
         # Run button
-        if st.button(button_label, type="primary", use_container_width=True):
-            from src.kalshi_api import format_markets_for_analysis, format_basketball_markets_for_analysis
+        if st.button("🎯 Run Deep Research", type="primary", use_container_width=True):
+            from src.kalshi_api import select_total_extremes, format_totals_for_deep_research
             
-            # Format markets
-            if sport == "basketball":
-                markets_text = format_basketball_markets_for_analysis(selected_markets)
-            else:
-                markets_text = format_markets_for_analysis(selected_markets)
+            # Collect markets from all selected games and filter to extreme totals
+            selected_games = [game_options[mid][0] for mid in selected_match_ids]
+            all_filtered_markets = []
+            games_metadata = []
             
-            # Determine mode and status label
-            if research_only:
-                status_label = "🔍 Running Research..."
-                complete_label = "✅ Research Complete!"
-            else:
-                status_label = "🔬 Running LLM Council Analysis..."
-                complete_label = "✅ Analysis Complete!"
+            for game in selected_games:
+                # Filter to extreme totals for this game
+                game_markets = game["markets"]
+                filtered = select_total_extremes(game_markets)
+                all_filtered_markets.extend(filtered)
+                
+                # Parse teams
+                away_team, home_team = parse_teams_from_title(game["title"])
+                games_metadata.append({
+                    "title": game["title"],
+                    "date": game.get("date"),
+                    "away_team": away_team,
+                    "home_team": home_team,
+                    "filtered_markets": filtered,
+                })
             
-            # Run with status updates
-            with st.status(status_label, expanded=True) as status:
+            # Format markets for Deep Research
+            markets_text = format_totals_for_deep_research(all_filtered_markets, games_metadata)
+            
+            # Run two-stage analysis
+            with st.status("🔬 Running NBA Combo Analysis...", expanded=True) as status:
                 try:
-                    if research_only:
-                        # Research-only mode
-                        if prompt_version == "v2":
-                            st.write("📊 Multi-stage research (5 stages)...")
-                        else:
-                            st.write("🔍 Single-stage research with Gemini...")
-                        
-                        result = asyncio.run(run_research_async(
-                            settings=settings,
-                            sport=sport,
-                            markets_text=markets_text,
-                            prompt_version=prompt_version,
-                            home_team=home_team,
-                            away_team=away_team,
-                            match_date_str=match_date_str,
-                            competition=competition,
-                        ))
-                        
-                        st.write("✅ Research complete!")
-                    else:
-                        # Full analysis mode
-                        if prompt_version == "v2":
-                            st.write("📊 Stage 0: Multi-stage research (5 stages)...")
-                        else:
-                            st.write("🔍 Stage 1: Research with Gemini...")
-                        
-                        result = asyncio.run(run_analysis_async(
-                            settings=settings,
-                            sport=sport,
-                            markets_text=markets_text,
-                            prompt_version=prompt_version,
-                            home_team=home_team,
-                            away_team=away_team,
-                            match_date_str=match_date_str,
-                            competition=competition,
-                        ))
-                        
-                        st.write("✅ Analysis complete!")
+                    st.write(f"📊 Selected {len(selected_match_ids)} games for combo analysis")
+                    st.write(f"📈 Using {len(all_filtered_markets)} extreme total markets")
+                    st.write("")
+                    st.write("**Stage 1: Gathering Research Data**")
+                    st.write("🔍 Running multi-stage research for each game (Gemini + Google Search)...")
+                    st.write(f"   This will research {len(games_metadata)} games × 5 stages each")
+                    st.write("")
+                    st.write("**Stage 2: Deep Research Analysis**")
+                    st.write("🧠 Deep Research Agent will analyze all data and produce combo recommendations")
+                    st.write("")
+                    st.write("⏳ Total time: ~5-10 minutes depending on number of games...")
                     
-                    status.update(label=complete_label, state="complete", expanded=False)
+                    from src.llm_council import run_nba_combo_deep_research
+                    
+                    result = asyncio.run(run_nba_combo_deep_research(
+                        settings=settings,
+                        markets_text=markets_text,
+                        games_metadata=games_metadata,
+                    ))
+                    
+                    st.write("")
+                    st.write("✅ Analysis complete!")
+                    status.update(label="✅ Combo Analysis Complete!", state="complete", expanded=False)
                     
                     # Store result in session state
                     st.session_state.result = result
-                    st.session_state.match_title = match_title
-                    st.session_state.sport = sport
+                    st.session_state.selected_games = selected_games
                     st.session_state.markets_text = markets_text
-                    st.session_state.selected_markets = selected_markets
-                    st.session_state.result_mode = "research_only" if research_only else "full"
+                    st.session_state.selected_markets = all_filtered_markets
                     
                 except Exception as e:
-                    fail_label = "❌ Research Failed" if research_only else "❌ Analysis Failed"
-                    status.update(label=fail_label, state="error")
-                    st.error(f"Error during {'research' if research_only else 'analysis'}: {e}")
+                    status.update(label="❌ Deep Research Failed", state="error")
+                    st.error(f"Error during Deep Research: {e}")
                     import traceback
                     st.code(traceback.format_exc())
                     return
@@ -702,117 +503,60 @@ def main():
         st.markdown("---")
         
         result = st.session_state.result
-        is_research_only = getattr(st.session_state, 'result_mode', 'full') == 'research_only'
         
-        if is_research_only:
-            st.header("📊 Research Results")
+        st.header("📊 Combo Analysis Results")
+        
+        # Tabs for results
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🎯 Recommendations",
+            "🔍 Research",
+            "📈 Market Data",
+            "📥 Download"
+        ])
+        
+        with tab1:
+            st.markdown("## Combo Recommendations")
+            st.markdown("*Analysis by Gemini Deep Research Agent*")
+            st.markdown(result.final_recommendation)
+        
+        with tab2:
+            st.markdown("## Research Data")
+            st.markdown("*Gathered via Gemini with Google Search grounding (Stage 1)*")
+            st.markdown(result.research)
+        
+        with tab3:
+            st.markdown("## Filtered Market Data")
+            st.markdown("*Kalshi TOTAL markets (extreme strikes only)*")
+            st.code(st.session_state.markets_text)
+        
+        with tab4:
+            st.markdown("## Download Report")
             
-            # Simplified tabs for research-only mode
-            tab1, tab2 = st.tabs([
-                "🔍 Research",
-                "📥 Download"
-            ])
+            # Generate markdown
+            markdown_content = generate_combo_markdown_report(
+                result=result,
+                selected_games=st.session_state.selected_games,
+                markets_text=st.session_state.markets_text,
+                selected_markets=st.session_state.selected_markets,
+            )
             
-            with tab1:
-                st.markdown("## Research Findings")
-                st.markdown("*Data gathered via Gemini with Google Search grounding*")
-                st.markdown(result.research)
+            # Generate filename
+            date_str = datetime.now().strftime("%Y%m%d")
+            game_count = len(st.session_state.selected_games)
+            filename = f"nba_combo_{game_count}games_analysis_{date_str}.md"
             
-            with tab2:
-                st.markdown("## Download Report")
-                
-                # Generate markdown (research-only)
-                markdown_content = generate_markdown_report(
-                    result=result,
-                    match_title=st.session_state.match_title,
-                    sport=st.session_state.sport,
-                    markets_text=st.session_state.markets_text,
-                    selected_markets=st.session_state.selected_markets,
-                    research_only=True,
-                )
-                
-                # Generate filename
-                date_str = datetime.now().strftime("%Y%m%d")
-                safe_title = sanitize_filename(st.session_state.match_title)
-                filename = f"{safe_title}_research_{prompt_version}_{date_str}.md"
-                
-                st.download_button(
-                    label="📥 Download Research Report",
-                    data=markdown_content,
-                    file_name=filename,
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
-                
-                # Preview
-                with st.expander("📄 Preview Report", expanded=False):
-                    st.code(markdown_content[:3000] + "..." if len(markdown_content) > 3000 else markdown_content)
-        else:
-            st.header("📊 Analysis Results")
+            st.download_button(
+                label="📥 Download Report",
+                data=markdown_content,
+                file_name=filename,
+                mime="text/markdown",
+                use_container_width=True,
+            )
             
-            # Full tabs for analysis mode
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "🎯 Recommendation",
-                "🔍 Research",
-                "🧠 Analyses",
-                "👥 Reviews",
-                "📥 Download"
-            ])
-            
-            with tab1:
-                st.markdown("## Final Recommendation")
-                st.markdown(result.final_recommendation)
-            
-            with tab2:
-                st.markdown("## Research Findings")
-                st.markdown("*Data gathered via Gemini with Google Search grounding*")
-                st.markdown(result.research)
-            
-            with tab3:
-                st.markdown("## Individual Analyses")
-                for model, analysis in result.analyses.items():
-                    model_display = model.split("/")[-1] if "/" in model else model
-                    with st.expander(f"📝 {model_display}", expanded=False):
-                        st.markdown(analysis)
-            
-            with tab4:
-                st.markdown("## Peer Reviews")
-                for model, review in result.reviews.items():
-                    model_display = model.split("/")[-1] if "/" in model else model
-                    with st.expander(f"👁️ Review by {model_display}", expanded=False):
-                        st.markdown(review)
-            
-            with tab5:
-                st.markdown("## Download Report")
-                
-                # Generate markdown (full analysis)
-                markdown_content = generate_markdown_report(
-                    result=result,
-                    match_title=st.session_state.match_title,
-                    sport=st.session_state.sport,
-                    markets_text=st.session_state.markets_text,
-                    selected_markets=st.session_state.selected_markets,
-                    research_only=False,
-                )
-                
-                # Generate filename
-                date_str = datetime.now().strftime("%Y%m%d")
-                safe_title = sanitize_filename(st.session_state.match_title)
-                filename = f"{safe_title}_{prompt_version}_{date_str}.md"
-                
-                st.download_button(
-                    label="📥 Download Markdown Report",
-                    data=markdown_content,
-                    file_name=filename,
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
-                
-                # Preview
-                with st.expander("📄 Preview Report", expanded=False):
-                    st.code(markdown_content[:3000] + "..." if len(markdown_content) > 3000 else markdown_content)
+            # Preview
+            with st.expander("📄 Preview Report", expanded=False):
+                st.code(markdown_content[:3000] + "..." if len(markdown_content) > 3000 else markdown_content)
 
 
 if __name__ == "__main__":
     main()
-
