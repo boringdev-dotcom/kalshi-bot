@@ -1337,6 +1337,7 @@ For each game, synthesize the research to determine:
 - **Key Factors**: The 2-3 most important factors affecting this total
 - **Market Assessment**: Is the extreme strike (low or high) offering value?
 - **Recommendation**: OVER or UNDER on which strike, and why
+- **Your Analysis**: Show your math. Every probability estimate needs supporting data. Tell me why you picked one strike over the other.
 - **Confidence**: High/Medium/Low with reasoning
 
 ### Combo Betting Strategy
