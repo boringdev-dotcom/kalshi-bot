@@ -1369,6 +1369,126 @@ Be specific with contract tickers and prices from the market data. Make decisive
     return prompt
 
 
+def _build_combined_deep_research_prompt(
+    compiled_research: str,
+    markets_text: str,
+    games_metadata: List[Dict[str, Any]],
+) -> str:
+    """
+    Build prompt for Deep Research to analyze BOTH totals AND spreads.
+    
+    The LLM will analyze both market types for each game and recommend
+    whether to play TOTAL or SPREAD for each game in the combo.
+    
+    Args:
+        compiled_research: All research data gathered from multi-stage research
+        markets_text: Formatted markets data (both totals AND spreads extremes)
+        games_metadata: List of game metadata dicts with title, date, teams
+        
+    Returns:
+        Complete prompt for Deep Research analysis
+    """
+    # Build games list
+    games_list = []
+    for game in games_metadata:
+        title = game.get("title", "Unknown")
+        date = game.get("date")
+        date_str = date.strftime("%B %d, %Y") if date else "TBD"
+        away_team = game.get("away_team", "Away")
+        home_team = game.get("home_team", "Home")
+        games_list.append(f"- {title} ({date_str}): {away_team} @ {home_team}")
+    
+    games_section = "\n".join(games_list)
+    
+    prompt = f"""You are an expert NBA sports betting analyst. I have already gathered detailed research data for the following NBA games. Your job is to ANALYZE this research and provide COMBO betting recommendations.
+
+**IMPORTANT**: For each game, you must analyze BOTH the TOTAL (over/under) markets AND the SPREAD (blowout) markets, then decide which market type offers the better edge for that specific game.
+
+## GAMES IN THIS COMBO
+
+{games_section}
+
+## KALSHI MARKETS (Totals & Spreads Extremes)
+
+{markets_text}
+
+## PRE-GATHERED RESEARCH DATA
+
+The following research has been gathered via web search. Analyze this data to make your recommendations:
+
+{compiled_research}
+
+## YOUR ANALYSIS TASK
+
+### Executive Summary
+Brief overview of the combo opportunity and overall recommendation.
+
+### Game-by-Game Analysis (CRITICAL - Pick TOTAL or SPREAD per game)
+
+For EACH game, you must:
+
+1. **Analyze TOTALS**:
+   - Project the total points range based on pace, efficiency, injuries
+   - Assess which extreme strike (low or high) offers value
+   - Estimate your probability for OVER vs UNDER
+
+2. **Analyze SPREADS** (Blowout Tails):
+   - Assess each team's blowout potential (winning by a large margin)
+   - Consider matchup advantages, rest, motivation, injury impact
+   - Estimate probability of each team covering the blowout spread
+
+3. **PICK: TOTAL or SPREAD?**
+   - Compare your edge on the best total play vs the best spread play
+   - **Make a decisive pick**: Is this game better as a TOTAL bet or SPREAD bet?
+   - Explain WHY this market type has the better edge for this specific game
+   - Remember we will be doing combos so you need to pick the best play for each game and then combine them into a combo, even if the payout seems low, in combo betting you are looking for the best edge not the highest payout.
+
+4. **Your Pick Details**:
+   - Ticker to play
+   - Direction (OVER/UNDER for totals, YES/NO for spreads)
+   - Your estimated probability
+   - Market implied probability
+   - Your edge (your prob - market prob)
+   - Confidence: High/Medium/Low
+
+### Combo Betting Strategy
+- List the best pick from each game (whether total or spread)
+- Recommended combo structure with specific tickers
+- Combined implied probability (product of individual probabilities)
+- Which games have the strongest edges?
+- Correlation analysis (are the games independent?)
+- Remember we will be doing combos so you need to pick the best play for each game and then combine them into a combo, even if the payout seems low, in combo betting you are looking for the best edge not the highest payout.
+
+### Actionable Betting Recommendations
+
+**PRIMARY COMBO:**
+For each game, specify:
+- Game: [Title]
+- Market Type: [TOTAL or SPREAD]
+- Ticker: [exact ticker]
+- Play: [OVER/UNDER or YES/NO] @ [price]¢
+- Your Prob: [X]% | Market: [Y]% | Edge: [Z]%
+
+Then:
+- Combined implied probability
+- Combined edge
+- Recommended stake
+
+**ALTERNATIVE PLAYS:**
+- Best single-game plays if combo is too risky
+- Hedge suggestions (opposite market type as insurance)
+
+### Risk Assessment
+- What could go wrong for each leg?
+- Key injuries/news to monitor before tip-off
+- When to pass on this combo
+- Which legs are most vulnerable?
+
+Be specific with contract tickers and prices from the market data. Make decisive recommendations - no hedging or wishy-washy picks. For each game, commit to either TOTAL or SPREAD."""
+
+    return prompt
+
+
 def _run_deep_research_sync(
     google_api_key: str,
     prompt: str,
@@ -1436,6 +1556,7 @@ async def run_nba_combo_deep_research(
     markets_text: str,
     games_metadata: List[Dict[str, Any]],
     progress_callback=None,
+    use_combined_analysis: bool = False,
 ) -> CouncilResult:
     """
     Run two-stage NBA combo analysis:
@@ -1444,9 +1565,12 @@ async def run_nba_combo_deep_research(
     
     Args:
         settings: Application settings with API keys
-        markets_text: Formatted totals market data (extreme strikes only)
+        markets_text: Formatted markets data (totals only, or combined totals+spreads)
         games_metadata: List of game metadata dicts with title, date, teams
         progress_callback: Optional callback(message) for progress updates
+        use_combined_analysis: If True, use combined totals+spreads prompt where LLM
+                               picks between market types per game. If False (default),
+                               use totals-only prompt for backward compatibility.
         
     Returns:
         CouncilResult with research and Deep Research analysis
@@ -1519,12 +1643,20 @@ async def run_nba_combo_deep_research(
     # =========================================================================
     log_progress("Stage 2: Deep Research analyzing data for combo recommendations...")
     
-    # Build the analysis prompt
-    prompt = _build_deep_research_analysis_prompt(
-        compiled_research=compiled_research,
-        markets_text=markets_text,
-        games_metadata=games_metadata,
-    )
+    # Build the analysis prompt (combined totals+spreads or totals-only)
+    if use_combined_analysis:
+        log_progress("  Using combined TOTALS + SPREADS analysis (LLM picks per game)")
+        prompt = _build_combined_deep_research_prompt(
+            compiled_research=compiled_research,
+            markets_text=markets_text,
+            games_metadata=games_metadata,
+        )
+    else:
+        prompt = _build_deep_research_analysis_prompt(
+            compiled_research=compiled_research,
+            markets_text=markets_text,
+            games_metadata=games_metadata,
+        )
     
     try:
         # Run the sync Deep Research call in executor
@@ -1543,7 +1675,8 @@ async def run_nba_combo_deep_research(
             final_recommendation=result_text,
             metadata={
                 "sport": "basketball",
-                "mode": "combo_deep_research",
+                "mode": "combo_deep_research_combined" if use_combined_analysis else "combo_deep_research",
+                "analysis_type": "totals_and_spreads" if use_combined_analysis else "totals_only",
                 "research_model": "gemini-3-pro-preview (grounding)",
                 "analysis_model": DEEP_RESEARCH_AGENT,
                 "council_models": [],

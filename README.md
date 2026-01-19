@@ -1,10 +1,20 @@
-# Kalshi Discord Bot
+# Kalshi Bot
 
-A production-ready Discord bot that monitors your Kalshi orders via WebSocket and sends rich notifications to Discord when orders are filled. Supports both Discord bot (with real-time odds updates) and webhook modes.
+A production-ready suite of tools for Kalshi trading:
 
-**NEW: Soccer Research Bot** - An AI-powered betting research assistant using LLM Council (multiple AI models working together) to analyze La Liga and Premier League matches on Kalshi.
+1. **Live Market Dashboard** - Real-time trading dashboard with price charts, orderbooks, and trade history
+2. **Discord Order Bot** - Monitors orders and sends notifications when filled
+3. **Soccer Research Bot** - AI-powered betting analysis using LLM Council
 
 ## Features
+
+### Live Market Dashboard (NEW)
+- **Real-time Price Charts** - Multi-series line charts with live updates using TradingView's lightweight-charts
+- **Order Book Visualization** - Live bid/ask depth display for multiple markets
+- **Trades Panel** - Scatter plot and table view with trade statistics
+- **Market Selector** - Browse NBA, Bundesliga, La Liga, Premier League, MLS, and UCL markets
+- **WebSocket Streaming** - True real-time updates via WebSocket connection
+- **React + TypeScript** - Modern, fast frontend with Tailwind CSS styling
 
 ### Order Monitoring Bot
 - **Real-time order monitoring** via Kalshi WebSocket API
@@ -163,6 +173,30 @@ Then run the worker separately:
 uv run kalshi-bot run-worker
 ```
 
+### Running the Live Market Dashboard
+
+The dashboard consists of a FastAPI backend and a React frontend:
+
+**1. Start the Backend API:**
+
+```bash
+# In the project root directory
+uvicorn src.api:app --reload --port 8000
+```
+
+**2. Start the Frontend:**
+
+```bash
+# In the frontend directory
+cd frontend
+npm install  # First time only
+npm run dev
+```
+
+The dashboard will be available at `http://localhost:5173`
+
+See [frontend/README.md](frontend/README.md) for more details on the frontend.
+
 ### Running the Soccer Research Bot
 
 ```bash
@@ -266,18 +300,26 @@ kalshi-bot/
 │   ├── __init__.py          # Package initialization
 │   ├── main.py              # Main entry point (API + Worker)
 │   ├── cli.py               # CLI interface (run-all, run-api, run-worker)
-│   ├── api.py               # FastAPI application (health check)
+│   ├── api.py               # FastAPI application (REST + WebSocket API)
 │   ├── config.py            # Centralized configuration (Settings)
 │   ├── kalshi_auth.py       # Shared Kalshi authentication utilities
-│   ├── kalshi_api.py        # Kalshi REST API client (+ soccer markets)
-│   ├── kalshi_ws_client.py  # WebSocket client (order streaming)
+│   ├── kalshi_api.py        # Kalshi REST API client (markets, orderbook, trades)
+│   ├── kalshi_ws_client.py  # WebSocket client (order & market streaming)
 │   ├── discord_bot.py       # Discord bot client (real-time updates)
 │   ├── discord_notify.py    # Discord webhook/embed formatting
 │   ├── research_bot.py      # Soccer research bot (LLM Council)
 │   ├── llm_council.py       # LLM Council engine (OpenRouter)
 │   ├── prompts.py           # LLM prompts for analysis pipeline
 │   └── discord_embeds.py    # Discord embeds for research output
-├── generate_curl.py          # Helper script for API testing
+├── frontend/                 # React + TypeScript dashboard
+│   ├── src/
+│   │   ├── components/      # React components (chart, orderbook, trades)
+│   │   ├── hooks/           # Custom hooks (useWebSocket)
+│   │   ├── api.ts           # API client functions
+│   │   ├── types.ts         # TypeScript types
+│   │   └── App.tsx          # Main app component
+│   ├── package.json         # Frontend dependencies
+│   └── README.md            # Frontend documentation
 ├── pyproject.toml           # Project metadata and dependencies
 ├── .env                     # Your environment variables (not in git)
 └── README.md
