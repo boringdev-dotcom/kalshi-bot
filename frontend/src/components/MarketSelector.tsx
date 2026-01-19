@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronDown, RefreshCw, Search, Star, ToggleLeft, ToggleRight } from 'lucide-react';
+import { ChevronDown, RefreshCw, Search, Star } from 'lucide-react';
 import type { LeagueData, SelectedMarket, Event, TickerData } from '../types';
 import { clsx } from 'clsx';
 
