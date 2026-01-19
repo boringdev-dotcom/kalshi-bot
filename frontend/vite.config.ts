@@ -8,7 +8,10 @@ export default defineConfig(({ mode }) => {
   
   // Backend URL from VITE_BACKEND_URL env var, defaults to localhost:8000
   const backendUrl = env.VITE_BACKEND_URL || 'http://localhost:8000'
-  const backendWsUrl = backendUrl.replace('http', 'ws')
+  // Convert http(s) to ws(s) for WebSocket
+  const backendWsUrl = backendUrl.replace(/^http/, 'ws')
+  
+  console.log('Proxy config:', { backendUrl, backendWsUrl })
   
   return {
     plugins: [react()],
@@ -18,10 +21,13 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: backendUrl,
           changeOrigin: true,
+          secure: false, // Allow self-signed certs
         },
         '/ws': {
           target: backendWsUrl,
           ws: true,
+          changeOrigin: true,
+          secure: false, // Allow self-signed certs
         },
       },
     },
