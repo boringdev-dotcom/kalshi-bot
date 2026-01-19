@@ -42,7 +42,13 @@ class Settings(BaseSettings):
     
     # API server configuration
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
+    # Note: Render.com uses PORT env var, so we check both API_PORT and PORT
     api_port: int = Field(default=8000, alias="API_PORT")
+    
+    def get_port(self) -> int:
+        """Get port, preferring PORT env var (for Render.com) over API_PORT."""
+        import os
+        return int(os.environ.get("PORT", self.api_port))
     
     # CORS configuration (comma-separated list of allowed origins)
     cors_origins: str = Field(

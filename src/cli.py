@@ -97,10 +97,11 @@ async def _run_worker(settings: Settings) -> None:
 
 async def _run_api(settings: Settings) -> None:
     """Run the FastAPI server."""
+    port = settings.get_port()  # Uses PORT env var for Render.com
     config = uvicorn.Config(
         app,
         host=settings.api_host,
-        port=settings.api_port,
+        port=port,
         log_level="info",
         access_log=False,
     )
@@ -119,9 +120,10 @@ def run_all():
         logger.error("Please ensure your .env file contains the required values")
         sys.exit(1)
     
+    port = settings.get_port()
     logger.info("Starting Kalshi Discord bot (API + Worker)...")
     logger.info(f"WebSocket URL: {settings.kalshi_ws_url}")
-    logger.info(f"API server: http://{settings.api_host}:{settings.api_port}")
+    logger.info(f"API server: http://{settings.api_host}:{port}")
     
     async def main():
         try:
@@ -148,8 +150,9 @@ def run_api():
         logger.error("Missing KALSHI_API_KEY_ID or KALSHI_PRIVATE_KEY_PEM")
         sys.exit(1)
     
-    logger.info(f"Starting API server on http://{settings.api_host}:{settings.api_port}")
-    logger.info(f"Health check: http://{settings.api_host}:{settings.api_port}/health")
+    port = settings.get_port()
+    logger.info(f"Starting API server on http://{settings.api_host}:{port}")
+    logger.info(f"Health check: http://{settings.api_host}:{port}/health")
     
     async def main():
         try:
