@@ -132,6 +132,7 @@ export interface SelectedMarket {
   subtitle: string;
   eventTitle: string;
   league: string;
+  viewSide: 'yes' | 'no';  // Which side to display prices for (YES = over, NO = under)
 }
 
 export interface TradeWithMeta extends Trade {

@@ -144,18 +144,20 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
     });
   }, [focusedTicker, markets]);
 
-  // Update data when price history changes
+  // Update data when price history or viewSide changes
   useEffect(() => {
     for (const market of markets) {
       const series = seriesRef.current.get(market.ticker);
       const history = priceHistory[market.ticker];
+      const isNoView = market.viewSide === 'no';
       
       if (series && history && history.length > 0) {
         // Convert to lightweight-charts format and sort by time
+        // Invert prices if viewing NO side (NO price = 100 - YES price)
         const data: LineData[] = history
           .map(point => ({
             time: point.time as Time,
-            value: point.value,
+            value: isNoView ? 100 - point.value : point.value,
           }))
           .sort((a, b) => (a.time as number) - (b.time as number));
         
@@ -180,7 +182,17 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
   const legend = useMemo(() => {
     return markets.map((market, index) => {
       const ticker = tickerData[market.ticker];
-      const lastPrice = ticker?.last_price ?? ticker?.yes_bid ?? '--';
+      const isNoView = market.viewSide === 'no';
+      
+      // Get price based on view side
+      let lastPrice: number | string = '--';
+      if (ticker) {
+        const yesPrice = ticker.last_price ?? ticker.yes_bid;
+        if (yesPrice !== null && yesPrice !== undefined) {
+          lastPrice = isNoView ? 100 - yesPrice : yesPrice;
+        }
+      }
+      
       const color = COLORS[index % COLORS.length];
       const isFocused = focusedTicker === market.ticker;
       
@@ -190,6 +202,7 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
         color,
         price: lastPrice,
         isFocused,
+        viewSide: market.viewSide || 'yes',
       };
     });
   }, [markets, tickerData, focusedTicker]);
@@ -213,6 +226,11 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
               <span className={`text-xs ${item.isFocused ? 'text-text-primary font-medium' : 'text-text-secondary'}`}>
                 {item.name}
               </span>
+              {item.viewSide === 'no' && (
+                <span className="text-[9px] px-1 py-0.5 rounded bg-accent-red/20 text-accent-red font-medium">
+                  NO
+                </span>
+              )}
               <span 
                 className="text-xs font-mono font-semibold"
                 style={{ color: item.color }}

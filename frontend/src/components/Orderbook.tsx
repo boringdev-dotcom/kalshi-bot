@@ -3,6 +3,7 @@ import type { Orderbook as OrderbookType, OrderbookLevel } from '../types';
 
 interface OrderbookProps {
   orderbook: OrderbookType | undefined;
+  viewSide?: 'yes' | 'no';  // Which side to display as primary (YES = default)
 }
 
 // Normalize orderbook level - handles both array [price, qty] and object {price, quantity} formats
@@ -29,7 +30,9 @@ function normalizeLevel(level: OrderbookLevel | [number, number] | unknown): { p
   return null;
 }
 
-export function Orderbook({ orderbook }: OrderbookProps) {
+export function Orderbook({ orderbook, viewSide = 'yes' }: OrderbookProps) {
+  const isYesView = viewSide === 'yes';
+  
   // Process orderbook data
   const { bids, asks, maxQuantity, spread, midPrice } = useMemo(() => {
     if (!orderbook) {
@@ -37,21 +40,25 @@ export function Orderbook({ orderbook }: OrderbookProps) {
     }
 
     // Normalize and filter valid levels
-    // YES side = bids (people wanting to buy YES)
     const rawYes = orderbook.yes || [];
-    const bids = rawYes
+    const yesLevels = rawYes
       .map(normalizeLevel)
       .filter((l): l is { price: number; quantity: number } => l !== null)
       .sort((a, b) => b.price - a.price)
       .slice(0, 10);
     
-    // NO side = asks (people wanting to sell YES / buy NO)
     const rawNo = orderbook.no || [];
-    const asks = rawNo
+    const noLevels = rawNo
       .map(normalizeLevel)
       .filter((l): l is { price: number; quantity: number } => l !== null)
       .sort((a, b) => a.price - b.price)
       .slice(0, 10);
+    
+    // Swap bids/asks if viewing NO side
+    // When viewing YES: YES side = bids, NO side = asks
+    // When viewing NO: NO side = bids, YES side = asks (prices inverted)
+    const bids = isYesView ? yesLevels : noLevels;
+    const asks = isYesView ? noLevels : yesLevels;
 
     // Find max quantity for bar scaling
     const allQuantities = [...bids, ...asks].map(l => l.quantity);
@@ -68,7 +75,7 @@ export function Orderbook({ orderbook }: OrderbookProps) {
       : null;
 
     return { bids, asks, maxQuantity, spread, midPrice };
-  }, [orderbook]);
+  }, [orderbook, isYesView]);
 
   // Format price in cents
   const formatPrice = (price: number | undefined) => {
@@ -102,6 +109,12 @@ export function Orderbook({ orderbook }: OrderbookProps) {
 
   return (
     <div className="h-full flex flex-col text-xs">
+      {/* View indicator */}
+      {!isYesView && (
+        <div className="px-2 py-1 bg-accent-red/10 text-accent-red text-[10px] font-medium text-center">
+          Viewing NO side (inverted)
+        </div>
+      )}
       {/* Header with spread */}
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-border-subtle">
         <div className="flex gap-4">
