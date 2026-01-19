@@ -14,7 +14,7 @@ import type {
   TickerData,
   ChartDataPoint 
 } from './types';
-import { Activity, TrendingUp, BookOpen, List, ChevronRight, ChevronLeft, DollarSign } from 'lucide-react';
+import { Activity, TrendingUp, BookOpen, List, ChevronRight, ChevronLeft, DollarSign, Menu, X } from 'lucide-react';
 import { LiveOddsPanel } from './components/LiveOddsPanel';
 import { clsx } from 'clsx';
 
@@ -30,6 +30,7 @@ function App() {
   const [focusedMarket, setFocusedMarket] = useState<SelectedMarket | null>(null); // single focus
   const [activeTab, setActiveTab] = useState<MainTab>('overview');
   const [showSignals, setShowSignals] = useState(false); // right strip toggle
+  const [showMobileMenu, setShowMobileMenu] = useState(false); // mobile sidebar
   const [orderbooks, setOrderbooks] = useState<Record<string, OrderbookType>>({});
   const [trades, setTrades] = useState<Record<string, Trade[]>>({});
   const [tickerData, setTickerData] = useState<Record<string, TickerData>>({});
@@ -184,10 +185,17 @@ function App() {
   return (
     <div className="h-screen bg-bg-primary flex flex-col overflow-hidden">
       {/* Top Bar */}
-      <header className="flex-none px-4 py-3 border-b border-border-subtle flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Activity className="w-6 h-6 text-accent-blue" />
-          <h1 className="text-lg font-semibold text-text-primary">Kalshi</h1>
+      <header className="flex-none px-3 md:px-4 py-2 md:py-3 border-b border-border-subtle flex items-center justify-between">
+        <div className="flex items-center gap-2 md:gap-3">
+          {/* Mobile menu button */}
+          <button
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            className="md:hidden p-1.5 -ml-1 rounded hover:bg-bg-secondary transition-colors"
+          >
+            {showMobileMenu ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+          <Activity className="w-5 h-5 md:w-6 md:h-6 text-accent-blue" />
+          <h1 className="text-base md:text-lg font-semibold text-text-primary">Kalshi</h1>
         </div>
         <ConnectionStatus isConnected={isConnected} tickerCount={subscribedTickers.size} />
       </header>
@@ -199,16 +207,34 @@ function App() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: Market List */}
-        <div className="w-80 flex-none border-r border-border-subtle flex flex-col">
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Mobile Overlay */}
+        {showMobileMenu && (
+          <div 
+            className="md:hidden absolute inset-0 bg-black/50 z-20"
+            onClick={() => setShowMobileMenu(false)}
+          />
+        )}
+
+        {/* Left: Market List - Slide in on mobile */}
+        <div className={clsx(
+          'flex-none border-r border-border-subtle flex flex-col bg-bg-primary z-30',
+          'w-72 md:w-80',
+          // Mobile: absolute positioned, slides in
+          'absolute md:relative inset-y-0 left-0',
+          'transform transition-transform duration-200 ease-out',
+          showMobileMenu ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        )}>
           <MarketSelector
             leagues={leagues}
             selectedMarkets={selectedMarkets}
             focusedMarket={focusedMarket}
             tickerData={tickerData}
             onMarketsChange={handleMarketsChange}
-            onFocusMarket={handleFocusMarket}
+            onFocusMarket={(market) => {
+              handleFocusMarket(market);
+              setShowMobileMenu(false); // Close menu on mobile after selection
+            }}
             isLoading={isLoading}
           />
         </div>
@@ -216,40 +242,40 @@ function App() {
         {/* Center: Main Focus Panel */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Tabs */}
-          <div className="flex-none px-4 py-2 border-b border-border-subtle flex items-center gap-1">
+          <div className="flex-none px-2 md:px-4 py-2 border-b border-border-subtle flex items-center gap-0.5 md:gap-1 overflow-x-auto">
             <TabButton 
               active={activeTab === 'overview'} 
               onClick={() => setActiveTab('overview')}
               icon={<TrendingUp className="w-4 h-4" />}
             >
-              Overview
+              <span className="hidden sm:inline">Overview</span>
             </TabButton>
             <TabButton 
               active={activeTab === 'orderbook'} 
               onClick={() => setActiveTab('orderbook')}
               icon={<BookOpen className="w-4 h-4" />}
             >
-              Orderbook
+              <span className="hidden sm:inline">Orderbook</span>
             </TabButton>
             <TabButton 
               active={activeTab === 'trades'} 
               onClick={() => setActiveTab('trades')}
               icon={<List className="w-4 h-4" />}
             >
-              Trades
+              <span className="hidden sm:inline">Trades</span>
             </TabButton>
             <TabButton 
               active={activeTab === 'live-odds'} 
               onClick={() => setActiveTab('live-odds')}
               icon={<DollarSign className="w-4 h-4" />}
             >
-              Live Odds
+              <span className="hidden sm:inline">Live Odds</span>
             </TabButton>
             
-            {/* Focused market info */}
+            {/* Focused market info - hidden on mobile */}
             {focusedMarket && (
-              <div className="ml-auto flex items-center gap-3 text-sm">
-                <span className="text-text-secondary">{focusedMarket.eventTitle}</span>
+              <div className="ml-auto hidden lg:flex items-center gap-3 text-sm">
+                <span className="text-text-secondary truncate max-w-[150px]">{focusedMarket.eventTitle}</span>
                 <span className="text-text-primary font-medium">{focusedMarket.subtitle}</span>
                 {focusedTickerData && (
                   <div className="flex items-center gap-2 font-mono text-xs">
@@ -263,7 +289,7 @@ function App() {
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 overflow-hidden p-4">
+          <div className="flex-1 overflow-hidden p-2 md:p-4">
             {selectedMarkets.length === 0 ? (
               <div className="h-full flex items-center justify-center text-text-muted">
                 Star markets from the list to add them to your watchlist
@@ -322,9 +348,9 @@ function App() {
           </div>
         </div>
 
-        {/* Right: Signals Strip (collapsible) */}
+        {/* Right: Signals Strip (collapsible) - Hidden on mobile */}
         <div className={clsx(
-          'flex-none border-l border-border-subtle flex flex-col transition-all duration-200',
+          'hidden md:flex flex-none border-l border-border-subtle flex-col transition-all duration-200',
           showSignals ? 'w-72' : 'w-10'
         )}>
           <button

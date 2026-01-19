@@ -154,9 +154,22 @@ app = FastAPI(
 )
 
 # CORS middleware for React frontend
+# Origins loaded from CORS_ORIGINS env var (comma-separated), defaults to localhost dev servers
+import os
+_cors_origins_str = os.environ.get(
+    "CORS_ORIGINS", 
+    "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://localhost:8080"
+)
+if _cors_origins_str == "*":
+    _cors_origins = ["*"]
+else:
+    _cors_origins = [origin.strip() for origin in _cors_origins_str.split(",") if origin.strip()]
+
+logger.info(f"CORS origins: {_cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

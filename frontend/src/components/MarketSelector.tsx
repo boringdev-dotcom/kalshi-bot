@@ -242,21 +242,21 @@ function MarketRow({ market, tickerData, isFocused, isWatched, onFocus, onToggle
     <button
       onClick={onFocus}
       className={clsx(
-        'w-full px-3 py-2 flex items-center gap-2 text-left transition-colors',
+        'w-full px-3 py-3 md:py-2 flex items-center gap-2 text-left transition-colors',
         isFocused 
           ? 'bg-accent-blue/10 border-l-2 border-accent-blue' 
-          : 'hover:bg-bg-secondary/50 border-l-2 border-transparent'
+          : 'hover:bg-bg-secondary/50 border-l-2 border-transparent active:bg-bg-secondary/70'
       )}
     >
       {/* Watch toggle */}
       <button
         onClick={onToggleWatch}
         className={clsx(
-          'flex-none p-0.5 rounded transition-colors',
+          'flex-none p-1.5 md:p-0.5 rounded transition-colors -ml-1',
           isWatched ? 'text-yellow-500' : 'text-text-muted hover:text-yellow-500'
         )}
       >
-        <Star className={clsx('w-3.5 h-3.5', isWatched && 'fill-current')} />
+        <Star className={clsx('w-4 h-4 md:w-3.5 md:h-3.5', isWatched && 'fill-current')} />
       </button>
       
       {/* Market info */}

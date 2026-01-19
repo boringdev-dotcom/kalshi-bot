@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
     
+    # CORS configuration (comma-separated list of allowed origins)
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173",
+        alias="CORS_ORIGINS"
+    )
+    
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Get CORS origins as a list."""
+        if self.cors_origins == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+    
     @field_validator("kalshi_private_key_pem", mode="before")
     @classmethod
     def normalize_private_key(cls, v: Optional[str]) -> Optional[str]:
