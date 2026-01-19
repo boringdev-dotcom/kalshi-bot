@@ -1200,6 +1200,201 @@ def select_total_extremes(markets: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return result
 
 
+# =============================================================================
+# SPREAD EXTREMES FOR ALTERNATIVE ANALYSIS
+# =============================================================================
+
+def implied_yes_prob(market: Dict[str, Any]) -> Optional[float]:
+    """
+    Compute implied YES probability from market bid/ask or last_price.
+    
+    Priority:
+      1. Midpoint of yes_bid and yes_ask (if both exist)
+      2. Fallback to last_price
+    
+    Args:
+        market: Market dictionary with pricing fields
+        
+    Returns:
+        Implied YES probability as a float (0-100 scale), or None if unavailable
+    """
+    yes_bid = market.get("yes_bid")
+    yes_ask = market.get("yes_ask")
+    
+    if yes_bid is not None and yes_ask is not None:
+        return (yes_bid + yes_ask) / 2.0
+    
+    # Fallback to last_price
+    last_price = market.get("last_price")
+    if last_price is not None:
+        return float(last_price)
+    
+    return None
+
+
+def select_spread_extremes(markets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filter markets to SPREAD type only and keep the tail markets (max strike per team).
+    
+    For alternative spread analysis, we want the "blowout tails" - the highest
+    strike spread market for each team. E.g., "Team A wins by >10.5" and
+    "Team B wins by >8.5" are the two tails.
+    
+    Args:
+        markets: List of market dictionaries for a single game
+        
+    Returns:
+        List containing at most 2 markets: max strike for each team (the tails)
+    """
+    # Filter to spreads only
+    spreads = [m for m in markets if m.get("market_type") == "spread"]
+    
+    if not spreads:
+        return []
+    
+    # Parse team + strike and group by team
+    # Structure: { team_abbrev: [(strike, market), ...] }
+    by_team: Dict[str, List[tuple]] = {}
+    
+    for market in spreads:
+        ticker = market.get("ticker", "")
+        team_abbrev, direction = _parse_team_direction_from_ticker(ticker)
+        strike = _parse_strike_from_ticker(ticker)
+        
+        if team_abbrev and strike is not None:
+            if team_abbrev not in by_team:
+                by_team[team_abbrev] = []
+            by_team[team_abbrev].append((strike, market))
+    
+    # If no teams could be parsed, fall back to returning first 1-2 spreads
+    if not by_team:
+        return spreads[:2]
+    
+    # For each team, pick the max strike (the "tail" / blowout market)
+    result = []
+    for team_abbrev, strike_markets in by_team.items():
+        # Sort by strike descending and pick the max
+        strike_markets.sort(key=lambda x: x[0], reverse=True)
+        max_strike_market = strike_markets[0][1]
+        result.append(max_strike_market)
+    
+    return result
+
+
+def pick_higher_prob_spread_extreme(
+    extremes: List[Dict[str, Any]]
+) -> tuple[Optional[Dict[str, Any]], Optional[float]]:
+    """
+    Given a list of spread extreme markets (tails), pick the one with higher implied YES probability.
+    
+    Args:
+        extremes: List of spread tail markets (typically 2, one per team)
+        
+    Returns:
+        Tuple of (chosen_market, implied_yes_prob) or (None, None) if no valid prices
+    """
+    if not extremes:
+        return None, None
+    
+    best_market = None
+    best_prob = None
+    
+    for market in extremes:
+        prob = implied_yes_prob(market)
+        if prob is not None:
+            if best_prob is None or prob > best_prob:
+                best_prob = prob
+                best_market = market
+    
+    return best_market, best_prob
+
+
+def compute_spread_combo_analysis(
+    games_data: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Compute alternative spread combo analysis for multiple games.
+    
+    For each game:
+      - Select the spread extremes (max strike per team = tails)
+      - Pick the tail with higher implied YES probability
+    
+    Then compute combined implied probability across all games.
+    
+    Args:
+        games_data: List of game dicts, each with "markets" key containing market list
+        
+    Returns:
+        {
+            "games": [
+                {
+                    "title": str,
+                    "tails": [market1, market2],  # the two tail markets
+                    "tail_probs": [prob1, prob2],  # implied YES prob for each tail
+                    "chosen_market": market,  # the higher-prob tail
+                    "chosen_prob": float,  # its probability
+                },
+                ...
+            ],
+            "combined_prob": float,  # product of chosen probs (as decimal 0-1)
+            "combined_prob_pct": float,  # as percentage
+            "implied_fair_price_cents": float,  # combined_prob * 100
+            "games_included": int,  # number of games with valid prices
+        }
+    """
+    result_games = []
+    probs_for_combo = []
+    
+    for game in games_data:
+        title = game.get("title", "Unknown Game")
+        markets = game.get("markets", [])
+        
+        # Get spread extremes (tails)
+        tails = select_spread_extremes(markets)
+        
+        # Compute implied prob for each tail
+        tail_probs = []
+        for tail in tails:
+            prob = implied_yes_prob(tail)
+            tail_probs.append(prob)
+        
+        # Pick higher-prob tail
+        chosen_market, chosen_prob = pick_higher_prob_spread_extreme(tails)
+        
+        game_result = {
+            "title": title,
+            "tails": tails,
+            "tail_probs": tail_probs,
+            "chosen_market": chosen_market,
+            "chosen_prob": chosen_prob,
+        }
+        result_games.append(game_result)
+        
+        # Add to combo if valid
+        if chosen_prob is not None:
+            probs_for_combo.append(chosen_prob / 100.0)  # convert to decimal
+    
+    # Compute combined probability
+    if probs_for_combo:
+        combined_prob = 1.0
+        for p in probs_for_combo:
+            combined_prob *= p
+        combined_prob_pct = combined_prob * 100
+        implied_fair_price = combined_prob_pct  # in cents
+    else:
+        combined_prob = None
+        combined_prob_pct = None
+        implied_fair_price = None
+    
+    return {
+        "games": result_games,
+        "combined_prob": combined_prob,
+        "combined_prob_pct": combined_prob_pct,
+        "implied_fair_price_cents": implied_fair_price,
+        "games_included": len(probs_for_combo),
+    }
+
+
 def format_totals_for_deep_research(
     markets: List[Dict[str, Any]],
     games_metadata: List[Dict[str, Any]],
@@ -1291,6 +1486,141 @@ def format_totals_for_deep_research(
     return "\n".join(output)
 
 
+def format_combined_extremes_for_deep_research(
+    games_metadata: List[Dict[str, Any]],
+) -> str:
+    """
+    Format both TOTAL and SPREAD extreme markets for Gemini Deep Research prompt.
+    
+    For each game, includes:
+      - Total extremes: lowest and highest strike (over/under)
+      - Spread extremes: max strike per team (blowout tails)
+    
+    The LLM will analyze both and recommend which market type to play per game.
+    
+    Args:
+        games_metadata: List of game metadata dicts with:
+            - title, date, away_team, home_team
+            - total_extremes: list of extreme total markets
+            - spread_extremes: list of extreme spread markets
+        
+    Returns:
+        Formatted string for Deep Research input
+    """
+    output = []
+    output.append("=" * 70)
+    output.append("KALSHI NBA MARKETS - TOTALS & SPREADS EXTREMES")
+    output.append("=" * 70)
+    output.append("")
+    output.append("MARKET GUIDE:")
+    output.append("  • TOTALS: Over/Under on combined points scored")
+    output.append("    - Showing lowest and highest strike for each game")
+    output.append("    - YES = Over the strike | NO = Under the strike")
+    output.append("  • SPREADS: Team wins by more than X points (blowout markets)")
+    output.append("    - Showing highest strike per team (the 'blowout tails')")
+    output.append("    - YES = Team wins by more than X | NO = They don't")
+    output.append("  • Prices in cents (e.g., 45¢ = 45% implied probability)")
+    output.append("")
+    output.append("YOUR TASK: For each game, analyze BOTH totals and spreads,")
+    output.append("then recommend whether to play TOTAL or SPREAD for that game.")
+    output.append("")
+    
+    for game in games_metadata:
+        title = game.get("title", "Unknown")
+        date = game.get("date")
+        date_str = date.strftime("%B %d, %Y") if date else "TBD"
+        away_team = game.get("away_team", "Away")
+        home_team = game.get("home_team", "Home")
+        total_extremes = game.get("total_extremes", [])
+        spread_extremes = game.get("spread_extremes", [])
+        
+        output.append(f"\n{'='*70}")
+        output.append(f"🏀 {title}")
+        output.append(f"   Date: {date_str}")
+        output.append(f"   {away_team} @ {home_team}")
+        output.append("=" * 70)
+        
+        # --- TOTALS SECTION ---
+        output.append("\n  ┌─ TOTAL MARKETS (Over/Under) ─────────────────────────────────────")
+        
+        if not total_extremes:
+            output.append("  │  No total markets available for this game")
+        else:
+            for market in total_extremes:
+                ticker = market.get("ticker", "N/A")
+                strike = _parse_strike_from_ticker(ticker)
+                yes_bid = market.get("yes_bid")
+                yes_ask = market.get("yes_ask")
+                volume = market.get("volume", 0) or 0
+                
+                output.append(f"  │")
+                output.append(f"  │  Ticker: {ticker}")
+                if strike is not None:
+                    output.append(f"  │  Strike: {strike} total points")
+                
+                if yes_bid is not None and yes_ask is not None:
+                    yes_mid = (yes_bid + yes_ask) / 2
+                    under_mid = 100 - yes_mid
+                    output.append(f"  │  OVER:  Bid {yes_bid}¢ | Ask {yes_ask}¢ | Mid {yes_mid:.0f}¢")
+                    output.append(f"  │  UNDER: Implied mid {under_mid:.0f}¢")
+                elif yes_bid is not None:
+                    output.append(f"  │  OVER: Bid {yes_bid}¢")
+                elif yes_ask is not None:
+                    output.append(f"  │  OVER: Ask {yes_ask}¢")
+                else:
+                    last_price = market.get("last_price")
+                    if last_price is not None:
+                        output.append(f"  │  OVER: Last price {last_price}¢")
+                
+                output.append(f"  │  Volume: {volume} contracts")
+        
+        output.append("  └────────────────────────────────────────────────────────────────────")
+        
+        # --- SPREADS SECTION ---
+        output.append("\n  ┌─ SPREAD MARKETS (Blowout Tails) ────────────────────────────────")
+        
+        if not spread_extremes:
+            output.append("  │  No spread markets available for this game")
+        else:
+            for market in spread_extremes:
+                ticker = market.get("ticker", "N/A")
+                strike = _parse_strike_from_ticker(ticker)
+                team_abbrev, _ = _parse_team_direction_from_ticker(ticker)
+                yes_bid = market.get("yes_bid")
+                yes_ask = market.get("yes_ask")
+                yes_sub = market.get("yes_sub_title", f"{team_abbrev} wins by >{strike}")
+                volume = market.get("volume", 0) or 0
+                
+                output.append(f"  │")
+                output.append(f"  │  Ticker: {ticker}")
+                output.append(f"  │  {team_abbrev} wins by more than {strike} points")
+                
+                if yes_bid is not None and yes_ask is not None:
+                    yes_mid = (yes_bid + yes_ask) / 2
+                    no_mid = 100 - yes_mid
+                    output.append(f"  │  YES (blowout):  Bid {yes_bid}¢ | Ask {yes_ask}¢ | Mid {yes_mid:.0f}¢")
+                    output.append(f"  │  NO  (no blowout): Implied mid {no_mid:.0f}¢")
+                elif yes_bid is not None:
+                    output.append(f"  │  YES: Bid {yes_bid}¢")
+                elif yes_ask is not None:
+                    output.append(f"  │  YES: Ask {yes_ask}¢")
+                else:
+                    last_price = market.get("last_price")
+                    if last_price is not None:
+                        output.append(f"  │  YES: Last price {last_price}¢")
+                
+                output.append(f"  │  Volume: {volume} contracts")
+        
+        output.append("  └────────────────────────────────────────────────────────────────────")
+        output.append("")
+    
+    output.append("=" * 70)
+    output.append("END OF MARKETS BOARD")
+    output.append("=" * 70)
+    
+    return "\n".join(output)
+
+
 # =============================================================================
 # SHARED UTILITY FUNCTIONS
 # =============================================================================
@@ -1345,4 +1675,385 @@ def group_markets_by_match(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str,
         matches[match_id]["markets"].append(market)
     
     return matches
+
+
+# =============================================================================
+# LIVE DASHBOARD API FUNCTIONS
+# =============================================================================
+
+def get_orderbook(
+    ticker: str,
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+    depth: int = 0,
+) -> Dict[str, Any]:
+    """
+    Fetch orderbook for a specific market.
+    
+    Args:
+        ticker: Market ticker symbol
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL (demo vs production)
+        depth: Number of price levels to return (0 or negative = full book)
+        
+    Returns:
+        Orderbook dictionary with 'yes' and 'no' arrays of [price, quantity] pairs
+    """
+    if ws_url and "demo" in ws_url:
+        base_url = "https://demo-api.kalshi.co"
+    else:
+        base_url = "https://api.elections.kalshi.com"
+    
+    path = f"/trade-api/v2/markets/{ticker}/orderbook"
+    
+    # Add depth parameter if specified
+    params = {}
+    if depth != 0:
+        params["depth"] = depth
+    
+    if params:
+        query_string = "&".join(f"{k}={v}" for k, v in params.items())
+        full_path = f"{path}?{query_string}"
+    else:
+        full_path = path
+    
+    url = base_url + full_path
+    
+    try:
+        timestamp_ms = str(int(time.time() * 1000))
+        signature = sign_request(private_key_pem, timestamp_ms, "GET", full_path)
+        
+        headers = {
+            "KALSHI-ACCESS-KEY": key_id,
+            "KALSHI-ACCESS-SIGNATURE": signature,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Format orderbook data
+        orderbook = data.get("orderbook", data)
+        return {
+            "yes": orderbook.get("yes", []),
+            "no": orderbook.get("no", []),
+            "ticker": ticker,
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch orderbook for {ticker}: {e}")
+        return {"yes": [], "no": [], "ticker": ticker}
+
+
+def get_trades(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+    ticker: str = None,
+    limit: int = 100,
+    cursor: str = None,
+    min_ts: int = None,
+    max_ts: int = None,
+) -> Dict[str, Any]:
+    """
+    Fetch trades from Kalshi REST API.
+    
+    Args:
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL (demo vs production)
+        ticker: Optional market ticker to filter trades
+        limit: Maximum number of trades to return (max 1000)
+        cursor: Pagination cursor
+        min_ts: Minimum timestamp (Unix epoch seconds)
+        max_ts: Maximum timestamp (Unix epoch seconds)
+        
+    Returns:
+        Dictionary with 'trades' list and 'cursor' for pagination
+    """
+    if ws_url and "demo" in ws_url:
+        base_url = "https://demo-api.kalshi.co"
+    else:
+        base_url = "https://api.elections.kalshi.com"
+    
+    path = "/trade-api/v2/markets/trades"
+    
+    # Build query parameters
+    params = {"limit": min(limit, 1000)}
+    if ticker:
+        params["ticker"] = ticker
+    if cursor:
+        params["cursor"] = cursor
+    if min_ts:
+        params["min_ts"] = min_ts
+    if max_ts:
+        params["max_ts"] = max_ts
+    
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    full_path = f"{path}?{query_string}"
+    url = base_url + full_path
+    
+    try:
+        timestamp_ms = str(int(time.time() * 1000))
+        signature = sign_request(private_key_pem, timestamp_ms, "GET", full_path)
+        
+        headers = {
+            "KALSHI-ACCESS-KEY": key_id,
+            "KALSHI-ACCESS-SIGNATURE": signature,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Format trades with consistent field names
+        trades = []
+        for trade in data.get("trades", []):
+            formatted_trade = {
+                "trade_id": trade.get("trade_id"),
+                "ticker": trade.get("ticker"),
+                "price": trade.get("yes_price") or trade.get("price"),
+                "yes_price": trade.get("yes_price"),
+                "no_price": trade.get("no_price"),
+                "count": trade.get("count") or trade.get("size", 1),
+                "taker_side": trade.get("taker_side"),
+                "created_time": trade.get("created_time"),
+            }
+            trades.append(formatted_trade)
+        
+        return {
+            "trades": trades,
+            "cursor": data.get("cursor"),
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch trades: {e}")
+        return {"trades": [], "cursor": None}
+
+
+def get_candlesticks(
+    ticker: str,
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+    series_ticker: str = None,
+    period_interval: int = 1,  # Minutes per candle
+    start_ts: int = None,
+    end_ts: int = None,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch candlestick/OHLC data for a market.
+    
+    Args:
+        ticker: Market ticker symbol
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL
+        series_ticker: Optional series ticker
+        period_interval: Minutes per candle (1, 5, 15, 60, etc.)
+        start_ts: Start timestamp (Unix epoch seconds)
+        end_ts: End timestamp (Unix epoch seconds)
+        
+    Returns:
+        List of candlestick dictionaries with open, high, low, close, volume
+    """
+    if ws_url and "demo" in ws_url:
+        base_url = "https://demo-api.kalshi.co"
+    else:
+        base_url = "https://api.elections.kalshi.com"
+    
+    path = f"/trade-api/v2/markets/{ticker}/candlesticks"
+    
+    # Build query parameters
+    params = {"period_interval": period_interval}
+    if series_ticker:
+        params["series_ticker"] = series_ticker
+    if start_ts:
+        params["start_ts"] = start_ts
+    if end_ts:
+        params["end_ts"] = end_ts
+    
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    full_path = f"{path}?{query_string}"
+    url = base_url + full_path
+    
+    try:
+        timestamp_ms = str(int(time.time() * 1000))
+        signature = sign_request(private_key_pem, timestamp_ms, "GET", full_path)
+        
+        headers = {
+            "KALSHI-ACCESS-KEY": key_id,
+            "KALSHI-ACCESS-SIGNATURE": signature,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Format candlesticks
+        candlesticks = []
+        for candle in data.get("candlesticks", []):
+            formatted_candle = {
+                "timestamp": candle.get("end_period_ts") or candle.get("ts"),
+                "open": candle.get("open_price") or candle.get("open"),
+                "high": candle.get("high_price") or candle.get("high"),
+                "low": candle.get("low_price") or candle.get("low"),
+                "close": candle.get("close_price") or candle.get("close") or candle.get("price"),
+                "volume": candle.get("volume", 0),
+                "yes_price": candle.get("yes_price") or candle.get("close_price") or candle.get("price"),
+            }
+            candlesticks.append(formatted_candle)
+        
+        return candlesticks
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch candlesticks for {ticker}: {e}")
+        return []
+
+
+def get_all_sports_markets(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Fetch all sports markets, organized by sport/league.
+    
+    Returns markets for all configured sports (NBA, Soccer leagues).
+    
+    Args:
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL
+        
+    Returns:
+        Dictionary mapping sport/league to list of market dicts:
+        {
+            "nba": [...],
+            "bundesliga": [...],
+            "la_liga": [...],
+            ...
+        }
+    """
+    all_markets = {}
+    
+    # Fetch basketball markets
+    try:
+        nba_markets = get_basketball_markets(
+            key_id=key_id,
+            private_key_pem=private_key_pem,
+            ws_url=ws_url,
+            leagues=["nba"],
+        )
+        if nba_markets:
+            all_markets["nba"] = nba_markets
+    except Exception as e:
+        logger.error(f"Failed to fetch NBA markets: {e}")
+    
+    # Fetch soccer markets for all leagues
+    soccer_leagues = ["bundesliga", "la_liga", "premier_league", "mls", "ucl"]
+    for league in soccer_leagues:
+        try:
+            soccer_markets = get_soccer_markets(
+                key_id=key_id,
+                private_key_pem=private_key_pem,
+                ws_url=ws_url,
+                leagues=[league],
+            )
+            if soccer_markets:
+                all_markets[league] = soccer_markets
+        except Exception as e:
+            logger.error(f"Failed to fetch {league} markets: {e}")
+    
+    return all_markets
+
+
+def group_markets_by_event(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """
+    Group markets by event (game/match).
+    
+    Similar to group_markets_by_match but returns more structured data
+    suitable for the live dashboard.
+    
+    Args:
+        markets: List of market dictionaries
+        
+    Returns:
+        Dictionary mapping event_id to event data:
+        {
+            "26JAN19STUFRA": {
+                "event_id": "26JAN19STUFRA",
+                "title": "Stuttgart vs Frankfurt",
+                "league": "bundesliga",
+                "close_time": "2026-01-19T...",
+                "markets": [
+                    {"ticker": "...-STU", "subtitle": "Stuttgart", ...},
+                    {"ticker": "...-TIE", "subtitle": "Tie", ...},
+                    {"ticker": "...-FRA", "subtitle": "Frankfurt", ...},
+                ]
+            }
+        }
+    """
+    events = {}
+    
+    for market in markets:
+        ticker = market.get("ticker", "")
+        parts = ticker.split("-")
+        
+        # Extract event identifier (second part of ticker)
+        if len(parts) >= 2:
+            event_id = parts[1]
+        else:
+            event_id = market.get("event_ticker") or ticker
+        
+        if event_id not in events:
+            # Parse title to get clean event name
+            title = market.get("title", "Unknown Event")
+            # Remove suffixes like "Winner?", "Tie?", etc.
+            for suffix in [" Winner?", " Winner", " Tie?", " Tie", " Total?", " Total"]:
+                title = title.replace(suffix, "")
+            
+            events[event_id] = {
+                "event_id": event_id,
+                "title": title.strip(),
+                "league": market.get("league", "unknown"),
+                "close_time": market.get("close_time") or market.get("expiration_time"),
+                "markets": [],
+            }
+        
+        # Add market to event with useful fields for display
+        market_info = {
+            "ticker": market.get("ticker"),
+            "subtitle": market.get("subtitle") or market.get("yes_sub_title") or _extract_outcome_from_ticker(ticker),
+            "market_type": market.get("market_type", "unknown"),
+            "yes_bid": market.get("yes_bid"),
+            "yes_ask": market.get("yes_ask"),
+            "no_bid": market.get("no_bid"),
+            "no_ask": market.get("no_ask"),
+            "last_price": market.get("last_price"),
+            "volume": market.get("volume", 0),
+        }
+        events[event_id]["markets"].append(market_info)
+    
+    return events
+
+
+def _extract_outcome_from_ticker(ticker: str) -> str:
+    """Extract outcome name from ticker suffix (e.g., STU, TIE, FRA)."""
+    parts = ticker.split("-")
+    if len(parts) >= 3:
+        outcome = parts[-1]
+        # Remove any numbers (for spread/total tickers)
+        import re
+        outcome = re.sub(r'\d+', '', outcome)
+        return outcome
+    return "Unknown"
 

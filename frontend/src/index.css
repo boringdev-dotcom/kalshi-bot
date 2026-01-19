@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0a12 0%, #12121c 50%, #0f0f18 100%);
+  color: #e0e0e8;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a12;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3a50;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4a60;
+}
+
+/* Custom utilities */
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-accent-blue to-accent-purple bg-clip-text text-transparent;
+  }
+  
+  .glass-panel {
+    @apply bg-bg-panel/60 border border-border-subtle rounded-lg;
+  }
+  
+  .panel-header {
+    @apply px-3 py-2 border-b border-border-subtle flex items-center justify-between;
+  }
+  
+  .panel-title {
+    @apply text-sm font-semibold text-text-primary;
+  }
+
+  /* Compact row styling */
+  .compact-row {
+    @apply px-3 py-1.5 text-sm;
+  }
+
+  /* Focus highlight */
+  .focus-highlight {
+    @apply bg-accent-blue/10 border-l-2 border-accent-blue;
+  }
+}
+
+/* Price colors */
+.price-up {
+  color: #00c853;
+}
+
+.price-down {
+  color: #ff1744;
+}
+
+.price-neutral {
+  color: #a0a0b0;
+}
+
+/* Orderbook specific styles */
+.orderbook-bid {
+  background: linear-gradient(to right, rgba(0, 200, 83, 0.08), transparent);
+}
+
+.orderbook-ask {
+  background: linear-gradient(to left, rgba(255, 23, 68, 0.08), transparent);
+}
+
+/* Table styles */
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  text-align: left;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+th {
+  color: #606070;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid #1e1e2a;
+}
+
+td {
+  border-bottom: 1px solid #1e1e2a;
+}
+
+/* Animation */
+@keyframes pulse-green {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(0, 200, 83, 0.2); }
+}
+
+@keyframes pulse-red {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(255, 23, 68, 0.2); }
+}
+
+.flash-green {
+  animation: pulse-green 0.3s ease-in-out;
+}
+
+.flash-red {
+  animation: pulse-red 0.3s ease-in-out;
+}
