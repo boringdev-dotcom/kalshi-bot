@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronDown, RefreshCw, Search, Star } from 'lucide-react';
+import { ChevronDown, RefreshCw, Search, Star, ToggleLeft, ToggleRight } from 'lucide-react';
 import type { LeagueData, SelectedMarket, Event, TickerData } from '../types';
 import { clsx } from 'clsx';
 
@@ -10,6 +10,7 @@ interface MarketSelectorProps {
   tickerData: Record<string, TickerData>;
   onMarketsChange: (markets: SelectedMarket[]) => void;
   onFocusMarket: (market: SelectedMarket) => void;
+  onToggleViewSide: (ticker: string) => void;
   isLoading: boolean;
 }
 
@@ -20,6 +21,7 @@ export function MarketSelector({
   tickerData,
   onMarketsChange,
   onFocusMarket,
+  onToggleViewSide,
   isLoading,
 }: MarketSelectorProps) {
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
@@ -66,9 +68,16 @@ export function MarketSelector({
           subtitle: market.subtitle,
           eventTitle: event.title,
           league: event.league,
+          viewSide: 'yes',  // Default to YES side
         },
       ]);
     }
+  };
+
+  // Get viewSide for a market
+  const getViewSide = (ticker: string): 'yes' | 'no' => {
+    const market = selectedMarkets.find(m => m.ticker === ticker);
+    return market?.viewSide || 'yes';
   };
 
   // Focus on a market (and add to watchlist)
@@ -78,6 +87,7 @@ export function MarketSelector({
       subtitle: market.subtitle,
       eventTitle: event.title,
       league: event.league,
+      viewSide: getViewSide(market.ticker),
     });
   };
 
@@ -159,6 +169,11 @@ export function MarketSelector({
                   e.stopPropagation();
                   onMarketsChange(selectedMarkets.filter(m => m.ticker !== market.ticker));
                 }}
+                onToggleViewSide={(e) => {
+                  e.stopPropagation();
+                  onToggleViewSide(market.ticker);
+                }}
+                showViewToggle={true}
               />
             ))}
           </div>
@@ -201,6 +216,7 @@ export function MarketSelector({
                         subtitle: market.subtitle,
                         eventTitle: event.title,
                         league: event.league,
+                        viewSide: getViewSide(market.ticker),
                       }}
                       tickerData={tickerData[market.ticker] || {
                         ticker: market.ticker,
@@ -215,6 +231,11 @@ export function MarketSelector({
                       isWatched={isMarketWatched(market.ticker)}
                       onFocus={() => handleFocusMarket(market, event)}
                       onToggleWatch={(e) => toggleWatchlist(market, event, e)}
+                      onToggleViewSide={(e) => {
+                        e.stopPropagation();
+                        onToggleViewSide(market.ticker);
+                      }}
+                      showViewToggle={isMarketWatched(market.ticker)}
                     />
                   ))}
                 </div>
@@ -235,14 +256,32 @@ interface MarketRowProps {
   isWatched: boolean;
   onFocus: () => void;
   onToggleWatch: (e: React.MouseEvent) => void;
+  onToggleViewSide?: (e: React.MouseEvent) => void;
+  showViewToggle?: boolean;
 }
 
-function MarketRow({ market, tickerData, isFocused, isWatched, onFocus, onToggleWatch }: MarketRowProps) {
+function MarketRow({ 
+  market, 
+  tickerData, 
+  isFocused, 
+  isWatched, 
+  onFocus, 
+  onToggleWatch,
+  onToggleViewSide,
+  showViewToggle = false,
+}: MarketRowProps) {
+  const viewSide = market.viewSide || 'yes';
+  const isYesView = viewSide === 'yes';
+  
+  // Calculate displayed prices based on view side
+  const bidPrice = isYesView ? tickerData?.yes_bid : tickerData?.no_bid;
+  const askPrice = isYesView ? tickerData?.yes_ask : tickerData?.no_ask;
+  
   return (
-    <button
+    <div
       onClick={onFocus}
       className={clsx(
-        'w-full px-3 py-3 md:py-2 flex items-center gap-2 text-left transition-colors',
+        'w-full px-3 py-3 md:py-2 flex items-center gap-2 text-left transition-colors cursor-pointer',
         isFocused 
           ? 'bg-accent-blue/10 border-l-2 border-accent-blue' 
           : 'hover:bg-bg-secondary/50 border-l-2 border-transparent active:bg-bg-secondary/70'
@@ -264,12 +303,28 @@ function MarketRow({ market, tickerData, isFocused, isWatched, onFocus, onToggle
         <div className="text-sm text-text-primary truncate">{market.subtitle}</div>
       </div>
       
+      {/* YES/NO Toggle (only show for watched markets) */}
+      {showViewToggle && isWatched && onToggleViewSide && (
+        <button
+          onClick={onToggleViewSide}
+          className={clsx(
+            'flex-none px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors',
+            isYesView 
+              ? 'bg-accent-green/20 text-accent-green hover:bg-accent-green/30' 
+              : 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
+          )}
+          title={`Viewing ${isYesView ? 'YES' : 'NO'} side. Click to switch.`}
+        >
+          {isYesView ? 'YES' : 'NO'}
+        </button>
+      )}
+      
       {/* Price chips */}
       <div className="flex-none flex items-center gap-1.5 font-mono text-xs">
-        <span className="text-accent-green">{tickerData?.yes_bid ?? '--'}</span>
+        <span className="text-accent-green">{bidPrice ?? '--'}</span>
         <span className="text-text-muted">/</span>
-        <span className="text-accent-red">{tickerData?.yes_ask ?? '--'}</span>
+        <span className="text-accent-red">{askPrice ?? '--'}</span>
       </div>
-    </button>
+    </div>
   );
 }

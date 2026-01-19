@@ -166,6 +166,22 @@ function App() {
     }
   }, [selectedMarkets, handleMarketsChange]);
 
+  // Toggle YES/NO view side for a market
+  const handleToggleViewSide = useCallback((ticker: string) => {
+    setSelectedMarkets(prev => prev.map(m => 
+      m.ticker === ticker 
+        ? { ...m, viewSide: m.viewSide === 'yes' ? 'no' : 'yes' }
+        : m
+    ));
+    // Also update focused market if it's the same
+    if (focusedMarket?.ticker === ticker) {
+      setFocusedMarket(prev => prev ? {
+        ...prev,
+        viewSide: prev.viewSide === 'yes' ? 'no' : 'yes'
+      } : null);
+    }
+  }, [focusedMarket]);
+
   // Get combined trades for all selected markets
   const allTrades = selectedMarkets.flatMap(m => 
     (trades[m.ticker] || []).map(t => ({ ...t, ticker: m.ticker, subtitle: m.subtitle }))
@@ -235,6 +251,7 @@ function App() {
               handleFocusMarket(market);
               setShowMobileMenu(false); // Close menu on mobile after selection
             }}
+            onToggleViewSide={handleToggleViewSide}
             isLoading={isLoading}
           />
         </div>
@@ -322,7 +339,10 @@ function App() {
             ) : activeTab === 'orderbook' ? (
               <div className="h-full glass-panel overflow-hidden">
                 {focusedMarket ? (
-                  <Orderbook orderbook={orderbooks[focusedTicker!]} />
+                  <Orderbook 
+                    orderbook={orderbooks[focusedTicker!]} 
+                    viewSide={focusedMarket.viewSide || 'yes'}
+                  />
                 ) : (
                   <div className="h-full flex items-center justify-center text-text-muted">
                     Click a market to view its orderbook
