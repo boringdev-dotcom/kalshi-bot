@@ -1,6 +1,7 @@
 import type { LeagueData, League, Orderbook, Trade, Candlestick, Market } from './types';
 
-const API_BASE = '/api';
+// API base URL - defaults to /api for same-origin, or use VITE_API_URL for cross-origin
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 // =============================================================================
 // API Functions

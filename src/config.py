@@ -42,7 +42,26 @@ class Settings(BaseSettings):
     
     # API server configuration
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
+    # Note: Render.com uses PORT env var, so we check both API_PORT and PORT
     api_port: int = Field(default=8000, alias="API_PORT")
+    
+    def get_port(self) -> int:
+        """Get port, preferring PORT env var (for Render.com) over API_PORT."""
+        import os
+        return int(os.environ.get("PORT", self.api_port))
+    
+    # CORS configuration (comma-separated list of allowed origins)
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173",
+        alias="CORS_ORIGINS"
+    )
+    
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Get CORS origins as a list."""
+        if self.cors_origins == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
     
     @field_validator("kalshi_private_key_pem", mode="before")
     @classmethod

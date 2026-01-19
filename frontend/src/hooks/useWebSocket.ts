@@ -86,9 +86,21 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/market-data`;
+    // Build WebSocket URL from API URL or use current host
+    let wsUrl: string;
+    const apiUrl = import.meta.env.VITE_API_URL;
+    
+    if (apiUrl && apiUrl.startsWith('http')) {
+      // Convert HTTP URL to WebSocket URL
+      const url = new URL(apiUrl);
+      const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${wsProtocol}//${url.host}/ws/market-data`;
+    } else {
+      // Use current host (same-origin)
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      wsUrl = `${protocol}//${host}/ws/market-data`;
+    }
 
     console.log('Connecting to WebSocket:', wsUrl);
     

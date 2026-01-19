@@ -84,12 +84,14 @@ async def main():
                 logger.error("No Discord notification method available")
     
     # Start API server and WebSocket client concurrently
+    port = settings.get_port()  # Uses PORT env var for Render.com
+    
     async def run_api_server():
         """Run the FastAPI server."""
         config = uvicorn.Config(
             app,
             host=settings.api_host,
-            port=settings.api_port,
+            port=port,
             log_level="info",
             access_log=False,
         )
@@ -128,8 +130,8 @@ async def main():
     
     # Run both tasks concurrently
     try:
-        logger.info(f"Starting API server on http://{settings.api_host}:{settings.api_port}")
-        logger.info(f"Health check available at http://{settings.api_host}:{settings.api_port}/health")
+        logger.info(f"Starting API server on http://{settings.api_host}:{port}")
+        logger.info(f"Health check available at http://{settings.api_host}:{port}/health")
         await asyncio.gather(
             run_api_server(),
             run_websocket_client(),

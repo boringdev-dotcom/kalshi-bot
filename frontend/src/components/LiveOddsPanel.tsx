@@ -207,8 +207,8 @@ export function LiveOddsPanel({ selectedMarkets, tickerData, oddsApiKey }: LiveO
         </div>
       )}
 
-      {/* Column Headers */}
-      <div className="flex-none grid grid-cols-[1fr_120px_100px_120px] gap-2 px-4 py-2 bg-bg-secondary/50 text-xs font-medium text-text-muted uppercase tracking-wide">
+      {/* Column Headers - Hidden on mobile */}
+      <div className="hidden md:grid flex-none grid-cols-[1fr_120px_100px_120px] gap-2 px-4 py-2 bg-bg-secondary/50 text-xs font-medium text-text-muted uppercase tracking-wide">
         <span>Game</span>
         <span className="text-center">Spread</span>
         <span className="text-center">Money</span>
@@ -236,7 +236,7 @@ export function LiveOddsPanel({ selectedMarkets, tickerData, oddsApiKey }: LiveO
   );
 }
 
-// Game Row Component - FanDuel style
+// Game Row Component - FanDuel style, responsive
 function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: SelectedMarket[]; tickerData: Record<string, TickerData> }) {
   const gameTime = new Date(game.commenceTime);
   const now = new Date();
@@ -268,27 +268,95 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
 
   return (
     <div className="border-b border-border-subtle">
+      {/* Game Header - Mobile */}
+      <div className="md:hidden px-3 py-2 bg-bg-secondary/30 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {isLive && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-accent-red/20 text-accent-red text-xs font-medium rounded">
+              <Circle className="w-2 h-2 fill-current" />
+              LIVE
+            </span>
+          )}
+          <span className="text-sm font-medium text-text-primary">
+            {game.awayTeam.split(' ').pop()} @ {game.homeTeam.split(' ').pop()}
+          </span>
+        </div>
+        <span className="text-xs text-text-muted">
+          {isLive ? 'In Progress' : isToday ? gameTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : gameTime.toLocaleDateString()}
+        </span>
+      </div>
+
+      {/* Mobile Layout - Stacked cards */}
+      <div className="md:hidden px-3 py-2 grid grid-cols-3 gap-2">
+        {/* Spread */}
+        <div className="bg-bg-secondary/50 rounded p-2">
+          <div className="text-[10px] text-text-muted uppercase mb-1">Spread</div>
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between">
+              <span className="text-text-secondary">{game.awayTeam.split(' ').pop()}</span>
+              <span className="font-mono text-accent-blue">{formatSpread(game.awaySpread)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-secondary">{game.homeTeam.split(' ').pop()}</span>
+              <span className="font-mono text-accent-blue">{formatSpread(game.homeSpread)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Moneyline */}
+        <div className="bg-bg-secondary/50 rounded p-2">
+          <div className="text-[10px] text-text-muted uppercase mb-1">Money</div>
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between">
+              <span className="text-text-secondary">{game.awayTeam.split(' ').pop()}</span>
+              <span className={clsx('font-mono', game.awayML && game.awayML > 0 ? 'text-accent-green' : 'text-accent-blue')}>
+                {formatOdds(game.awayML)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-secondary">{game.homeTeam.split(' ').pop()}</span>
+              <span className={clsx('font-mono', game.homeML && game.homeML > 0 ? 'text-accent-green' : 'text-accent-blue')}>
+                {formatOdds(game.homeML)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Total */}
+        <div className="bg-bg-secondary/50 rounded p-2">
+          <div className="text-[10px] text-text-muted uppercase mb-1">Total {game.totalPoints}</div>
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between">
+              <span className="text-text-secondary">Over</span>
+              <span className="font-mono text-accent-blue">{formatOdds(game.overOdds)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-secondary">Under</span>
+              <span className="font-mono text-accent-blue">{formatOdds(game.underOdds)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop Layout - Grid rows */}
       {/* Away Team Row */}
-      <div className="grid grid-cols-[1fr_120px_100px_120px] gap-2 px-4 py-2 hover:bg-bg-secondary/30 transition-colors">
+      <div className="hidden md:grid grid-cols-[1fr_120px_100px_120px] gap-2 px-4 py-2 hover:bg-bg-secondary/30 transition-colors">
         <div className="flex items-center gap-2">
           <span className="text-sm text-text-primary font-medium">{game.awayTeam}</span>
         </div>
         
-        {/* Spread */}
         <OddsCell 
           line={formatSpread(game.awaySpread)} 
           odds={formatOdds(game.awaySpreadOdds)}
           kalshiPrice={null}
         />
         
-        {/* Moneyline */}
         <OddsCell 
           odds={formatOdds(game.awayML)}
           kalshiPrice={getKalshiPrice('away')}
           highlight={game.awayML !== null && game.awayML > 0}
         />
         
-        {/* Over */}
         <OddsCell 
           line={game.totalPoints ? `O ${game.totalPoints}` : '--'} 
           odds={formatOdds(game.overOdds)}
@@ -297,7 +365,7 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
       </div>
       
       {/* Home Team Row */}
-      <div className="grid grid-cols-[1fr_120px_100px_120px] gap-2 px-4 py-2 hover:bg-bg-secondary/30 transition-colors">
+      <div className="hidden md:grid grid-cols-[1fr_120px_100px_120px] gap-2 px-4 py-2 hover:bg-bg-secondary/30 transition-colors">
         <div className="flex items-center gap-2">
           {isLive && (
             <span className="flex items-center gap-1 px-1.5 py-0.5 bg-accent-red/20 text-accent-red text-xs font-medium rounded">
@@ -308,21 +376,18 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
           <span className="text-sm text-text-primary font-medium">{game.homeTeam}</span>
         </div>
         
-        {/* Spread */}
         <OddsCell 
           line={formatSpread(game.homeSpread)} 
           odds={formatOdds(game.homeSpreadOdds)}
           kalshiPrice={null}
         />
         
-        {/* Moneyline */}
         <OddsCell 
           odds={formatOdds(game.homeML)}
           kalshiPrice={getKalshiPrice('home')}
           highlight={game.homeML !== null && game.homeML > 0}
         />
         
-        {/* Under */}
         <OddsCell 
           line={game.totalPoints ? `U ${game.totalPoints}` : '--'} 
           odds={formatOdds(game.underOdds)}
@@ -330,11 +395,16 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
         />
       </div>
       
-      {/* Game Time */}
-      <div className="px-4 py-1 text-xs text-text-muted bg-bg-secondary/20">
+      {/* Game Time - Desktop */}
+      <div className="hidden md:block px-4 py-1 text-xs text-text-muted bg-bg-secondary/20">
         {isLive ? 'In Progress' : isToday ? gameTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : gameTime.toLocaleDateString()}
         <span className="mx-2">•</span>
         {markets.length} Kalshi market{markets.length !== 1 ? 's' : ''}
+      </div>
+
+      {/* Kalshi markets count - Mobile */}
+      <div className="md:hidden px-3 py-1.5 text-xs text-text-muted">
+        {markets.length} Kalshi market{markets.length !== 1 ? 's' : ''} matched
       </div>
     </div>
   );
