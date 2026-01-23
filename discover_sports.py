@@ -220,6 +220,7 @@ def main():
         "KXEPLGAME", "KXEPLSPREAD", "KXEPL",
         "KXNFLGAME", "KXNFLSPREAD", 
         "KXNBAGAME", "KXNBASPREAD",
+        "KXCRICKETT20IMATCH", "KXCRICKETIPLMATCH",  # Cricket series
     ]
     
     for series in known_series:

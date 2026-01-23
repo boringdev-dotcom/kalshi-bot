@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { fetchMarkets } from './api';
 import { MarketSelector } from './components/MarketSelector';
@@ -14,14 +14,50 @@ import type {
   TickerData,
   ChartDataPoint 
 } from './types';
-import { Activity, TrendingUp, BookOpen, List, ChevronRight, ChevronLeft, DollarSign, Menu, X } from 'lucide-react';
+import { Activity, TrendingUp, BookOpen, List, ChevronRight, ChevronLeft, DollarSign, Menu, X, Share2, Check } from 'lucide-react';
 import { LiveOddsPanel } from './components/LiveOddsPanel';
 import { clsx } from 'clsx';
 
 type MainTab = 'overview' | 'orderbook' | 'trades' | 'live-odds';
 
-// Get API key from environment
-const ODDS_API_KEY = import.meta.env.VITE_ODDS_API_KEY || null;
+// URL param helpers
+function parseWatchlistFromURL(): { ticker: string; viewSide: 'yes' | 'no' }[] {
+  const params = new URLSearchParams(window.location.search);
+  const watchParam = params.get('watch');
+  if (!watchParam) return [];
+  
+  return watchParam.split(',').map(item => {
+    const [ticker, side] = item.split(':');
+    return {
+      ticker,
+      viewSide: (side === 'no' ? 'no' : 'yes') as 'yes' | 'no',
+    };
+  }).filter(item => item.ticker);
+}
+
+function parseFocusFromURL(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('focus');
+}
+
+function updateURL(markets: SelectedMarket[], focusedTicker: string | null) {
+  const params = new URLSearchParams();
+  
+  if (markets.length > 0) {
+    const watchStr = markets.map(m => `${m.ticker}:${m.viewSide}`).join(',');
+    params.set('watch', watchStr);
+  }
+  
+  if (focusedTicker) {
+    params.set('focus', focusedTicker);
+  }
+  
+  const newURL = params.toString() 
+    ? `${window.location.pathname}?${params.toString()}`
+    : window.location.pathname;
+  
+  window.history.replaceState(null, '', newURL);
+}
 
 function App() {
   // Market data state
@@ -37,6 +73,24 @@ function App() {
   const [priceHistory, setPriceHistory] = useState<Record<string, ChartDataPoint[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [urlSynced, setUrlSynced] = useState(false); // Track if we've synced from URL
+  const [showCopied, setShowCopied] = useState(false); // For share button feedback
+
+  // Build a lookup map for finding markets by ticker
+  const marketLookup = useMemo(() => {
+    const lookup: Record<string, { market: { ticker: string; subtitle: string }; event: { title: string; league: string } }> = {};
+    for (const league of leagues) {
+      for (const event of league.events) {
+        for (const market of event.markets) {
+          lookup[market.ticker] = {
+            market: { ticker: market.ticker, subtitle: market.subtitle },
+            event: { title: event.title, league: event.league },
+          };
+        }
+      }
+    }
+    return lookup;
+  }, [leagues]);
 
   // WebSocket handlers
   const handleOrderbook = useCallback((ticker: string, data: OrderbookType) => {
@@ -111,6 +165,79 @@ function App() {
       }
     }
     loadMarkets();
+  }, []);
+
+  // Restore watchlist from URL when leagues are loaded
+  useEffect(() => {
+    if (urlSynced || leagues.length === 0) return;
+
+    const urlWatchlist = parseWatchlistFromURL();
+    const urlFocus = parseFocusFromURL();
+
+    if (urlWatchlist.length > 0) {
+      const restoredMarkets: SelectedMarket[] = [];
+      
+      for (const { ticker, viewSide } of urlWatchlist) {
+        const found = marketLookup[ticker];
+        if (found) {
+          restoredMarkets.push({
+            ticker,
+            subtitle: found.market.subtitle,
+            eventTitle: found.event.title,
+            league: found.event.league,
+            viewSide,
+          });
+        }
+      }
+
+      if (restoredMarkets.length > 0) {
+        setSelectedMarkets(restoredMarkets);
+        
+        // Subscribe to all restored tickers
+        subscribe(restoredMarkets.map(m => m.ticker));
+
+        // Restore focused market
+        if (urlFocus) {
+          const focusedFromURL = restoredMarkets.find(m => m.ticker === urlFocus);
+          if (focusedFromURL) {
+            setFocusedMarket(focusedFromURL);
+          }
+        }
+        
+        // If no focus specified but we have markets, focus the first one
+        if (!urlFocus && restoredMarkets.length > 0) {
+          setFocusedMarket(restoredMarkets[0]);
+        }
+      }
+    }
+
+    setUrlSynced(true);
+  }, [leagues, urlSynced, marketLookup, subscribe]);
+
+  // Update URL when watchlist or focus changes
+  useEffect(() => {
+    if (!urlSynced) return;
+    updateURL(selectedMarkets, focusedMarket?.ticker || null);
+  }, [selectedMarkets, focusedMarket, urlSynced]);
+
+  // Share current watchlist
+  const handleShare = useCallback(async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    }
   }, []);
 
   // Periodically refresh data for selected markets (every 10 seconds)
@@ -213,7 +340,34 @@ function App() {
           <Activity className="w-5 h-5 md:w-6 md:h-6 text-accent-blue" />
           <h1 className="text-base md:text-lg font-semibold text-text-primary">Kalshi</h1>
         </div>
-        <ConnectionStatus isConnected={isConnected} tickerCount={subscribedTickers.size} />
+        <div className="flex items-center gap-2 md:gap-3">
+          {/* Share button */}
+          {selectedMarkets.length > 0 && (
+            <button
+              onClick={handleShare}
+              className={clsx(
+                'flex items-center gap-1.5 px-2 py-1 rounded-md text-sm transition-colors',
+                showCopied 
+                  ? 'bg-accent-green/15 text-accent-green' 
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
+              )}
+              title="Copy shareable link"
+            >
+              {showCopied ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span className="hidden sm:inline">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Share</span>
+                </>
+              )}
+            </button>
+          )}
+          <ConnectionStatus isConnected={isConnected} tickerCount={subscribedTickers.size} />
+        </div>
       </header>
 
       {error && (
@@ -361,7 +515,6 @@ function App() {
                 <LiveOddsPanel 
                   selectedMarkets={selectedMarkets}
                   tickerData={tickerData}
-                  oddsApiKey={ODDS_API_KEY}
                 />
               </div>
             )}

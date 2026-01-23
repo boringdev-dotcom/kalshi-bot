@@ -2,11 +2,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { RefreshCw, Circle } from 'lucide-react';
 import type { SelectedMarket, TickerData } from '../types';
 import { clsx } from 'clsx';
+import { fetchNBAOdds } from '../api';
 
 interface LiveOddsPanelProps {
   selectedMarkets: SelectedMarket[];
   tickerData: Record<string, TickerData>;
-  oddsApiKey: string | null;
 }
 
 interface GameOdds {
@@ -46,53 +46,40 @@ function formatSpread(spread: number | null): string {
   return spread > 0 ? `+${spread}` : `${spread}`;
 }
 
-export function LiveOddsPanel({ selectedMarkets, tickerData, oddsApiKey }: LiveOddsPanelProps) {
+export function LiveOddsPanel({ selectedMarkets, tickerData }: LiveOddsPanelProps) {
   const [odds, setOdds] = useState<GameOdds[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Fetch odds from The Odds API - NBA only, all markets
+  // Fetch odds from backend (which proxies The Odds API)
   const fetchOdds = async () => {
-    if (!oddsApiKey) {
-      setError('No API key configured');
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
 
     try {
-      const response = await fetch(
-        `https://api.the-odds-api.com/v4/sports/basketball_nba/odds/?apiKey=${oddsApiKey}&regions=us&markets=h2h,spreads,totals&oddsFormat=american`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      const data = await response.json();
+      const data = await fetchNBAOdds();
       const allOdds: GameOdds[] = [];
       
       for (const game of data) {
         // Find FanDuel or fall back to first available
-        let bookmaker = game.bookmakers?.find((b: any) => b.key === 'fanduel');
+        let bookmaker = game.bookmakers?.find((b) => b.key === 'fanduel');
         if (!bookmaker && game.bookmakers?.length > 0) {
           bookmaker = game.bookmakers[0];
         }
         
         if (!bookmaker) continue;
 
-        const h2h = bookmaker.markets?.find((m: any) => m.key === 'h2h');
-        const spreads = bookmaker.markets?.find((m: any) => m.key === 'spreads');
-        const totals = bookmaker.markets?.find((m: any) => m.key === 'totals');
+        const h2h = bookmaker.markets?.find((m) => m.key === 'h2h');
+        const spreads = bookmaker.markets?.find((m) => m.key === 'spreads');
+        const totals = bookmaker.markets?.find((m) => m.key === 'totals');
         
-        const homeH2H = h2h?.outcomes?.find((o: any) => o.name === game.home_team);
-        const awayH2H = h2h?.outcomes?.find((o: any) => o.name === game.away_team);
-        const homeSpread = spreads?.outcomes?.find((o: any) => o.name === game.home_team);
-        const awaySpread = spreads?.outcomes?.find((o: any) => o.name === game.away_team);
-        const over = totals?.outcomes?.find((o: any) => o.name === 'Over');
-        const under = totals?.outcomes?.find((o: any) => o.name === 'Under');
+        const homeH2H = h2h?.outcomes?.find((o) => o.name === game.home_team);
+        const awayH2H = h2h?.outcomes?.find((o) => o.name === game.away_team);
+        const homeSpread = spreads?.outcomes?.find((o) => o.name === game.home_team);
+        const awaySpread = spreads?.outcomes?.find((o) => o.name === game.away_team);
+        const over = totals?.outcomes?.find((o) => o.name === 'Over');
+        const under = totals?.outcomes?.find((o) => o.name === 'Under');
         
         allOdds.push({
           id: game.id,
@@ -124,10 +111,10 @@ export function LiveOddsPanel({ selectedMarkets, tickerData, oddsApiKey }: LiveO
 
   // Fetch on mount only
   useEffect(() => {
-    if (oddsApiKey && odds.length === 0) {
+    if (odds.length === 0) {
       fetchOdds();
     }
-  }, [oddsApiKey]);
+  }, []);
 
   // Group markets by game
   const groupedGames: GroupedGame[] = useMemo(() => {
@@ -156,21 +143,6 @@ export function LiveOddsPanel({ selectedMarkets, tickerData, oddsApiKey }: LiveO
     
     return Array.from(groups.values());
   }, [selectedMarkets, odds]);
-
-  if (!oddsApiKey) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-text-muted p-8">
-        <h3 className="text-lg font-medium text-text-primary mb-2">API Key Required</h3>
-        <p className="text-center text-sm mb-4">
-          Get a free key from{' '}
-          <a href="https://the-odds-api.com/" target="_blank" rel="noopener noreferrer" className="text-accent-blue hover:underline">
-            the-odds-api.com
-          </a>
-        </p>
-        <code className="text-xs bg-bg-secondary px-2 py-1 rounded">VITE_ODDS_API_KEY=your_key</code>
-      </div>
-    );
-  }
 
   if (selectedMarkets.length === 0) {
     return (

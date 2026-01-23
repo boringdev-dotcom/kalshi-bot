@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # Google Gemini API key (for research with Google Search grounding)
     google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY")
     
+    # The Odds API key (for live sports odds)
+    odds_api_key: Optional[str] = Field(default=None, alias="ODDS_API_KEY")
+    
     # Research bot schedule configuration
     research_schedule_hour: int = Field(default=8, alias="RESEARCH_SCHEDULE_HOUR")
     research_schedule_minute: int = Field(default=0, alias="RESEARCH_SCHEDULE_MINUTE")
