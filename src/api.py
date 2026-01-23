@@ -21,6 +21,7 @@ from .kalshi_api import (
     group_markets_by_event,
     SOCCER_SERIES_TICKERS,
     BASKETBALL_SERIES_TICKERS,
+    CRICKET_SERIES_TICKERS,
 )
 from .kalshi_ws_client import (
     MarketDataStore,
@@ -196,6 +197,8 @@ def format_league_display_name(league_id: str) -> str:
         "premier_league": "Premier League",
         "mls": "MLS",
         "ucl": "UEFA Champions League",
+        "t20_international": "T20 International Cricket",
+        "ipl": "Indian Premier League",
     }
     return display_names.get(league_id, league_id.replace("_", " ").title())
 
@@ -204,6 +207,8 @@ def get_sport_for_league(league_id: str) -> str:
     """Get sport type for a league."""
     if league_id == "nba":
         return "basketball"
+    if league_id in ("t20_international", "ipl"):
+        return "cricket"
     return "soccer"
 
 
@@ -241,6 +246,14 @@ async def get_leagues():
             "league_id": league_id,
             "display_name": format_league_display_name(league_id),
             "sport": "soccer",
+        })
+    
+    # Cricket leagues
+    for league_id in CRICKET_SERIES_TICKERS.keys():
+        leagues.append({
+            "league_id": league_id,
+            "display_name": format_league_display_name(league_id),
+            "sport": "cricket",
         })
     
     return leagues
@@ -778,6 +791,43 @@ async def get_live_data(ticker: str):
         
     except Exception as e:
         logger.error(f"Failed to fetch live data for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/odds/nba")
+async def get_nba_odds():
+    """
+    Get live NBA odds from The Odds API.
+    
+    Proxies requests to The Odds API to keep the API key secure on the backend.
+    Returns odds for all NBA games with h2h, spreads, and totals markets.
+    """
+    s = get_settings()
+    
+    if not s.odds_api_key:
+        raise HTTPException(status_code=503, detail="Odds API key not configured")
+    
+    try:
+        import httpx
+        
+        url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
+        params = {
+            "apiKey": s.odds_api_key,
+            "regions": "us",
+            "markets": "h2h,spreads,totals",
+            "oddsFormat": "american",
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+            
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Odds API error: {e.response.status_code} - {e.response.text}")
+        raise HTTPException(status_code=e.response.status_code, detail=f"Odds API error: {e.response.text}")
+    except Exception as e:
+        logger.error(f"Failed to fetch odds: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

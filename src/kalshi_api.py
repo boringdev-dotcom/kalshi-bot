@@ -85,6 +85,33 @@ BASKETBALL_SEARCH_TERMS = {
 BASKETBALL_MARKET_TYPES = ["winner", "spread", "total", "moneyline"]
 
 
+# Cricket series tickers on Kalshi
+# T20 International matches and other cricket formats
+CRICKET_SERIES_TICKERS = {
+    "t20_international": [
+        "KXCRICKETT20IMATCH",    # T20 International match winner
+    ],
+    "ipl": [
+        "KXCRICKETIPLMATCH",     # IPL match winner (if available)
+    ],
+}
+
+# Ticker prefixes for cricket searching
+CRICKET_TICKER_PREFIXES = {
+    "t20_international": ["KXCRICKETT20I", "CRICKET", "T20"],
+    "ipl": ["KXCRICKETIPL", "IPL"],
+}
+
+# Fallback search terms for cricket
+CRICKET_SEARCH_TERMS = {
+    "t20_international": ["T20 INTERNATIONAL", "T20I", "CRICKET"],
+    "ipl": ["IPL", "INDIAN PREMIER LEAGUE"],
+}
+
+# Cricket market types
+CRICKET_MARKET_TYPES = ["winner", "match_winner"]
+
+
 def get_market_name(ticker: str, key_id: str, private_key_pem: str, ws_url: str = None) -> Optional[str]:
     """
     Fetch market name from Kalshi REST API.
@@ -908,6 +935,271 @@ def format_basketball_markets_for_analysis(markets: List[Dict[str, Any]]) -> str
             # Get the main game title
             main_title = event_markets[0].get("title", event)
             output.append(f"\n🏀 {main_title}")
+            output.append("-" * 40)
+            
+            for market in event_markets:
+                ticker = market.get("ticker", "N/A")
+                market_type = market.get("market_type", "unknown")
+                yes_bid = market.get("yes_bid")
+                yes_ask = market.get("yes_ask")
+                yes_sub = market.get("yes_sub_title", "YES")
+                no_sub = market.get("no_sub_title", "NO")
+                
+                # Format odds - use `is not None` to handle 0 as valid price
+                if yes_bid is not None and yes_ask is not None:
+                    yes_mid = (yes_bid + yes_ask) / 2
+                    no_mid = 100 - yes_mid
+                    output.append(f"  [{market_type.upper()}] {ticker}")
+                    output.append(f"    {yes_sub}: {yes_mid:.0f}¢ (bid: {yes_bid}¢, ask: {yes_ask}¢)")
+                    output.append(f"    {no_sub}: {no_mid:.0f}¢")
+                else:
+                    last_price = market.get("last_price", "N/A")
+                    output.append(f"  [{market_type.upper()}] {ticker}")
+                    output.append(f"    Last Price: {last_price}¢")
+                
+                output.append("")
+    
+    return "\n".join(output)
+
+
+# =============================================================================
+# CRICKET MARKET FUNCTIONS
+# =============================================================================
+
+def get_cricket_markets(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str = None,
+    leagues: List[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch cricket markets for specified leagues/competitions.
+    
+    Uses series_ticker filtering for efficient API calls when possible.
+    
+    Args:
+        key_id: Kalshi API key ID
+        private_key_pem: RSA private key in PEM format
+        ws_url: WebSocket URL to determine API base URL
+        leagues: List of leagues to filter (e.g., ["t20_international", "ipl"])
+                 If None, fetches all available cricket leagues.
+        
+    Returns:
+        List of cricket market dictionaries with market details and odds
+    """
+    if leagues is None:
+        leagues = ["t20_international", "ipl"]
+    
+    cricket_markets = []
+    seen_tickers = set()  # Avoid duplicates across series
+    
+    # Try to fetch using series_ticker for each league (fast path)
+    for league in leagues:
+        series_tickers = CRICKET_SERIES_TICKERS.get(league, [])
+        # Handle both list and legacy string format
+        if isinstance(series_tickers, str):
+            series_tickers = [series_tickers]
+        
+        for series_ticker in series_tickers:
+            logger.info(f"Fetching {league} cricket markets using series_ticker: {series_ticker}")
+            cursor = None
+            
+            while True:
+                result = get_markets(
+                    key_id=key_id,
+                    private_key_pem=private_key_pem,
+                    ws_url=ws_url,
+                    status="open",
+                    limit=100,
+                    cursor=cursor,
+                    series_ticker=series_ticker,
+                )
+                
+                markets = result.get("markets", [])
+                if not markets:
+                    break
+                
+                for market in markets:
+                    ticker = market.get("ticker")
+                    if ticker and ticker not in seen_tickers:
+                        seen_tickers.add(ticker)
+                        cricket_markets.append(_format_cricket_market(market, league))
+                
+                cursor = result.get("cursor")
+                if not cursor:
+                    break
+    
+    # If no markets found via series_ticker, try event-based search
+    if not cricket_markets:
+        logger.info("No cricket markets via series_ticker, trying event search...")
+        cricket_markets = _search_cricket_markets_fallback(
+            key_id, private_key_pem, ws_url, leagues
+        )
+    
+    logger.info(f"Found {len(cricket_markets)} cricket markets for leagues: {leagues}")
+    return cricket_markets
+
+
+def _format_cricket_market(market: Dict[str, Any], league: str) -> Dict[str, Any]:
+    """Format a market dict for cricket analysis."""
+    ticker = market.get("ticker", "").upper()
+    title = market.get("title", "").upper()
+    subtitle = market.get("subtitle", "").upper()
+    series_ticker = market.get("series_ticker", "").upper()
+    combined_text = f"{ticker} {title} {subtitle}"
+    
+    # Determine market type based on series ticker first (most reliable)
+    market_type = "unknown"
+    if "MATCH" in series_ticker or "WINNER" in combined_text:
+        # Match winner markets
+        market_type = "winner"
+    elif any(t in combined_text for t in ["WINNER", "TO WIN", "WINS"]):
+        market_type = "winner"
+    
+    return {
+        "ticker": market.get("ticker"),
+        "title": market.get("title"),
+        "subtitle": market.get("subtitle"),
+        "yes_bid": market.get("yes_bid"),
+        "yes_ask": market.get("yes_ask"),
+        "no_bid": market.get("no_bid"),
+        "no_ask": market.get("no_ask"),
+        "last_price": market.get("last_price"),
+        "volume": market.get("volume"),
+        "open_interest": market.get("open_interest"),
+        "close_time": market.get("close_time"),
+        "expiration_time": market.get("expiration_time"),
+        "market_type": market_type,
+        "league": league,
+        "yes_sub_title": market.get("yes_sub_title"),
+        "no_sub_title": market.get("no_sub_title"),
+        "event_ticker": market.get("event_ticker"),
+        "series_ticker": market.get("series_ticker"),
+    }
+
+
+def _search_cricket_markets_fallback(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str,
+    leagues: List[str],
+) -> List[Dict[str, Any]]:
+    """
+    Fallback: Search for cricket markets by scanning events.
+    
+    This is slower but more reliable if series_tickers change.
+    """
+    cricket_markets = []
+    
+    # Build search terms
+    search_terms = ["CRICKET", "T20", "IPL"]
+    for league in leagues:
+        if league in CRICKET_SEARCH_TERMS:
+            search_terms.extend(CRICKET_SEARCH_TERMS[league])
+    
+    # Fetch events and look for cricket
+    cursor = None
+    checked_events = set()
+    
+    while True:
+        result = get_events(
+            key_id=key_id,
+            private_key_pem=private_key_pem,
+            ws_url=ws_url,
+            status="open",
+            limit=100,
+            cursor=cursor,
+        )
+        
+        events = result.get("events", [])
+        if not events:
+            break
+        
+        for event in events:
+            event_ticker = event.get("event_ticker", "")
+            if event_ticker in checked_events:
+                continue
+            checked_events.add(event_ticker)
+            
+            title = event.get("title", "").upper()
+            category = event.get("category", "").upper()
+            combined = f"{event_ticker} {title} {category}"
+            
+            # Check if this is a cricket event
+            if any(term in combined.upper() for term in search_terms):
+                # Determine league
+                detected_league = "unknown"
+                for league_name, terms in CRICKET_SEARCH_TERMS.items():
+                    if league_name in leagues and any(t in combined for t in terms):
+                        detected_league = league_name
+                        break
+                
+                if detected_league == "unknown":
+                    # Default to t20_international if we found cricket keywords
+                    if "t20_international" in leagues:
+                        detected_league = "t20_international"
+                    else:
+                        continue
+                
+                # Fetch markets for this event
+                market_result = get_markets(
+                    key_id=key_id,
+                    private_key_pem=private_key_pem,
+                    ws_url=ws_url,
+                    status="open",
+                    event_ticker=event_ticker,
+                    limit=50,
+                )
+                
+                for market in market_result.get("markets", []):
+                    cricket_markets.append(_format_cricket_market(market, detected_league))
+        
+        cursor = result.get("cursor")
+        if not cursor:
+            break
+    
+    return cricket_markets
+
+
+def format_cricket_markets_for_analysis(markets: List[Dict[str, Any]]) -> str:
+    """
+    Format cricket markets into a readable string for LLM analysis.
+    
+    Args:
+        markets: List of cricket market dictionaries
+        
+    Returns:
+        Formatted string describing the markets and their odds
+    """
+    if not markets:
+        return "No cricket markets found for the specified leagues."
+    
+    # Group markets by league and then by match
+    from collections import defaultdict
+    by_league = defaultdict(list)
+    
+    for market in markets:
+        league = market.get("league", "unknown")
+        by_league[league].append(market)
+    
+    output = []
+    
+    for league, league_markets in by_league.items():
+        league_display = league.replace("_", " ").title()
+        output.append(f"\n{'='*50}")
+        output.append(f"  🏏 {league_display}")
+        output.append(f"{'='*50}\n")
+        
+        # Group by event/match
+        by_event = defaultdict(list)
+        for market in league_markets:
+            event = market.get("event_ticker") or market.get("title", "Unknown")
+            by_event[event].append(market)
+        
+        for event, event_markets in by_event.items():
+            # Get the main match title
+            main_title = event_markets[0].get("title", event)
+            output.append(f"\n🏏 {main_title}")
             output.append("-" * 40)
             
             for market in event_markets:
@@ -1927,7 +2219,7 @@ def get_all_sports_markets(
     """
     Fetch all sports markets, organized by sport/league.
     
-    Returns markets for all configured sports (NBA, Soccer leagues).
+    Returns markets for all configured sports (NBA, Soccer leagues, Cricket).
     
     Args:
         key_id: Kalshi API key ID
@@ -1940,6 +2232,7 @@ def get_all_sports_markets(
             "nba": [...],
             "bundesliga": [...],
             "la_liga": [...],
+            "t20_international": [...],
             ...
         }
     """
@@ -1972,6 +2265,21 @@ def get_all_sports_markets(
                 all_markets[league] = soccer_markets
         except Exception as e:
             logger.error(f"Failed to fetch {league} markets: {e}")
+    
+    # Fetch cricket markets for all leagues
+    cricket_leagues = ["t20_international", "ipl"]
+    for league in cricket_leagues:
+        try:
+            cricket_markets = get_cricket_markets(
+                key_id=key_id,
+                private_key_pem=private_key_pem,
+                ws_url=ws_url,
+                leagues=[league],
+            )
+            if cricket_markets:
+                all_markets[league] = cricket_markets
+        except Exception as e:
+            logger.error(f"Failed to fetch {league} cricket markets: {e}")
     
     return all_markets
 

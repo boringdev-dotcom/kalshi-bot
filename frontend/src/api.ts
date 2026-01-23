@@ -95,3 +95,39 @@ export async function fetchLiveDataMulti(tickers: string[]): Promise<{
   }
   return response.json();
 }
+
+// =============================================================================
+// Odds API Functions (proxied through backend)
+// =============================================================================
+
+export interface OddsApiGame {
+  id: string;
+  sport_key: string;
+  sport_title: string;
+  commence_time: string;
+  home_team: string;
+  away_team: string;
+  bookmakers: Array<{
+    key: string;
+    title: string;
+    markets: Array<{
+      key: string;
+      outcomes: Array<{
+        name: string;
+        price: number;
+        point?: number;
+      }>;
+    }>;
+  }>;
+}
+
+export async function fetchNBAOdds(): Promise<OddsApiGame[]> {
+  const response = await fetch(`${API_BASE}/odds/nba`);
+  if (!response.ok) {
+    if (response.status === 503) {
+      throw new Error('Odds API not configured on server');
+    }
+    throw new Error(`Failed to fetch NBA odds: ${response.statusText}`);
+  }
+  return response.json();
+}
