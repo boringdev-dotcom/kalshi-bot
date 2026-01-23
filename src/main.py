@@ -9,6 +9,7 @@ from .api import app
 from .config import Settings
 from .discord_notify import post_order_created
 from .discord_bot import initialize_bot, send_order_notification, handle_price_update
+from .telegram_notify import send_telegram_notification
 from .kalshi_ws_client import stream_orders
 
 # Configure logging
@@ -33,8 +34,10 @@ async def main():
         logger.error("Please ensure your .env file contains the required values")
         sys.exit(1)
     
-    logger.info("Starting Kalshi Discord bot...")
+    logger.info("Starting Kalshi trading bot...")
     logger.info(f"WebSocket URL: {settings.kalshi_ws_url}")
+    if settings.use_telegram:
+        logger.info("Telegram notifications enabled")
     
     use_bot = settings.use_discord_bot
     
@@ -64,6 +67,7 @@ async def main():
         
         ws_url_to_use = ws_url_param or settings.kalshi_ws_url
         
+        # Send Discord notification
         if bot_available:
             # Use Discord bot (supports message editing for live odds)
             logger.debug("Using Discord bot to send notification")
@@ -75,13 +79,20 @@ async def main():
             if not result and settings.discord_webhook_url:
                 logger.warning("Bot send failed, falling back to webhook")
                 post_order_created(settings.discord_webhook_url, order, ws_url_to_use)
-        else:
+        elif settings.discord_webhook_url:
             # Fallback to webhook
             logger.debug("Using Discord webhook to send notification")
-            if settings.discord_webhook_url:
-                post_order_created(settings.discord_webhook_url, order, ws_url_to_use)
-            else:
-                logger.error("No Discord notification method available")
+            post_order_created(settings.discord_webhook_url, order, ws_url_to_use)
+        
+        # Send Telegram notification
+        if settings.use_telegram:
+            logger.debug("Sending Telegram notification")
+            await send_telegram_notification(
+                settings.telegram_bot_token,
+                settings.telegram_chat_id,
+                order,
+                ws_url_to_use
+            )
     
     # Start API server and WebSocket client concurrently
     port = settings.get_port()  # Uses PORT env var for Render.com
