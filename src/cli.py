@@ -10,6 +10,7 @@ from .api import app
 from .config import Settings
 from .discord_notify import post_order_created
 from .discord_bot import initialize_bot, send_order_notification, handle_price_update
+from .telegram_notify import send_telegram_notification
 from .kalshi_ws_client import stream_orders
 
 # Configure logging
@@ -53,6 +54,7 @@ async def _run_worker(settings: Settings) -> None:
         
         ws_url_to_use = ws_url_param or settings.kalshi_ws_url
         
+        # Send Discord notification
         if bot_available:
             logger.debug("Using Discord bot to send notification")
             await send_order_notification(order, ws_url_to_use)
@@ -62,12 +64,19 @@ async def _run_worker(settings: Settings) -> None:
             if not result and settings.discord_webhook_url:
                 logger.warning("Bot send failed, falling back to webhook")
                 post_order_created(settings.discord_webhook_url, order, ws_url_to_use)
-        else:
+        elif settings.discord_webhook_url:
             logger.debug("Using Discord webhook to send notification")
-            if settings.discord_webhook_url:
-                post_order_created(settings.discord_webhook_url, order, ws_url_to_use)
-            else:
-                logger.error("No Discord notification method available")
+            post_order_created(settings.discord_webhook_url, order, ws_url_to_use)
+        
+        # Send Telegram notification
+        if settings.use_telegram:
+            logger.debug("Sending Telegram notification")
+            await send_telegram_notification(
+                settings.telegram_bot_token,
+                settings.telegram_chat_id,
+                order,
+                ws_url_to_use
+            )
     
     # Wait a moment for bot to be fully ready
     if use_bot:
@@ -121,9 +130,11 @@ def run_all():
         sys.exit(1)
     
     port = settings.get_port()
-    logger.info("Starting Kalshi Discord bot (API + Worker)...")
+    logger.info("Starting Kalshi trading bot (API + Worker)...")
     logger.info(f"WebSocket URL: {settings.kalshi_ws_url}")
     logger.info(f"API server: http://{settings.api_host}:{port}")
+    if settings.use_telegram:
+        logger.info("Telegram notifications enabled")
     
     async def main():
         try:

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     discord_channel_id: Optional[str] = Field(default=None, alias="DISCORD_CHANNEL_ID")
     discord_webhook_url: Optional[str] = Field(default=None, alias="DISCORD_WEBHOOK_URL")
     
+    # Telegram configuration
+    telegram_bot_token: Optional[str] = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: Optional[str] = Field(default=None, alias="TELEGRAM_CHAT_ID")
+    
     # OpenRouter configuration for LLM Council
     openrouter_api_key: Optional[str] = Field(default=None, alias="OPENROUTER_API_KEY")
     
@@ -80,6 +84,11 @@ class Settings(BaseSettings):
         return bool(self.discord_bot_token and self.discord_channel_id)
     
     @property
+    def use_telegram(self) -> bool:
+        """Check if Telegram notifications are enabled (requires both token and chat ID)."""
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
+    
+    @property
     def discord_channel_id_int(self) -> Optional[int]:
         """Get Discord channel ID as integer."""
         if self.discord_channel_id:
@@ -103,9 +112,11 @@ class Settings(BaseSettings):
         if not self.kalshi_private_key_pem:
             missing.append("KALSHI_PRIVATE_KEY_PEM")
         
-        # Require either Discord bot OR webhook
-        if not self.use_discord_bot and not self.discord_webhook_url:
-            missing.append("DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (or DISCORD_WEBHOOK_URL)")
+        # Require at least one notification method: Discord (bot or webhook) OR Telegram
+        has_discord = self.use_discord_bot or self.discord_webhook_url
+        has_telegram = self.use_telegram
+        if not has_discord and not has_telegram:
+            missing.append("DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (or DISCORD_WEBHOOK_URL) or TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
         
         return missing
     
@@ -125,9 +136,11 @@ class Settings(BaseSettings):
         if not self.openrouter_api_key:
             missing.append("OPENROUTER_API_KEY")
         
-        # Require either Discord bot OR webhook (same as order bot)
-        if not self.use_discord_bot and not self.discord_webhook_url:
-            missing.append("DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (or DISCORD_WEBHOOK_URL)")
+        # Require at least one notification method: Discord (bot or webhook) OR Telegram
+        has_discord = self.use_discord_bot or self.discord_webhook_url
+        has_telegram = self.use_telegram
+        if not has_discord and not has_telegram:
+            missing.append("DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (or DISCORD_WEBHOOK_URL) or TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
         
         return missing
     
