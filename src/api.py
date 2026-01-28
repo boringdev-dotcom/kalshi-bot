@@ -878,3 +878,268 @@ async def get_live_data_multi(tickers: str = Query(..., description="Comma-separ
         "data": results,
         "timestamp": datetime.now().isoformat(),
     }
+
+
+# =============================================================================
+# Research API Endpoints
+# =============================================================================
+
+import uuid
+from enum import Enum
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+# In-memory job storage (for simplicity - consider Redis for production)
+_research_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+class ResearchJobRequest(BaseModel):
+    sport: str = "soccer"  # "soccer" or "basketball"
+    match_id: str
+    prompt_version: str = "v1"
+
+
+class ResearchJobResponse(BaseModel):
+    job_id: str
+    status: str
+    created_at: str
+
+
+class GameInfo(BaseModel):
+    match_id: str
+    title: str
+    league: str
+    sport: str
+    market_count: int
+    close_time: Optional[str] = None
+
+
+@app.get("/api/research/games")
+async def get_research_games():
+    """
+    Get all available games for research analysis.
+    
+    Returns games grouped by sport and league.
+    """
+    s = get_settings()
+    
+    try:
+        # Fetch all sports markets
+        all_markets = await asyncio.to_thread(
+            get_all_sports_markets,
+            key_id=s.kalshi_api_key_id,
+            private_key_pem=s.kalshi_private_key_pem,
+            ws_url=s.kalshi_ws_url,
+        )
+        
+        games = []
+        
+        for league_id, markets in all_markets.items():
+            # Group markets by event/match
+            events = group_markets_by_event(markets)
+            
+            # Determine sport type
+            sport = "basketball" if league_id == "nba" else "soccer"
+            if league_id in ("t20_international", "ipl"):
+                sport = "cricket"
+            
+            for event_id, event_data in events.items():
+                games.append({
+                    "match_id": event_id,
+                    "title": event_data["title"],
+                    "league": league_id,
+                    "league_display": format_league_display_name(league_id),
+                    "sport": sport,
+                    "market_count": len(event_data["markets"]),
+                    "close_time": event_data.get("close_time"),
+                    "markets": event_data["markets"],  # Include market details
+                })
+        
+        # Sort by close_time (soonest first)
+        games.sort(key=lambda g: g.get("close_time") or "9999")
+        
+        return {"games": games, "count": len(games)}
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch research games: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/research/run", response_model=ResearchJobResponse)
+async def start_research_job(request: ResearchJobRequest):
+    """
+    Start a new research analysis job.
+    
+    The job runs asynchronously. Poll /api/research/jobs/{job_id} for results.
+    """
+    s = get_settings()
+    
+    # Validate required API keys
+    if not s.openrouter_api_key:
+        raise HTTPException(status_code=503, detail="OpenRouter API key not configured")
+    if not s.google_api_key:
+        raise HTTPException(status_code=503, detail="Google API key not configured")
+    
+    # Create job
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "status": JobStatus.PENDING,
+        "sport": request.sport,
+        "match_id": request.match_id,
+        "prompt_version": request.prompt_version,
+        "created_at": datetime.now().isoformat(),
+        "started_at": None,
+        "completed_at": None,
+        "result": None,
+        "error": None,
+    }
+    
+    _research_jobs[job_id] = job
+    
+    # Start background task
+    asyncio.create_task(_run_research_job(job_id, request, s))
+    
+    return ResearchJobResponse(
+        job_id=job_id,
+        status=JobStatus.PENDING,
+        created_at=job["created_at"],
+    )
+
+
+async def _run_research_job(job_id: str, request: ResearchJobRequest, s: Settings):
+    """Background task to run research analysis."""
+    from .llm_council import run_soccer_analysis, run_basketball_analysis
+    from .kalshi_api import (
+        get_soccer_markets,
+        get_basketball_markets,
+        format_markets_for_analysis,
+        format_basketball_markets_for_kalshi_trading,
+        group_markets_by_match,
+    )
+    
+    job = _research_jobs.get(job_id)
+    if not job:
+        return
+    
+    job["status"] = JobStatus.RUNNING
+    job["started_at"] = datetime.now().isoformat()
+    
+    try:
+        # Fetch markets based on sport
+        if request.sport == "basketball":
+            markets = get_basketball_markets(
+                key_id=s.kalshi_api_key_id,
+                private_key_pem=s.kalshi_private_key_pem,
+                ws_url=s.kalshi_ws_url,
+            )
+        else:
+            markets = get_soccer_markets(
+                key_id=s.kalshi_api_key_id,
+                private_key_pem=s.kalshi_private_key_pem,
+                ws_url=s.kalshi_ws_url,
+            )
+        
+        if not markets:
+            raise ValueError(f"No {request.sport} markets found")
+        
+        # Group and find the requested match
+        matches = group_markets_by_match(markets)
+        match_data = matches.get(request.match_id)
+        
+        if not match_data:
+            # Try to find by partial match
+            for mid, mdata in matches.items():
+                if request.match_id in mid:
+                    match_data = mdata
+                    break
+        
+        if not match_data:
+            raise ValueError(f"Match {request.match_id} not found")
+        
+        selected_markets = match_data.get("markets", [])
+        title = match_data.get("title", "Unknown")
+        
+        # Format markets for analysis
+        if request.sport == "basketball":
+            markets_text = format_basketball_markets_for_kalshi_trading(selected_markets)
+        else:
+            markets_text = format_markets_for_analysis(selected_markets)
+        
+        # Parse team names for multi-stage research
+        home_team = None
+        away_team = None
+        
+        clean_title = title
+        for suffix in [" Winner?", " Winner", " Total?", " Total", " Spread?", " Spread", " Tie?", " Tie"]:
+            clean_title = clean_title.replace(suffix, "")
+        
+        if " vs " in clean_title:
+            parts = clean_title.split(" vs ")
+            if len(parts) == 2:
+                away_team = parts[0].strip()
+                home_team = parts[1].strip()
+        
+        # Run analysis
+        if request.sport == "basketball":
+            result = await run_basketball_analysis(
+                settings=s,
+                markets_text=markets_text,
+                prompt_version=request.prompt_version,
+                home_team=home_team,
+                away_team=away_team,
+                game_date=datetime.now().strftime("%B %d, %Y"),
+            )
+        else:
+            result = await run_soccer_analysis(
+                settings=s,
+                markets_text=markets_text,
+                prompt_version=request.prompt_version,
+                home_team=home_team,
+                away_team=away_team,
+                competition=match_data.get("league", ""),
+                match_date=datetime.now().strftime("%B %d, %Y"),
+            )
+        
+        # Store result
+        job["status"] = JobStatus.COMPLETED
+        job["completed_at"] = datetime.now().isoformat()
+        job["result"] = {
+            "title": title,
+            "research": result.research,
+            "analyses": result.analyses,
+            "reviews": result.reviews,
+            "final_recommendation": result.final_recommendation,
+            "metadata": result.metadata,
+        }
+        
+    except Exception as e:
+        logger.error(f"Research job {job_id} failed: {e}", exc_info=True)
+        job["status"] = JobStatus.FAILED
+        job["completed_at"] = datetime.now().isoformat()
+        job["error"] = str(e)
+
+
+@app.get("/api/research/jobs/{job_id}")
+async def get_research_job(job_id: str):
+    """Get the status and results of a research job."""
+    job = _research_jobs.get(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return job
+
+
+@app.get("/api/research/jobs")
+async def list_research_jobs(limit: int = 20):
+    """List recent research jobs."""
+    jobs = list(_research_jobs.values())
+    jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
+    return {"jobs": jobs[:limit]}

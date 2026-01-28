@@ -14,7 +14,7 @@ import type {
   TickerData,
   ChartDataPoint 
 } from './types';
-import { Activity, TrendingUp, BookOpen, List, ChevronRight, ChevronLeft, DollarSign, Menu, X, Share2, Check } from 'lucide-react';
+import { TrendingUp, BookOpen, List, ChevronRight, ChevronLeft, DollarSign, Menu, X, Share2, Check } from 'lucide-react';
 import { LiveOddsPanel } from './components/LiveOddsPanel';
 import { clsx } from 'clsx';
 
@@ -326,9 +326,9 @@ function App() {
   const focusedTickerData = focusedTicker ? tickerData[focusedTicker] : null;
 
   return (
-    <div className="h-screen bg-bg-primary flex flex-col overflow-hidden">
-      {/* Top Bar */}
-      <header className="flex-none px-3 md:px-4 py-2 md:py-3 border-b border-border-subtle flex items-center justify-between">
+    <div className="h-full bg-bg-primary flex flex-col overflow-hidden">
+      {/* Sub-header with connection status and share button */}
+      <div className="flex-none px-3 md:px-4 py-2 border-b border-border-subtle flex items-center justify-between">
         <div className="flex items-center gap-2 md:gap-3">
           {/* Mobile menu button */}
           <button
@@ -337,8 +337,7 @@ function App() {
           >
             {showMobileMenu ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-          <Activity className="w-5 h-5 md:w-6 md:h-6 text-accent-blue" />
-          <h1 className="text-base md:text-lg font-semibold text-text-primary">Kalshi</h1>
+          <span className="text-sm text-text-muted">Live Market Data</span>
         </div>
         <div className="flex items-center gap-2 md:gap-3">
           {/* Share button */}
@@ -368,7 +367,7 @@ function App() {
           )}
           <ConnectionStatus isConnected={isConnected} tickerCount={subscribedTickers.size} />
         </div>
-      </header>
+      </div>
 
       {error && (
         <div className="flex-none mx-4 mt-3 p-3 bg-accent-red/10 border border-accent-red/30 rounded-lg text-accent-red text-sm">
