@@ -160,6 +160,12 @@ export interface ResearchJobRequest {
   prompt_version: string;
 }
 
+export interface ComboResearchJobRequest {
+  sport: string;
+  match_ids: string[];
+  use_combined_analysis: boolean;
+}
+
 export interface ResearchJobResponse {
   job_id: string;
   status: string;
@@ -221,6 +227,21 @@ export async function listResearchJobs(limit: number = 20): Promise<{ jobs: Rese
   const response = await fetch(`${API_BASE}/research/jobs?limit=${limit}`);
   if (!response.ok) {
     throw new Error(`Failed to list research jobs: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function startComboResearchJob(request: ComboResearchJobRequest): Promise<ResearchJobResponse> {
+  const response = await fetch(`${API_BASE}/research/combo`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || `Failed to start combo research job: ${response.statusText}`);
   }
   return response.json();
 }

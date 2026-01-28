@@ -905,6 +905,12 @@ class ResearchJobRequest(BaseModel):
     prompt_version: str = "v1"
 
 
+class ComboResearchJobRequest(BaseModel):
+    sport: str = "basketball"  # Currently only basketball supported for combo
+    match_ids: List[str]  # Multiple game IDs
+    use_combined_analysis: bool = True  # Use totals+spreads analysis
+
+
 class ResearchJobResponse(BaseModel):
     job_id: str
     status: str
@@ -1143,3 +1149,171 @@ async def list_research_jobs(limit: int = 20):
     jobs = list(_research_jobs.values())
     jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
     return {"jobs": jobs[:limit]}
+
+
+@app.post("/api/research/combo", response_model=ResearchJobResponse)
+async def start_combo_research_job(request: ComboResearchJobRequest):
+    """
+    Start a combo research analysis job for multiple games.
+    
+    This uses Deep Research to analyze multiple games and suggest combo bets.
+    The job runs asynchronously. Poll /api/research/jobs/{job_id} for results.
+    """
+    s = get_settings()
+    
+    # Validate required API keys
+    if not s.google_api_key:
+        raise HTTPException(status_code=503, detail="Google API key not configured")
+    
+    if len(request.match_ids) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 games required for combo analysis")
+    
+    if len(request.match_ids) > 6:
+        raise HTTPException(status_code=400, detail="Maximum 6 games allowed for combo analysis")
+    
+    # Create job
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "status": JobStatus.PENDING,
+        "sport": request.sport,
+        "match_ids": request.match_ids,
+        "job_type": "combo",
+        "use_combined_analysis": request.use_combined_analysis,
+        "created_at": datetime.now().isoformat(),
+        "started_at": None,
+        "completed_at": None,
+        "result": None,
+        "error": None,
+        "progress": [],
+    }
+    
+    _research_jobs[job_id] = job
+    
+    # Start background task
+    asyncio.create_task(_run_combo_research_job(job_id, request, s))
+    
+    return ResearchJobResponse(
+        job_id=job_id,
+        status=JobStatus.PENDING,
+        created_at=job["created_at"],
+    )
+
+
+async def _run_combo_research_job(job_id: str, request: ComboResearchJobRequest, s: Settings):
+    """Background task to run combo research analysis."""
+    from .llm_council import run_nba_combo_deep_research
+    from .kalshi_api import (
+        get_basketball_markets,
+        format_basketball_markets_for_kalshi_trading,
+        group_markets_by_match,
+    )
+    
+    job = _research_jobs.get(job_id)
+    if not job:
+        return
+    
+    job["status"] = JobStatus.RUNNING
+    job["started_at"] = datetime.now().isoformat()
+    
+    def progress_callback(msg: str):
+        job["progress"].append({
+            "message": msg,
+            "timestamp": datetime.now().isoformat(),
+        })
+    
+    try:
+        # Fetch basketball markets
+        progress_callback("Fetching basketball markets...")
+        markets = get_basketball_markets(
+            key_id=s.kalshi_api_key_id,
+            private_key_pem=s.kalshi_private_key_pem,
+            ws_url=s.kalshi_ws_url,
+        )
+        
+        if not markets:
+            raise ValueError("No basketball markets found")
+        
+        # Group markets by match
+        matches = group_markets_by_match(markets)
+        
+        # Find the requested matches
+        games_metadata = []
+        all_markets = []
+        
+        for match_id in request.match_ids:
+            match_data = matches.get(match_id)
+            
+            if not match_data:
+                # Try partial match
+                for mid, mdata in matches.items():
+                    if match_id in mid:
+                        match_data = mdata
+                        break
+            
+            if not match_data:
+                raise ValueError(f"Match {match_id} not found")
+            
+            title = match_data.get("title", "Unknown")
+            
+            # Parse team names
+            home_team = None
+            away_team = None
+            clean_title = title
+            for suffix in [" Winner?", " Winner", " Total?", " Total", " Spread?", " Spread"]:
+                clean_title = clean_title.replace(suffix, "")
+            
+            if " vs " in clean_title:
+                parts = clean_title.split(" vs ")
+                if len(parts) == 2:
+                    away_team = parts[0].strip()
+                    home_team = parts[1].strip()
+            
+            games_metadata.append({
+                "title": title,
+                "match_id": match_id,
+                "home_team": home_team,
+                "away_team": away_team,
+                "date": None,  # Will use today's date
+            })
+            
+            all_markets.extend(match_data.get("markets", []))
+        
+        progress_callback(f"Found {len(games_metadata)} games with {len(all_markets)} total markets")
+        
+        # Format markets for analysis
+        markets_text = format_basketball_markets_for_kalshi_trading(all_markets)
+        
+        # Run combo analysis
+        progress_callback("Starting Deep Research combo analysis...")
+        result = await run_nba_combo_deep_research(
+            settings=s,
+            markets_text=markets_text,
+            games_metadata=games_metadata,
+            progress_callback=progress_callback,
+            use_combined_analysis=request.use_combined_analysis,
+        )
+        
+        # Store result
+        job["status"] = JobStatus.COMPLETED
+        job["completed_at"] = datetime.now().isoformat()
+        job["result"] = {
+            "games": [g["title"] for g in games_metadata],
+            "research": result.research,
+            "analyses": result.analyses,
+            "reviews": result.reviews,
+            "final_recommendation": result.final_recommendation,
+            "metadata": result.metadata,
+        }
+        
+        progress_callback("Combo analysis complete!")
+        
+    except Exception as e:
+        logger.error(f"Combo research job {job_id} failed: {e}", exc_info=True)
+        job["status"] = JobStatus.FAILED
+        job["completed_at"] = datetime.now().isoformat()
+        job["error"] = str(e)
+        job["progress"].append({
+            "message": f"Error: {str(e)}",
+            "timestamp": datetime.now().isoformat(),
+        })

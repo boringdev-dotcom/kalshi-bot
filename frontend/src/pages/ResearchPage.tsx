@@ -8,13 +8,23 @@ import {
   ChevronDown, 
   ChevronRight,
   RefreshCw,
-  Clock,
-  FileText
+  FileText,
+  Layers,
+  X,
+  Plus
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { fetchResearchGames, startResearchJob, getResearchJob, type ResearchGame, type ResearchJob } from '../api';
+import { 
+  fetchResearchGames, 
+  startResearchJob, 
+  startComboResearchJob,
+  getResearchJob, 
+  type ResearchGame, 
+  type ResearchJob 
+} from '../api';
 
 type PromptVersion = 'v1' | 'v2' | 'v3';
+type AnalysisMode = 'single' | 'combo';
 
 interface GroupedGames {
   [sport: string]: {
@@ -31,8 +41,11 @@ export function ResearchPage() {
   const [expandedSports, setExpandedSports] = useState<Set<string>>(new Set(['basketball', 'soccer']));
   const [expandedLeagues, setExpandedLeagues] = useState<Set<string>>(new Set());
   
-  const [selectedGame, setSelectedGame] = useState<ResearchGame | null>(null);
-  const [promptVersion, setPromptVersion] = useState<PromptVersion>('v1');
+  // Multi-selection state
+  const [selectedGames, setSelectedGames] = useState<ResearchGame[]>([]);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('combo');
+  const [promptVersion, setPromptVersion] = useState<PromptVersion>('v2');
+  const [useCombinedAnalysis, setUseCombinedAnalysis] = useState(true);
   
   const [activeJob, setActiveJob] = useState<ResearchJob | null>(null);
   
@@ -99,23 +112,63 @@ export function ResearchPage() {
     }
   }, [activeJob?.job_id, activeJob?.status]);
   
+  const handleToggleGame = (game: ResearchGame) => {
+    setSelectedGames(prev => {
+      const isSelected = prev.some(g => g.match_id === game.match_id);
+      if (isSelected) {
+        return prev.filter(g => g.match_id !== game.match_id);
+      } else {
+        // For combo mode, allow multiple; for single, replace
+        if (analysisMode === 'single') {
+          return [game];
+        }
+        return [...prev, game];
+      }
+    });
+  };
+  
+  const handleRemoveGame = (matchId: string) => {
+    setSelectedGames(prev => prev.filter(g => g.match_id !== matchId));
+  };
+  
   const handleStartResearch = async () => {
-    if (!selectedGame) return;
+    if (selectedGames.length === 0) return;
     
     try {
-      const response = await startResearchJob({
-        sport: selectedGame.sport,
-        match_id: selectedGame.match_id,
-        prompt_version: promptVersion,
-      });
+      setError(null);
       
-      setActiveJob({
-        job_id: response.job_id,
-        status: response.status as ResearchJob['status'],
-        created_at: response.created_at,
-        sport: selectedGame.sport,
-        match_id: selectedGame.match_id,
-      });
+      if (analysisMode === 'combo' && selectedGames.length >= 2) {
+        // Combo research
+        const response = await startComboResearchJob({
+          sport: selectedGames[0].sport,
+          match_ids: selectedGames.map(g => g.match_id),
+          use_combined_analysis: useCombinedAnalysis,
+        });
+        
+        setActiveJob({
+          job_id: response.job_id,
+          status: response.status as ResearchJob['status'],
+          created_at: response.created_at,
+          sport: selectedGames[0].sport,
+          match_id: selectedGames.map(g => g.match_id).join(','),
+        });
+      } else {
+        // Single game research
+        const game = selectedGames[0];
+        const response = await startResearchJob({
+          sport: game.sport,
+          match_id: game.match_id,
+          prompt_version: promptVersion,
+        });
+        
+        setActiveJob({
+          job_id: response.job_id,
+          status: response.status as ResearchJob['status'],
+          created_at: response.created_at,
+          sport: game.sport,
+          match_id: game.match_id,
+        });
+      }
       
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start research job');
@@ -162,6 +215,13 @@ export function ResearchPage() {
     t20_international: '🏏',
     ipl: '🇮🇳',
   };
+  
+  const isGameSelected = (game: ResearchGame) => 
+    selectedGames.some(g => g.match_id === game.match_id);
+  
+  const canRunAnalysis = analysisMode === 'combo' 
+    ? selectedGames.length >= 2 
+    : selectedGames.length === 1;
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -181,10 +241,78 @@ export function ResearchPage() {
               <RefreshCw className={clsx('w-4 h-4', isLoading && 'animate-spin')} />
             </button>
           </div>
-          <p className="text-sm text-text-muted mt-1">
-            Select a game for LLM Council analysis
+          
+          {/* Mode Toggle */}
+          <div className="flex gap-1 mt-3 p-1 bg-bg-secondary rounded-lg">
+            <button
+              onClick={() => {
+                setAnalysisMode('combo');
+                if (selectedGames.length === 1) {
+                  // Keep selection for combo
+                }
+              }}
+              className={clsx(
+                'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                analysisMode === 'combo'
+                  ? 'bg-accent-blue text-white'
+                  : 'text-text-secondary hover:text-text-primary'
+              )}
+            >
+              <Layers className="w-4 h-4" />
+              Combo
+            </button>
+            <button
+              onClick={() => {
+                setAnalysisMode('single');
+                if (selectedGames.length > 1) {
+                  setSelectedGames([selectedGames[0]]);
+                }
+              }}
+              className={clsx(
+                'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors',
+                analysisMode === 'single'
+                  ? 'bg-accent-blue text-white'
+                  : 'text-text-secondary hover:text-text-primary'
+              )}
+            >
+              <FileText className="w-4 h-4" />
+              Single
+            </button>
+          </div>
+          
+          <p className="text-xs text-text-muted mt-2">
+            {analysisMode === 'combo' 
+              ? 'Select 2-6 games for combo betting analysis'
+              : 'Select a game for detailed analysis'}
           </p>
         </div>
+        
+        {/* Selected Games */}
+        {selectedGames.length > 0 && (
+          <div className="p-3 border-b border-border-subtle bg-bg-secondary/50">
+            <div className="text-xs font-medium text-text-muted mb-2">
+              Selected ({selectedGames.length})
+            </div>
+            <div className="space-y-1">
+              {selectedGames.map((game) => (
+                <div
+                  key={game.match_id}
+                  className="flex items-center justify-between px-2 py-1.5 bg-accent-blue/10 rounded text-sm"
+                >
+                  <span className="text-text-primary truncate flex-1">
+                    {sportEmoji[game.sport]} {game.title}
+                  </span>
+                  <button
+                    onClick={() => handleRemoveGame(game.match_id)}
+                    className="p-0.5 hover:bg-bg-secondary rounded transition-colors text-text-muted hover:text-text-primary"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         
         {/* Game List */}
         <div className="flex-1 overflow-y-auto">
@@ -246,23 +374,36 @@ export function ResearchPage() {
                             {/* Games */}
                             {expandedLeagues.has(leagueKey) && (
                               <div className="ml-4">
-                                {leagueGames.map((game) => (
-                                  <button
-                                    key={game.match_id}
-                                    onClick={() => setSelectedGame(game)}
-                                    className={clsx(
-                                      'w-full text-left px-2 py-1.5 rounded text-sm transition-colors',
-                                      selectedGame?.match_id === game.match_id
-                                        ? 'bg-accent-blue/15 text-accent-blue'
-                                        : 'hover:bg-bg-secondary text-text-secondary hover:text-text-primary'
-                                    )}
-                                  >
-                                    <div className="truncate">{game.title}</div>
-                                    <div className="text-xs text-text-muted">
-                                      {game.market_count} markets
-                                    </div>
-                                  </button>
-                                ))}
+                                {leagueGames.map((game) => {
+                                  const selected = isGameSelected(game);
+                                  return (
+                                    <button
+                                      key={game.match_id}
+                                      onClick={() => handleToggleGame(game)}
+                                      className={clsx(
+                                        'w-full text-left px-2 py-1.5 rounded text-sm transition-colors flex items-center gap-2',
+                                        selected
+                                          ? 'bg-accent-blue/15 text-accent-blue'
+                                          : 'hover:bg-bg-secondary text-text-secondary hover:text-text-primary'
+                                      )}
+                                    >
+                                      <div className={clsx(
+                                        'w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0',
+                                        selected 
+                                          ? 'bg-accent-blue border-accent-blue' 
+                                          : 'border-border-subtle'
+                                      )}>
+                                        {selected && <Plus className="w-3 h-3 text-white rotate-45" />}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="truncate">{game.title}</div>
+                                        <div className="text-xs text-text-muted">
+                                          {game.market_count} markets
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -279,145 +420,164 @@ export function ResearchPage() {
       
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {selectedGame ? (
-          <>
-            {/* Game Info & Controls */}
-            <div className="flex-none p-4 border-b border-border-subtle">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">{sportEmoji[selectedGame.sport]}</span>
-                    <h3 className="text-lg font-semibold text-text-primary">
-                      {selectedGame.title}
-                    </h3>
-                  </div>
-                  <div className="flex items-center gap-3 mt-1 text-sm text-text-muted">
-                    <span>{leagueEmoji[selectedGame.league]} {selectedGame.league_display}</span>
-                    <span>•</span>
-                    <span>{selectedGame.market_count} markets</span>
-                    {selectedGame.close_time && (
-                      <>
-                        <span>•</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {new Date(selectedGame.close_time).toLocaleString()}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Research Controls */}
-                <div className="flex items-center gap-3">
-                  <select
-                    value={promptVersion}
-                    onChange={(e) => setPromptVersion(e.target.value as PromptVersion)}
-                    className="px-3 py-1.5 rounded-md bg-bg-secondary border border-border-subtle text-sm text-text-primary"
-                    disabled={activeJob?.status === 'running' || activeJob?.status === 'pending'}
-                  >
-                    <option value="v1">Prompt V1 (Original)</option>
-                    <option value="v2">Prompt V2 (Multi-stage)</option>
-                    {selectedGame.sport === 'soccer' && (
-                      <option value="v3">Prompt V3 (UCL)</option>
-                    )}
-                  </select>
-                  
-                  <button
-                    onClick={handleStartResearch}
-                    disabled={activeJob?.status === 'running' || activeJob?.status === 'pending'}
-                    className={clsx(
-                      'flex items-center gap-2 px-4 py-1.5 rounded-md font-medium transition-colors',
-                      activeJob?.status === 'running' || activeJob?.status === 'pending'
-                        ? 'bg-bg-secondary text-text-muted cursor-not-allowed'
-                        : 'bg-accent-blue text-white hover:bg-accent-blue/90'
-                    )}
-                  >
-                    {activeJob?.status === 'running' || activeJob?.status === 'pending' ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Running...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4" />
-                        Run Analysis
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-              
-              {/* Job Status */}
-              {activeJob && (
-                <div className={clsx(
-                  'mt-3 p-3 rounded-lg flex items-center gap-3',
-                  activeJob.status === 'completed' && 'bg-accent-green/10 border border-accent-green/30',
-                  activeJob.status === 'failed' && 'bg-accent-red/10 border border-accent-red/30',
-                  (activeJob.status === 'running' || activeJob.status === 'pending') && 'bg-accent-blue/10 border border-accent-blue/30'
-                )}>
-                  {activeJob.status === 'completed' && (
-                    <CheckCircle className="w-5 h-5 text-accent-green" />
-                  )}
-                  {activeJob.status === 'failed' && (
-                    <XCircle className="w-5 h-5 text-accent-red" />
-                  )}
-                  {(activeJob.status === 'running' || activeJob.status === 'pending') && (
-                    <Loader2 className="w-5 h-5 text-accent-blue animate-spin" />
-                  )}
-                  <div className="flex-1">
-                    <div className="font-medium text-text-primary capitalize">
-                      {activeJob.status === 'pending' && 'Starting analysis...'}
-                      {activeJob.status === 'running' && 'Analysis in progress...'}
-                      {activeJob.status === 'completed' && 'Analysis complete!'}
-                      {activeJob.status === 'failed' && 'Analysis failed'}
-                    </div>
-                    <div className="text-sm text-text-muted">
-                      {activeJob.status === 'running' && 'This may take 2-5 minutes'}
-                      {activeJob.status === 'completed' && activeJob.completed_at && (
-                        `Completed at ${new Date(activeJob.completed_at).toLocaleTimeString()}`
-                      )}
-                      {activeJob.status === 'failed' && activeJob.error}
-                    </div>
-                  </div>
-                </div>
-              )}
+        {/* Controls Header */}
+        <div className="flex-none p-4 border-b border-border-subtle">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-text-primary">
+                {analysisMode === 'combo' ? '🎯 Combo Analysis' : '📊 Single Game Analysis'}
+              </h3>
+              <p className="text-sm text-text-muted">
+                {analysisMode === 'combo' 
+                  ? `${selectedGames.length} game${selectedGames.length !== 1 ? 's' : ''} selected`
+                  : selectedGames.length === 1 
+                    ? selectedGames[0].title 
+                    : 'No game selected'}
+              </p>
             </div>
             
-            {/* Results Area */}
-            <div className="flex-1 overflow-y-auto p-4">
-              {activeJob?.status === 'completed' && activeJob.result ? (
-                <ResearchResults result={activeJob.result} />
-              ) : activeJob?.status === 'running' || activeJob?.status === 'pending' ? (
-                <div className="h-full flex items-center justify-center">
-                  <div className="text-center">
-                    <Loader2 className="w-12 h-12 text-accent-blue animate-spin mx-auto mb-4" />
-                    <p className="text-text-primary font-medium">Running LLM Council Analysis</p>
-                    <p className="text-text-muted text-sm mt-2">
+            {/* Analysis Controls */}
+            <div className="flex items-center gap-3">
+              {analysisMode === 'single' && (
+                <select
+                  value={promptVersion}
+                  onChange={(e) => setPromptVersion(e.target.value as PromptVersion)}
+                  className="px-3 py-1.5 rounded-md bg-bg-secondary border border-border-subtle text-sm text-text-primary"
+                  disabled={activeJob?.status === 'running' || activeJob?.status === 'pending'}
+                >
+                  <option value="v1">Prompt V1 (Original)</option>
+                  <option value="v2">Prompt V2 (Multi-stage)</option>
+                  {selectedGames[0]?.sport === 'soccer' && (
+                    <option value="v3">Prompt V3 (UCL)</option>
+                  )}
+                </select>
+              )}
+              
+              {analysisMode === 'combo' && (
+                <label className="flex items-center gap-2 text-sm text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={useCombinedAnalysis}
+                    onChange={(e) => setUseCombinedAnalysis(e.target.checked)}
+                    className="rounded border-border-subtle"
+                    disabled={activeJob?.status === 'running' || activeJob?.status === 'pending'}
+                  />
+                  Include spreads
+                </label>
+              )}
+              
+              <button
+                onClick={handleStartResearch}
+                disabled={!canRunAnalysis || activeJob?.status === 'running' || activeJob?.status === 'pending'}
+                className={clsx(
+                  'flex items-center gap-2 px-4 py-1.5 rounded-md font-medium transition-colors',
+                  !canRunAnalysis || activeJob?.status === 'running' || activeJob?.status === 'pending'
+                    ? 'bg-bg-secondary text-text-muted cursor-not-allowed'
+                    : 'bg-accent-blue text-white hover:bg-accent-blue/90'
+                )}
+              >
+                {activeJob?.status === 'running' || activeJob?.status === 'pending' ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Running...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4" />
+                    {analysisMode === 'combo' ? 'Run Combo Analysis' : 'Run Analysis'}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+          
+          {/* Job Status */}
+          {activeJob && (
+            <div className={clsx(
+              'mt-3 p-3 rounded-lg flex items-start gap-3',
+              activeJob.status === 'completed' && 'bg-accent-green/10 border border-accent-green/30',
+              activeJob.status === 'failed' && 'bg-accent-red/10 border border-accent-red/30',
+              (activeJob.status === 'running' || activeJob.status === 'pending') && 'bg-accent-blue/10 border border-accent-blue/30'
+            )}>
+              {activeJob.status === 'completed' && (
+                <CheckCircle className="w-5 h-5 text-accent-green flex-shrink-0 mt-0.5" />
+              )}
+              {activeJob.status === 'failed' && (
+                <XCircle className="w-5 h-5 text-accent-red flex-shrink-0 mt-0.5" />
+              )}
+              {(activeJob.status === 'running' || activeJob.status === 'pending') && (
+                <Loader2 className="w-5 h-5 text-accent-blue animate-spin flex-shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-text-primary capitalize">
+                  {activeJob.status === 'pending' && 'Starting analysis...'}
+                  {activeJob.status === 'running' && 'Analysis in progress...'}
+                  {activeJob.status === 'completed' && 'Analysis complete!'}
+                  {activeJob.status === 'failed' && 'Analysis failed'}
+                </div>
+                <div className="text-sm text-text-muted">
+                  {activeJob.status === 'running' && 'This may take 5-15 minutes for combo analysis'}
+                  {activeJob.status === 'completed' && activeJob.completed_at && (
+                    `Completed at ${new Date(activeJob.completed_at).toLocaleTimeString()}`
+                  )}
+                  {activeJob.status === 'failed' && activeJob.error}
+                </div>
+                {/* Progress messages */}
+                {(activeJob as any).progress?.length > 0 && (
+                  <div className="mt-2 text-xs text-text-muted max-h-20 overflow-y-auto">
+                    {((activeJob as any).progress as Array<{message: string; timestamp: string}>)
+                      .slice(-5)
+                      .map((p, i) => (
+                        <div key={i} className="truncate">{p.message}</div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {/* Results Area */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {activeJob?.status === 'completed' && activeJob.result ? (
+            <ResearchResults result={activeJob.result} isCombo={analysisMode === 'combo'} />
+          ) : activeJob?.status === 'running' || activeJob?.status === 'pending' ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <Loader2 className="w-12 h-12 text-accent-blue animate-spin mx-auto mb-4" />
+                <p className="text-text-primary font-medium">
+                  {analysisMode === 'combo' ? 'Running Deep Research Combo Analysis' : 'Running LLM Council Analysis'}
+                </p>
+                <p className="text-text-muted text-sm mt-2 max-w-md">
+                  {analysisMode === 'combo' ? (
+                    <>
+                      Stage 1: Multi-stage research for each game<br />
+                      Stage 2: Deep Research analyzing for combo recommendations
+                    </>
+                  ) : (
+                    <>
                       Stage 1: Research with Gemini + Google Search grounding<br />
                       Stage 2: Analysis by multiple LLMs<br />
                       Stage 3: Peer review<br />
                       Stage 4: Chairman synthesis
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full flex items-center justify-center text-text-muted">
-                  <div className="text-center">
-                    <FlaskConical className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>Click "Run Analysis" to start LLM Council research</p>
-                  </div>
-                </div>
-              )}
+                    </>
+                  )}
+                </p>
+              </div>
             </div>
-          </>
-        ) : (
-          <div className="h-full flex items-center justify-center text-text-muted">
-            <div className="text-center">
-              <FlaskConical className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>Select a game from the left panel to begin research</p>
+          ) : (
+            <div className="h-full flex items-center justify-center text-text-muted">
+              <div className="text-center">
+                <FlaskConical className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>
+                  {analysisMode === 'combo' 
+                    ? 'Select 2-6 games and click "Run Combo Analysis"'
+                    : 'Select a game and click "Run Analysis"'}
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -425,27 +585,47 @@ export function ResearchPage() {
 
 interface ResearchResultsProps {
   result: {
-    title: string;
+    title?: string;
+    games?: string[];
     research: string;
     analyses: Record<string, string>;
     reviews: Record<string, string>;
     final_recommendation: string;
     metadata: Record<string, any>;
   };
+  isCombo?: boolean;
 }
 
-function ResearchResults({ result }: ResearchResultsProps) {
+function ResearchResults({ result, isCombo }: ResearchResultsProps) {
   const [activeTab, setActiveTab] = useState<'recommendation' | 'research' | 'analyses' | 'reviews'>('recommendation');
   
   const tabs = [
-    { id: 'recommendation' as const, label: 'Final Recommendation', icon: FileText },
+    { id: 'recommendation' as const, label: isCombo ? 'Combo Picks' : 'Final Recommendation', icon: FileText },
     { id: 'research' as const, label: 'Research', icon: FlaskConical },
-    { id: 'analyses' as const, label: 'Analyses', icon: FileText },
-    { id: 'reviews' as const, label: 'Reviews', icon: FileText },
+    ...(Object.keys(result.analyses).length > 0 ? [
+      { id: 'analyses' as const, label: 'Analyses', icon: FileText },
+    ] : []),
+    ...(Object.keys(result.reviews).length > 0 ? [
+      { id: 'reviews' as const, label: 'Reviews', icon: FileText },
+    ] : []),
   ];
   
   return (
     <div className="h-full flex flex-col">
+      {/* Games header for combo */}
+      {isCombo && result.games && result.games.length > 0 && (
+        <div className="flex-none mb-4 p-3 bg-bg-secondary rounded-lg">
+          <div className="text-xs font-medium text-text-muted mb-2">Games in Combo</div>
+          <div className="flex flex-wrap gap-2">
+            {result.games.map((game, i) => (
+              <span key={i} className="px-2 py-1 bg-accent-blue/10 text-accent-blue text-sm rounded">
+                {game}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      
       {/* Tabs */}
       <div className="flex-none flex gap-1 mb-4 border-b border-border-subtle pb-2">
         {tabs.map((tab) => (
@@ -470,10 +650,10 @@ function ResearchResults({ result }: ResearchResultsProps) {
         {activeTab === 'recommendation' && (
           <div className="glass-panel p-4">
             <h3 className="text-lg font-semibold text-text-primary mb-3">
-              🎯 Final Recommendation
+              {isCombo ? '🎯 Combo Betting Recommendations' : '🎯 Final Recommendation'}
             </h3>
             <div className="prose prose-invert max-w-none">
-              <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans">
+              <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
                 {result.final_recommendation}
               </pre>
             </div>
@@ -486,17 +666,17 @@ function ResearchResults({ result }: ResearchResultsProps) {
               📊 Research Findings
             </h3>
             <div className="text-xs text-text-muted mb-3">
-              Model: {result.metadata?.research_model || 'Gemini'} (Google Search grounding)
+              Model: {result.metadata?.research_model || result.metadata?.analysis_model || 'Gemini'} (Google Search grounding)
             </div>
             <div className="prose prose-invert max-w-none">
-              <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans">
+              <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
                 {result.research}
               </pre>
             </div>
           </div>
         )}
         
-        {activeTab === 'analyses' && (
+        {activeTab === 'analyses' && Object.keys(result.analyses).length > 0 && (
           <div className="space-y-4">
             {Object.entries(result.analyses).map(([model, analysis]) => (
               <div key={model} className="glass-panel p-4">
@@ -504,7 +684,7 @@ function ResearchResults({ result }: ResearchResultsProps) {
                   🤖 {model.split('/').pop() || model}
                 </h3>
                 <div className="prose prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans">
+                  <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
                     {analysis}
                   </pre>
                 </div>
@@ -513,7 +693,7 @@ function ResearchResults({ result }: ResearchResultsProps) {
           </div>
         )}
         
-        {activeTab === 'reviews' && (
+        {activeTab === 'reviews' && Object.keys(result.reviews).length > 0 && (
           <div className="space-y-4">
             {Object.entries(result.reviews).map(([model, review]) => (
               <div key={model} className="glass-panel p-4">
@@ -521,7 +701,7 @@ function ResearchResults({ result }: ResearchResultsProps) {
                   📝 Review by {model.split('/').pop() || model}
                 </h3>
                 <div className="prose prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans">
+                  <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
                     {review}
                   </pre>
                 </div>
@@ -534,7 +714,13 @@ function ResearchResults({ result }: ResearchResultsProps) {
       {/* Metadata */}
       <div className="flex-none mt-4 pt-3 border-t border-border-subtle">
         <div className="flex flex-wrap gap-4 text-xs text-text-muted">
-          {result.metadata?.council_models && (
+          {result.metadata?.mode && (
+            <span>Mode: {result.metadata.mode}</span>
+          )}
+          {result.metadata?.analysis_type && (
+            <span>Analysis: {result.metadata.analysis_type}</span>
+          )}
+          {result.metadata?.council_models?.length > 0 && (
             <span>Council: {result.metadata.council_models.join(', ')}</span>
           )}
           {result.metadata?.chairman_model && (
