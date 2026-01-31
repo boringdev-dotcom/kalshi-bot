@@ -1288,9 +1288,15 @@ def _build_deep_research_analysis_prompt(
     This is the SECOND stage - Deep Research analyzes the research we already
     gathered (via Gemini grounding) and produces combo recommendations.
     
+    For totals-only mode, the model MUST choose between two HIGH-PROBABILITY options per game:
+    - OVER on lowest strike = Buy YES on min (high prob - easy to clear a low bar)
+    - UNDER on highest strike = Buy NO on max (high prob - easy to stay under a high bar)
+    
+    Both are likely to hit; the model picks which has better VALUE.
+    
     Args:
         compiled_research: All research data gathered from multi-stage research
-        markets_text: Formatted totals market data (extreme strikes only)
+        markets_text: Formatted totals options data (two high-prob options per game)
         games_metadata: List of game metadata dicts with title, date, teams
         
     Returns:
@@ -1307,64 +1313,94 @@ def _build_deep_research_analysis_prompt(
         games_list.append(f"- {title} ({date_str}): {away_team} @ {home_team}")
     
     games_section = "\n".join(games_list)
+    num_games = len(games_metadata)
     
-    prompt = f"""You are an expert NBA sports betting analyst. I have already gathered detailed research data for the following NBA games. Your job is to ANALYZE this research and provide COMBO betting recommendations focused on TOTAL (over/under) markets.
+    prompt = f"""You are an expert NBA sports betting analyst specializing in totals (over/under) markets.
+
+## YOUR CRITICAL TASK
+
+For each game below, you MUST choose EXACTLY ONE of two options. Both are HIGH-PROBABILITY bets:
+- **OVER [low strike]** = Buy YES on the lowest-strike total (you profit if game clears the low bar)
+- **UNDER [high strike]** = Buy NO on the highest-strike total (you profit if game stays under the high bar)
+
+Both options are likely to hit. Your job is to find which one offers BETTER VALUE.
+
+You are building a {num_games}-leg combo. Every game MUST have a pick. No skipping.
 
 ## GAMES IN THIS COMBO
 
 {games_section}
 
-## KALSHI TOTAL MARKETS (Extreme Strikes Only)
+## AVAILABLE BETTING OPTIONS (Two Per Game)
 
 {markets_text}
 
 ## PRE-GATHERED RESEARCH DATA
 
-The following research has been gathered via web search. Analyze this data to make your recommendations:
+The following research has been gathered via web search. Use this data to make your decisions:
 
 {compiled_research}
 
-## YOUR ANALYSIS TASK
+---
 
-Based on the research data above, analyze each game and provide:
+## YOUR ANALYSIS (Required Format)
 
 ### Executive Summary
-Brief overview of the combo opportunity and overall recommendation.
+One paragraph: What's the overall thesis for this combo? Which games have the clearest value? What's your combined edge estimate?
 
-### Game-by-Game Total Analysis
-For each game, synthesize the research to determine:
-- **Projected Total Range**: Your estimate based on pace, efficiency, injuries
-- **Key Factors**: The 2-3 most important factors affecting this total
-- **Market Assessment**: Is the extreme strike (low or high) offering value?
-- **Recommendation**: OVER or UNDER on which strike, and why
-- **Your Analysis**: Show your math. Every probability estimate needs supporting data. Tell me why you picked one strike over the other.
-- **Confidence**: High/Medium/Low with reasoning
+### Game-by-Game Analysis
 
-### Combo Betting Strategy
-- Which games have the strongest edge on totals?
-- Recommended combo structure (which contracts to combine)
-- Correlation analysis (are the games independent or correlated?)
-- Risk factors that could blow up the combo
+For EACH game, you MUST provide:
 
-### Actionable Betting Recommendations
+#### Game: [Title]
+**Research Synthesis:**
+- Projected total range based on pace, efficiency, injuries
+- Key factors affecting scoring (2-3 bullet points)
 
-**PRIMARY COMBO:**
-- Game 1: [Ticker] - [OVER/UNDER] @ [price]
-- Game 2: [Ticker] - [OVER/UNDER] @ [price]
-- etc.
-- Combined implied probability
-- Recommended stake
+**Option Comparison:**
+| Option | Ticker | Side | Buy Price | Your Prob | Market Prob | Edge |
+|--------|--------|------|-----------|-----------|-------------|------|
+| OVER [low strike] | [ticker] | YES | [ask]¢ | [X]% | [Y]% | [+/-Z]% |
+| UNDER [high strike] | [ticker] | NO | [ask]¢ | [X]% | [Y]% | [+/-Z]% |
 
-**ALTERNATIVE PLAYS:**
-- Single-game plays if combo is too risky
-- Hedge suggestions
+**Your Pick:** [OVER low] or [UNDER high]
+**Reasoning:** [2-3 sentences explaining why this option offers better value]
+**Confidence:** [HIGH/MEDIUM/LOW]
+
+---
+
+### Final Combo Recommendation
+
+**PRIMARY COMBO ({num_games} legs):**
+
+| Game | Pick | Ticker | Side | Buy Price | Your Prob | Edge |
+|------|------|--------|------|-----------|-----------|------|
+| Game 1 | [OVER X / UNDER Y] | [ticker] | [YES/NO] | [X]¢ | [X]% | [+X]% |
+| Game 2 | [OVER X / UNDER Y] | [ticker] | [YES/NO] | [X]¢ | [X]% | [+X]% |
+| ... | | | | | | |
+
+**Combined Analysis:**
+- Combined implied probability (multiply market probs): [X]%
+- Your estimated combined probability: [X]%
+- Combined edge: [+X]%
+- Recommended stake: [X] units
+
+**Strongest Legs:** Which 2 games have the clearest edge?
+**Weakest Leg:** Which game are you least confident about?
 
 ### Risk Assessment
-- What could go wrong?
+- What scenarios blow up this combo?
 - Key injuries/news to monitor before tip-off
-- When to pass on this combo
+- Under what conditions should you PASS on this combo?
 
-Be specific with contract tickers and prices from the market data. Make decisive recommendations."""
+---
+
+## RULES
+1. You MUST pick one option (OVER low strike OR UNDER high strike) for EVERY game
+2. Show your probability estimates and edge calculations
+3. Use the ASK price from the market data (that's what you pay to buy)
+4. Be decisive - no hedging or "either could work" answers
+5. If a game has no clear edge, still pick the better option and note low confidence"""
 
     return prompt
 

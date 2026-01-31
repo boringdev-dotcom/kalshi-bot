@@ -1778,6 +1778,152 @@ def format_totals_for_deep_research(
     return "\n".join(output)
 
 
+def format_total_tails_for_deep_research(
+    games_metadata: List[Dict[str, Any]],
+) -> str:
+    """
+    Format the two HIGH-PROBABILITY tail betting options per game for totals-only combo analysis.
+    
+    For combos, we want the LIKELY sides of the extreme strikes:
+      - OVER on lowest strike = YES on min (high prob - easy to clear a low bar)
+      - UNDER on highest strike = NO on max (high prob - easy to stay under a high bar)
+    
+    The model picks which one has better VALUE for each game.
+    
+    Args:
+        games_metadata: List of game metadata dicts with:
+            - title, date, away_team, home_team
+            - total_extremes: list of exactly 2 total markets [min_strike, max_strike]
+        
+    Returns:
+        Formatted string for Deep Research input with exactly 2 options per game
+    """
+    output = []
+    output.append("=" * 70)
+    output.append("KALSHI NBA TOTALS - TWO OPTIONS PER GAME (HIGH-PROB SIDES)")
+    output.append("=" * 70)
+    output.append("")
+    output.append("⚠️ CRITICAL INSTRUCTIONS:")
+    output.append("For each game, you MUST choose EXACTLY ONE of the two options below.")
+    output.append("Both options are the HIGH-PROBABILITY sides of the extreme strikes.")
+    output.append("")
+    output.append("HOW TO READ:")
+    output.append("  • OPTION A: OVER on lowest strike = BUY YES on min strike")
+    output.append("    → You profit if the game scores ABOVE the low line")
+    output.append("    → High probability (easy to clear a low bar)")
+    output.append("")
+    output.append("  • OPTION B: UNDER on highest strike = BUY NO on max strike")
+    output.append("    → You profit if the game scores BELOW the high line")
+    output.append("    → High probability (easy to stay under a high bar)")
+    output.append("")
+    output.append("  • Prices in cents (e.g., 65¢ = 65% implied probability)")
+    output.append("  • Use the ASK price when buying")
+    output.append("")
+    output.append("YOUR TASK: Pick the option with BETTER VALUE for each game.")
+    output.append("Both are likely to hit, but one may offer more edge.")
+    output.append("=" * 70)
+    
+    for game in games_metadata:
+        title = game.get("title", "Unknown")
+        date = game.get("date")
+        date_str = date.strftime("%B %d, %Y") if date else "TBD"
+        away_team = game.get("away_team", "Away")
+        home_team = game.get("home_team", "Home")
+        total_extremes = game.get("total_extremes", [])
+        
+        output.append(f"\n{'='*70}")
+        output.append(f"🏀 GAME: {title}")
+        output.append(f"   Date: {date_str}")
+        output.append(f"   Matchup: {away_team} @ {home_team}")
+        output.append("-" * 70)
+        
+        if len(total_extremes) < 2:
+            output.append("  ⚠️ Insufficient total markets - skip this game in combo")
+            continue
+        
+        # Sort by strike to ensure [min, max]
+        markets_with_strikes = []
+        for market in total_extremes:
+            ticker = market.get("ticker", "")
+            strike = _parse_strike_from_ticker(ticker)
+            if strike is not None:
+                markets_with_strikes.append((strike, market))
+        
+        if len(markets_with_strikes) < 2:
+            output.append("  ⚠️ Could not parse strikes - skip this game in combo")
+            continue
+        
+        markets_with_strikes.sort(key=lambda x: x[0])
+        min_strike, min_market = markets_with_strikes[0]
+        max_strike, max_market = markets_with_strikes[-1]
+        
+        # Option A: OVER on lowest strike (YES on min) - HIGH PROBABILITY
+        output.append("")
+        output.append(f"  ┌─ OPTION A: OVER {min_strike} (High prob - clear the low bar)")
+        output.append(f"  │  Ticker: {min_market.get('ticker', 'N/A')}")
+        output.append(f"  │  Strike: {min_strike} total points")
+        output.append(f"  │  Action: BUY YES (game scores OVER {min_strike})")
+        
+        min_yes_bid = min_market.get("yes_bid")
+        min_yes_ask = min_market.get("yes_ask")
+        
+        if min_yes_bid is not None and min_yes_ask is not None:
+            output.append(f"  │  YES Price: Bid {min_yes_bid}¢ | Ask {min_yes_ask}¢")
+            output.append(f"  │  → BUY at {min_yes_ask}¢ (implied prob: {min_yes_ask}%)")
+        else:
+            last_price = min_market.get("last_price")
+            if last_price is not None:
+                output.append(f"  │  Last YES price: {last_price}¢")
+            else:
+                output.append(f"  │  No pricing available")
+        
+        output.append(f"  │  Volume: {min_market.get('volume', 0) or 0} contracts")
+        output.append("  └─")
+        
+        # Option B: UNDER on highest strike (NO on max) - HIGH PROBABILITY
+        output.append("")
+        output.append(f"  ┌─ OPTION B: UNDER {max_strike} (High prob - stay under the high bar)")
+        output.append(f"  │  Ticker: {max_market.get('ticker', 'N/A')}")
+        output.append(f"  │  Strike: {max_strike} total points")
+        output.append(f"  │  Action: BUY NO (game scores UNDER {max_strike})")
+        
+        max_yes_bid = max_market.get("yes_bid")
+        max_yes_ask = max_market.get("yes_ask")
+        max_no_bid = max_market.get("no_bid")
+        max_no_ask = max_market.get("no_ask")
+        
+        # Calculate NO pricing (from YES or directly)
+        if max_no_bid is not None and max_no_ask is not None:
+            output.append(f"  │  NO Price: Bid {max_no_bid}¢ | Ask {max_no_ask}¢")
+            output.append(f"  │  → BUY at {max_no_ask}¢ (implied prob: {max_no_ask}%)")
+        elif max_yes_bid is not None and max_yes_ask is not None:
+            implied_no_bid = 100 - max_yes_ask
+            implied_no_ask = 100 - max_yes_bid
+            output.append(f"  │  NO Price (from YES): ~Bid {implied_no_bid}¢ | ~Ask {implied_no_ask}¢")
+            output.append(f"  │  → BUY at ~{implied_no_ask}¢ (implied prob: ~{implied_no_ask}%)")
+        else:
+            last_price = max_market.get("last_price")
+            if last_price is not None:
+                implied_no = 100 - last_price
+                output.append(f"  │  Last YES price: {last_price}¢ → NO ≈ {implied_no}¢")
+            else:
+                output.append(f"  │  No pricing available")
+        
+        output.append(f"  │  Volume: {max_market.get('volume', 0) or 0} contracts")
+        output.append("  └─")
+        
+        output.append("")
+        output.append(f"  📊 STRIKE RANGE: {min_strike} to {max_strike} ({max_strike - min_strike} point spread)")
+        output.append(f"  ❓ YOUR PICK: [OVER {min_strike}] or [UNDER {max_strike}]?")
+    
+    output.append("")
+    output.append("=" * 70)
+    output.append("END OF TOTALS OPTIONS - PICK ONE PER GAME")
+    output.append("=" * 70)
+    
+    return "\n".join(output)
+
+
 def format_combined_extremes_for_deep_research(
     games_metadata: List[Dict[str, Any]],
 ) -> str:

@@ -14,6 +14,8 @@ import {
   Plus
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { 
   fetchResearchGames, 
   startResearchJob, 
@@ -22,6 +24,17 @@ import {
   type ResearchGame, 
   type ResearchJob 
 } from '../api';
+
+// Markdown renderer component
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <div className="markdown-content">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 type PromptVersion = 'v1' | 'v2' | 'v3';
 type AnalysisMode = 'single' | 'combo';
@@ -652,11 +665,7 @@ function ResearchResults({ result, isCombo }: ResearchResultsProps) {
             <h3 className="text-lg font-semibold text-text-primary mb-3">
               {isCombo ? '🎯 Combo Betting Recommendations' : '🎯 Final Recommendation'}
             </h3>
-            <div className="prose prose-invert max-w-none">
-              <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
-                {result.final_recommendation}
-              </pre>
-            </div>
+            <MarkdownContent content={result.final_recommendation} />
           </div>
         )}
         
@@ -668,11 +677,7 @@ function ResearchResults({ result, isCombo }: ResearchResultsProps) {
             <div className="text-xs text-text-muted mb-3">
               Model: {result.metadata?.research_model || result.metadata?.analysis_model || 'Gemini'} (Google Search grounding)
             </div>
-            <div className="prose prose-invert max-w-none">
-              <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
-                {result.research}
-              </pre>
-            </div>
+            <MarkdownContent content={result.research} />
           </div>
         )}
         
@@ -683,11 +688,7 @@ function ResearchResults({ result, isCombo }: ResearchResultsProps) {
                 <h3 className="text-lg font-semibold text-text-primary mb-3">
                   🤖 {model.split('/').pop() || model}
                 </h3>
-                <div className="prose prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
-                    {analysis}
-                  </pre>
-                </div>
+                <MarkdownContent content={analysis} />
               </div>
             ))}
           </div>
@@ -700,11 +701,7 @@ function ResearchResults({ result, isCombo }: ResearchResultsProps) {
                 <h3 className="text-lg font-semibold text-text-primary mb-3">
                   📝 Review by {model.split('/').pop() || model}
                 </h3>
-                <div className="prose prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap text-sm text-text-secondary font-sans leading-relaxed">
-                    {review}
-                  </pre>
-                </div>
+                <MarkdownContent content={review} />
               </div>
             ))}
           </div>
