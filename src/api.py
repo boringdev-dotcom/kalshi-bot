@@ -1086,8 +1086,14 @@ async def _run_research_job(job_id: str, request: ResearchJobRequest, s: Setting
         for suffix in [" Winner?", " Winner", " Total?", " Total", " Spread?", " Spread", " Tie?", " Tie"]:
             clean_title = clean_title.replace(suffix, "")
         
+        # Try both "vs" and "at" separators
         if " vs " in clean_title:
             parts = clean_title.split(" vs ")
+            if len(parts) == 2:
+                away_team = parts[0].strip()
+                home_team = parts[1].strip()
+        elif " at " in clean_title:
+            parts = clean_title.split(" at ")
             if len(parts) == 2:
                 away_team = parts[0].strip()
                 home_team = parts[1].strip()
@@ -1205,8 +1211,11 @@ async def _run_combo_research_job(job_id: str, request: ComboResearchJobRequest,
     from .llm_council import run_nba_combo_deep_research
     from .kalshi_api import (
         get_basketball_markets,
-        format_basketball_markets_for_kalshi_trading,
+        format_combined_extremes_for_deep_research,
+        format_total_tails_for_deep_research,
         group_markets_by_match,
+        select_total_extremes,
+        select_spread_extremes,
     )
     
     job = _research_jobs.get(job_id)
@@ -1237,9 +1246,8 @@ async def _run_combo_research_job(job_id: str, request: ComboResearchJobRequest,
         # Group markets by match
         matches = group_markets_by_match(markets)
         
-        # Find the requested matches
+        # Find the requested matches and compute extreme markets
         games_metadata = []
-        all_markets = []
         
         for match_id in request.match_ids:
             match_data = matches.get(match_id)
@@ -1255,19 +1263,31 @@ async def _run_combo_research_job(job_id: str, request: ComboResearchJobRequest,
                 raise ValueError(f"Match {match_id} not found")
             
             title = match_data.get("title", "Unknown")
+            game_markets = match_data.get("markets", [])
             
-            # Parse team names
+            # Parse team names from title
+            # Titles can be "Team A vs Team B" or "Team A at Team B"
             home_team = None
             away_team = None
             clean_title = title
             for suffix in [" Winner?", " Winner", " Total?", " Total", " Spread?", " Spread"]:
                 clean_title = clean_title.replace(suffix, "")
             
+            # Try both "vs" and "at" separators
             if " vs " in clean_title:
                 parts = clean_title.split(" vs ")
                 if len(parts) == 2:
                     away_team = parts[0].strip()
                     home_team = parts[1].strip()
+            elif " at " in clean_title:
+                parts = clean_title.split(" at ")
+                if len(parts) == 2:
+                    away_team = parts[0].strip()
+                    home_team = parts[1].strip()
+            
+            # Select extreme markets for this game
+            total_extremes = select_total_extremes(game_markets)
+            spread_extremes = select_spread_extremes(game_markets)
             
             games_metadata.append({
                 "title": title,
@@ -1275,14 +1295,19 @@ async def _run_combo_research_job(job_id: str, request: ComboResearchJobRequest,
                 "home_team": home_team,
                 "away_team": away_team,
                 "date": None,  # Will use today's date
+                "total_extremes": total_extremes,
+                "spread_extremes": spread_extremes,
             })
-            
-            all_markets.extend(match_data.get("markets", []))
         
-        progress_callback(f"Found {len(games_metadata)} games with {len(all_markets)} total markets")
-        
-        # Format markets for analysis
-        markets_text = format_basketball_markets_for_kalshi_trading(all_markets)
+        # Format markets based on analysis mode
+        if request.use_combined_analysis:
+            # Include both totals and spreads extremes
+            progress_callback(f"Found {len(games_metadata)} games - using totals + spreads extremes")
+            markets_text = format_combined_extremes_for_deep_research(games_metadata)
+        else:
+            # Totals-only: show only the two tail options per game
+            progress_callback(f"Found {len(games_metadata)} games - using totals tails only (Extreme Over vs Extreme Under)")
+            markets_text = format_total_tails_for_deep_research(games_metadata)
         
         # Run combo analysis
         progress_callback("Starting Deep Research combo analysis...")
