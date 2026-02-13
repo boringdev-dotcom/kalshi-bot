@@ -42,6 +42,9 @@ SOCCER_SERIES_TICKERS = {
     ],
     "ligue_1": [
         "KXLIGUE1GAME",             # Winner/Tie markets
+        "KXLIGUE1SPREAD",           # Spread markets
+        "KXLIGUE1TOTAL",            # Total goals (Over/Under)
+        "KXLIGUE1BTTS",             # Both Teams To Score
     ],
 }
 
@@ -445,6 +448,7 @@ def get_soccer_markets(
     
     soccer_markets = []
     seen_tickers = set()  # Avoid duplicates across series
+    league_market_types: Dict[str, set] = {league: set() for league in leagues}
     
     # Try to fetch using series_ticker for each league (fast path)
     for league in leagues:
@@ -476,21 +480,72 @@ def get_soccer_markets(
                     ticker = market.get("ticker")
                     if ticker and ticker not in seen_tickers:
                         seen_tickers.add(ticker)
-                        soccer_markets.append(_format_soccer_market(market, league))
+                        formatted_market = _format_soccer_market(market, league)
+                        soccer_markets.append(formatted_market)
+                        league_market_types.setdefault(league, set()).add(
+                            formatted_market.get("market_type", "unknown")
+                        )
                 
                 cursor = result.get("cursor")
                 if not cursor:
                     break
     
-    # If no markets found via series_ticker, try event-based search
-    if not soccer_markets:
-        logger.info("No markets via series_ticker, trying event search...")
-        soccer_markets = _search_soccer_markets_fallback(
-            key_id, private_key_pem, ws_url, leagues
+    # If a league is empty or only has winner/tie markets, try event-based search to
+    # discover additional market types when series naming differs.
+    leagues_needing_fallback = []
+    for league in leagues:
+        observed_types = league_market_types.get(league, set())
+        expected_series = SOCCER_SERIES_TICKERS.get(league, [])
+        if isinstance(expected_series, str):
+            expected_series = [expected_series]
+
+        expects_alt_markets = any(
+            "SPREAD" in series.upper()
+            or "TOTAL" in series.upper()
+            or "BTTS" in series.upper()
+            for series in expected_series
         )
+        has_alt_markets = any(t in observed_types for t in ("spread", "total", "btts"))
+
+        if not observed_types or (expects_alt_markets and not has_alt_markets):
+            leagues_needing_fallback.append(league)
+
+    if leagues_needing_fallback:
+        logger.info(
+            "Trying event-based fallback for leagues with missing market types: %s",
+            leagues_needing_fallback,
+        )
+        fallback_markets = _search_soccer_markets_fallback(
+            key_id, private_key_pem, ws_url, leagues_needing_fallback
+        )
+        for market in fallback_markets:
+            ticker = market.get("ticker")
+            if ticker and ticker not in seen_tickers:
+                seen_tickers.add(ticker)
+                soccer_markets.append(market)
     
     logger.info(f"Found {len(soccer_markets)} soccer markets for leagues: {leagues}")
     return soccer_markets
+
+
+def _detect_soccer_league_from_text(combined_text: str, leagues: List[str]) -> str:
+    """
+    Detect soccer league from combined event/market text using both league terms
+    and known ticker prefixes.
+    """
+    text = combined_text.upper()
+
+    for league_name in leagues:
+        for term in SOCCER_SEARCH_TERMS.get(league_name, []):
+            if term in text:
+                return league_name
+
+    for league_name in leagues:
+        for prefix in SOCCER_TICKER_PREFIXES.get(league_name, []):
+            if prefix in text:
+                return league_name
+
+    return "unknown"
 
 
 def _format_soccer_market(market: Dict[str, Any], league: str) -> Dict[str, Any]:
@@ -557,6 +612,7 @@ def _search_soccer_markets_fallback(
     This is slower but more reliable if series_tickers change.
     """
     soccer_markets = []
+    seen_tickers = set()
     
     # Build search terms
     search_terms = ["SOCCER", "FOOTBALL"]
@@ -594,13 +650,8 @@ def _search_soccer_markets_fallback(
             
             # Check if this is a soccer event
             if any(term in combined.upper() for term in search_terms):
-                # Determine league
-                detected_league = "unknown"
-                for league_name, terms in SOCCER_SEARCH_TERMS.items():
-                    if league_name in leagues and any(t in combined for t in terms):
-                        detected_league = league_name
-                        break
-                
+                # Determine league from event ticker/title/category.
+                detected_league = _detect_soccer_league_from_text(combined, leagues)
                 if detected_league == "unknown":
                     continue
                 
@@ -615,7 +666,25 @@ def _search_soccer_markets_fallback(
                 )
                 
                 for market in market_result.get("markets", []):
-                    soccer_markets.append(_format_soccer_market(market, detected_league))
+                    # Re-check with market-level text in case event metadata is generic.
+                    market_text = (
+                        f"{market.get('ticker', '')} "
+                        f"{market.get('series_ticker', '')} "
+                        f"{market.get('title', '')} "
+                        f"{market.get('subtitle', '')}"
+                    )
+                    market_league = _detect_soccer_league_from_text(
+                        market_text, leagues
+                    )
+                    if market_league == "unknown":
+                        market_league = detected_league
+
+                    ticker = market.get("ticker")
+                    if ticker and ticker not in seen_tickers:
+                        seen_tickers.add(ticker)
+                        soccer_markets.append(
+                            _format_soccer_market(market, market_league)
+                        )
         
         cursor = result.get("cursor")
         if not cursor:
