@@ -531,6 +531,33 @@ def get_soccer_markets(
             if ticker and ticker not in seen_tickers:
                 seen_tickers.add(ticker)
                 soccer_markets.append(market)
+
+    # Some leagues use unexpected series naming. If we still only see winner/tie
+    # contracts, scan open markets and match by known league prefixes/terms.
+    leagues_still_missing = []
+    for league in leagues_needing_fallback:
+        observed_types = {
+            m.get("market_type", "unknown")
+            for m in soccer_markets
+            if m.get("league") == league
+        }
+        has_alt_markets = any(t in observed_types for t in ("spread", "total", "btts"))
+        if not has_alt_markets:
+            leagues_still_missing.append(league)
+
+    if leagues_still_missing:
+        logger.info(
+            "Trying prefix-based market fallback for leagues: %s",
+            leagues_still_missing,
+        )
+        prefix_markets = _search_soccer_markets_by_prefix_fallback(
+            key_id, private_key_pem, ws_url, leagues_still_missing
+        )
+        for market in prefix_markets:
+            ticker = market.get("ticker")
+            if ticker and ticker not in seen_tickers:
+                seen_tickers.add(ticker)
+                soccer_markets.append(market)
     
     logger.info(f"Found {len(soccer_markets)} soccer markets for leagues: {leagues}")
     return soccer_markets
@@ -559,7 +586,13 @@ def _detect_soccer_league_from_text(combined_text: str, leagues: List[str]) -> s
 def _format_soccer_market(market: Dict[str, Any], league: str) -> Dict[str, Any]:
     """Format a market dict for soccer analysis."""
     ticker = market.get("ticker", "").upper()
-    title = market.get("title", "").upper()
+    event_obj = market.get("event")
+    event_title = market.get("event_title") or market.get("event_name")
+    if not event_title and isinstance(event_obj, dict):
+        event_title = event_obj.get("title")
+
+    market_title = event_title or market.get("title") or ""
+    title = market_title.upper()
     subtitle = market.get("subtitle", "").upper()
     series_ticker = market.get("series_ticker", "").upper()
     combined_text = f"{ticker} {title} {subtitle}"
@@ -588,7 +621,7 @@ def _format_soccer_market(market: Dict[str, Any], league: str) -> Dict[str, Any]
     
     return {
         "ticker": market.get("ticker"),
-        "title": market.get("title"),
+        "title": market_title,
         "subtitle": market.get("subtitle"),
         "yes_bid": market.get("yes_bid"),
         "yes_ask": market.get("yes_ask"),
@@ -698,6 +731,61 @@ def _search_soccer_markets_fallback(
         if not cursor:
             break
     
+    return soccer_markets
+
+
+def _search_soccer_markets_by_prefix_fallback(
+    key_id: str,
+    private_key_pem: str,
+    ws_url: str,
+    leagues: List[str],
+    max_pages: int = 12,
+) -> List[Dict[str, Any]]:
+    """
+    Fallback: scan open markets and detect league from ticker/title prefixes.
+
+    This catches leagues where series_ticker names differ from configured values.
+    """
+    soccer_markets = []
+    seen_tickers = set()
+    cursor = None
+    pages_scanned = 0
+
+    while pages_scanned < max_pages:
+        result = get_markets(
+            key_id=key_id,
+            private_key_pem=private_key_pem,
+            ws_url=ws_url,
+            status="open",
+            limit=200,
+            cursor=cursor,
+        )
+
+        markets = result.get("markets", [])
+        if not markets:
+            break
+
+        for market in markets:
+            market_text = (
+                f"{market.get('ticker', '')} "
+                f"{market.get('series_ticker', '')} "
+                f"{market.get('title', '')} "
+                f"{market.get('subtitle', '')}"
+            )
+            detected_league = _detect_soccer_league_from_text(market_text, leagues)
+            if detected_league == "unknown":
+                continue
+
+            ticker = market.get("ticker")
+            if ticker and ticker not in seen_tickers:
+                seen_tickers.add(ticker)
+                soccer_markets.append(_format_soccer_market(market, detected_league))
+
+        pages_scanned += 1
+        cursor = result.get("cursor")
+        if not cursor:
+            break
+
     return soccer_markets
 
 
@@ -2543,19 +2631,19 @@ def group_markets_by_event(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str,
     for market in markets:
         ticker = market.get("ticker", "")
         parts = ticker.split("-")
-        
-        # Extract event identifier (second part of ticker)
-        if len(parts) >= 2:
-            event_id = parts[1]
-        else:
-            event_id = market.get("event_ticker") or ticker
+
+        # Prefer API-provided event identifier; ticker parsing can fragment
+        # some markets (e.g., spread/total variants) into separate fake events.
+        event_id = market.get("event_ticker")
+        if not event_id:
+            if len(parts) >= 2:
+                event_id = parts[1]
+            else:
+                event_id = ticker
         
         if event_id not in events:
             # Parse title to get clean event name
-            title = market.get("title", "Unknown Event")
-            # Remove suffixes like "Winner?", "Tie?", etc.
-            for suffix in [" Winner?", " Winner", " Tie?", " Tie", " Total?", " Total"]:
-                title = title.replace(suffix, "")
+            title = _clean_event_title(market.get("title", "Unknown Event"))
             
             events[event_id] = {
                 "event_id": event_id,
@@ -2564,6 +2652,10 @@ def group_markets_by_event(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str,
                 "close_time": market.get("close_time") or market.get("expiration_time"),
                 "markets": [],
             }
+        else:
+            candidate_title = _clean_event_title(market.get("title", "Unknown Event"))
+            if _is_better_event_title(candidate_title, events[event_id]["title"]):
+                events[event_id]["title"] = candidate_title
         
         # Add market to event with useful fields for display
         market_info = {
@@ -2580,6 +2672,66 @@ def group_markets_by_event(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str,
         events[event_id]["markets"].append(market_info)
     
     return events
+
+
+def _clean_event_title(title: str) -> str:
+    """Normalize event titles for selector display."""
+    if not title:
+        return "Unknown Event"
+
+    cleaned = title
+    for suffix in [
+        " Winner?",
+        " Winner",
+        " Tie?",
+        " Tie",
+        " Total?",
+        " Total",
+        " Spread?",
+        " Spread",
+    ]:
+        cleaned = cleaned.replace(suffix, "")
+    return cleaned.strip().rstrip("?").strip()
+
+
+def _looks_like_contract_title(title: str) -> bool:
+    """Heuristic: contract question vs neutral matchup title."""
+    upper = (title or "").upper()
+    return any(
+        phrase in upper
+        for phrase in (
+            "WINS BY OVER",
+            "WIN BY OVER",
+            "OVER ",
+            "UNDER ",
+            "BOTH TEAMS TO SCORE",
+        )
+    )
+
+
+def _is_better_event_title(candidate: str, current: str) -> bool:
+    """Prefer matchup-like titles over contract-level phrasing."""
+    cand = (candidate or "").strip()
+    cur = (current or "").strip()
+    if not cand:
+        return False
+    if not cur or cur == "Unknown Event":
+        return True
+
+    cand_upper = cand.upper()
+    cur_upper = cur.upper()
+
+    cand_has_matchup = " VS " in cand_upper or " AT " in cand_upper
+    cur_has_matchup = " VS " in cur_upper or " AT " in cur_upper
+    if cand_has_matchup and not cur_has_matchup:
+        return True
+
+    cand_contract = _looks_like_contract_title(cand)
+    cur_contract = _looks_like_contract_title(cur)
+    if not cand_contract and cur_contract:
+        return True
+
+    return False
 
 
 def _extract_outcome_from_ticker(ticker: str) -> str:
