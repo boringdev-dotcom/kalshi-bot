@@ -1,5 +1,6 @@
 """Kalshi REST API client for fetching market details."""
 import logging
+import re
 import time
 from typing import Optional, List, Dict, Any
 
@@ -2630,20 +2631,11 @@ def group_markets_by_event(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str,
     
     for market in markets:
         ticker = market.get("ticker", "")
-        parts = ticker.split("-")
-
-        # Prefer API-provided event identifier; ticker parsing can fragment
-        # some markets (e.g., spread/total variants) into separate fake events.
-        event_id = market.get("event_ticker")
-        if not event_id:
-            if len(parts) >= 2:
-                event_id = parts[1]
-            else:
-                event_id = ticker
+        event_id = _get_canonical_event_id(market)
         
         if event_id not in events:
             # Parse title to get clean event name
-            title = _clean_event_title(market.get("title", "Unknown Event"))
+            title = _clean_event_title(_extract_raw_event_title(market))
             
             events[event_id] = {
                 "event_id": event_id,
@@ -2653,7 +2645,7 @@ def group_markets_by_event(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str,
                 "markets": [],
             }
         else:
-            candidate_title = _clean_event_title(market.get("title", "Unknown Event"))
+            candidate_title = _clean_event_title(_extract_raw_event_title(market))
             if _is_better_event_title(candidate_title, events[event_id]["title"]):
                 events[event_id]["title"] = candidate_title
         
@@ -2674,6 +2666,50 @@ def group_markets_by_event(markets: List[Dict[str, Any]]) -> Dict[str, Dict[str,
     return events
 
 
+def _extract_match_id(symbol: str) -> Optional[str]:
+    """Extract canonical match id from ticker/event_ticker (second dash segment)."""
+    if not symbol:
+        return None
+    parts = str(symbol).split("-")
+    if len(parts) >= 2 and parts[1]:
+        return parts[1]
+    return None
+
+
+def _get_canonical_event_id(market: Dict[str, Any]) -> str:
+    """
+    Normalize event IDs across series.
+
+    Kalshi event_ticker often includes series prefix (e.g. KXLIGUE1GAME-... vs
+    KXLIGUE1SPREAD-...). Using the second segment groups GAME/SPREAD/TOTAL/BTTS
+    contracts for the same match together.
+    """
+    event_ticker = market.get("event_ticker")
+    ticker = market.get("ticker")
+
+    event_match_id = _extract_match_id(event_ticker)
+    if event_match_id:
+        return event_match_id
+
+    ticker_match_id = _extract_match_id(ticker)
+    if ticker_match_id:
+        return ticker_match_id
+
+    return str(event_ticker or ticker or "unknown")
+
+
+def _extract_raw_event_title(market: Dict[str, Any]) -> str:
+    """Get the best available raw event title from market payload."""
+    event_obj = market.get("event")
+    if market.get("event_title"):
+        return str(market.get("event_title"))
+    if market.get("event_name"):
+        return str(market.get("event_name"))
+    if isinstance(event_obj, dict) and event_obj.get("title"):
+        return str(event_obj.get("title"))
+    return str(market.get("title") or "Unknown Event")
+
+
 def _clean_event_title(title: str) -> str:
     """Normalize event titles for selector display."""
     if not title:
@@ -2691,6 +2727,9 @@ def _clean_event_title(title: str) -> str:
         " Spread",
     ]:
         cleaned = cleaned.replace(suffix, "")
+    cleaned = re.sub(r":\s*both teams to score.*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r":\s*(winner|total|spread).*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r":\s*s$", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip().rstrip("?").strip()
 
 
