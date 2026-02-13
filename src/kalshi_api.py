@@ -46,12 +46,6 @@ SOCCER_SERIES_TICKERS = {
         "KXLIGUE1TOTAL",            # Total goals (Over/Under)
         "KXLIGUE1BTTS",             # Both Teams To Score
     ],
-    "serie_a": [
-        "KXSERIEAGAME",             # Winner/Tie markets
-        "KXSERIEASPREAD",           # Spread markets
-        "KXSERIEATOTAL",            # Total goals (Over/Under)
-        "KXSERIEABTTS",             # Both Teams To Score
-    ],
 }
 
 # Ticker prefixes for searching (markets start with these)
@@ -62,7 +56,6 @@ SOCCER_TICKER_PREFIXES = {
     "ucl": ["KXUCL", "UCL"],
     "bundesliga": ["KXBUNDESLIGA", "BUNDESLIGA"],
     "ligue_1": ["KXLIGUE1", "LIGUE1"],
-    "serie_a": ["KXSERIEA", "SERIEA"],
 }
 
 # Fallback search terms if series tickers don't work
@@ -70,7 +63,6 @@ SOCCER_SEARCH_TERMS = {
     "la_liga": ["LA LIGA", "LALIGA", "LA-LIGA"],
     "premier_league": ["PREMIER LEAGUE", "EPL", "ENGLISH PREMIER"],
     "ligue_1": ["LIGUE 1", "LIGUE1", "FRENCH LEAGUE"],
-    "serie_a": ["SERIE A", "SERIEA", "ITALIAN LEAGUE"],
 }
 
 # Market types we're interested in
@@ -452,7 +444,7 @@ def get_soccer_markets(
         List of soccer market dictionaries with market details and odds
     """
     if leagues is None:
-        leagues = ["la_liga", "premier_league", "mls", "bundesliga", "ligue_1", "serie_a"]
+        leagues = ["la_liga", "premier_league", "mls", "bundesliga", "ligue_1"]
     
     soccer_markets = []
     seen_tickers = set()  # Avoid duplicates across series
@@ -2568,7 +2560,7 @@ def get_all_sports_markets(
         logger.error(f"Failed to fetch NBA markets: {e}")
     
     # Fetch soccer markets for all leagues
-    soccer_leagues = ["bundesliga", "la_liga", "premier_league", "mls", "ucl", "ligue_1", "serie_a"]
+    soccer_leagues = ["bundesliga", "la_liga", "premier_league", "mls", "ucl", "ligue_1"]
     for league in soccer_leagues:
         try:
             soccer_markets = get_soccer_markets(

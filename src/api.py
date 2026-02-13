@@ -194,7 +194,6 @@ def format_league_display_name(league_id: str) -> str:
         "nba": "NBA Basketball",
         "bundesliga": "Bundesliga",
         "ligue_1": "Ligue 1",
-        "serie_a": "Serie A",
         "la_liga": "La Liga",
         "premier_league": "Premier League",
         "mls": "MLS",
