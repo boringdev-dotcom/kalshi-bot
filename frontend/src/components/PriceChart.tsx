@@ -41,8 +41,22 @@ function formatProbability(probability: number | null | undefined): string {
   return `${probability.toFixed(1)}%`;
 }
 
-function getTeamKeyword(teamName: string): string {
-  return teamName.toLowerCase().split(' ').pop() || '';
+function tokenizeWords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2);
+}
+
+function countWordMatches(targetText: string, words: string[]): number {
+  let score = 0;
+  for (const word of words) {
+    if (word.length > 3 && targetText.includes(word)) {
+      score += 1;
+    }
+  }
+  return score;
 }
 
 function extractGameOdds(game: OddsApiGame): MarketOddsSnapshot | null {
@@ -68,12 +82,15 @@ function extractGameOdds(game: OddsApiGame): MarketOddsSnapshot | null {
 function getExternalMarketProbability(market: SelectedMarket, games: OddsApiGame[]): number | null {
   const subtitle = market.subtitle.toLowerCase();
   const marketText = `${market.eventTitle} ${market.subtitle}`.toLowerCase();
+  const subtitleWords = tokenizeWords(subtitle);
 
   for (const game of games) {
-    const homeKeyword = getTeamKeyword(game.home_team);
-    const awayKeyword = getTeamKeyword(game.away_team);
-    const matchesHome = homeKeyword.length > 0 && marketText.includes(homeKeyword);
-    const matchesAway = awayKeyword.length > 0 && marketText.includes(awayKeyword);
+    const homeWords = tokenizeWords(game.home_team);
+    const awayWords = tokenizeWords(game.away_team);
+    const homeMatchScore = countWordMatches(marketText, homeWords);
+    const awayMatchScore = countWordMatches(marketText, awayWords);
+    const matchesHome = homeMatchScore > 0;
+    const matchesAway = awayMatchScore > 0;
 
     if (!matchesHome && !matchesAway) continue;
 
@@ -82,8 +99,21 @@ function getExternalMarketProbability(market: SelectedMarket, games: OddsApiGame
 
     if (subtitle.includes('over')) return americanOddsToProbability(oddsSnapshot.overOdds);
     if (subtitle.includes('under')) return americanOddsToProbability(oddsSnapshot.underOdds);
-    if (homeKeyword && subtitle.includes(homeKeyword)) return americanOddsToProbability(oddsSnapshot.homeML);
-    if (awayKeyword && subtitle.includes(awayKeyword)) return americanOddsToProbability(oddsSnapshot.awayML);
+
+    const subtitleHomeScore = countWordMatches(subtitle, homeWords);
+    const subtitleAwayScore = countWordMatches(subtitle, awayWords);
+
+    if (subtitleHomeScore > subtitleAwayScore) return americanOddsToProbability(oddsSnapshot.homeML);
+    if (subtitleAwayScore > subtitleHomeScore) return americanOddsToProbability(oddsSnapshot.awayML);
+
+    const subtitleHasHomeCity = homeWords.some(word => word.length > 3 && subtitleWords.includes(word));
+    const subtitleHasAwayCity = awayWords.some(word => word.length > 3 && subtitleWords.includes(word));
+
+    if (subtitleHasHomeCity && !subtitleHasAwayCity) return americanOddsToProbability(oddsSnapshot.homeML);
+    if (subtitleHasAwayCity && !subtitleHasHomeCity) return americanOddsToProbability(oddsSnapshot.awayML);
+
+    if (homeMatchScore > awayMatchScore) return americanOddsToProbability(oddsSnapshot.homeML);
+    if (awayMatchScore > homeMatchScore) return americanOddsToProbability(oddsSnapshot.awayML);
 
     if (matchesHome && !matchesAway) return americanOddsToProbability(oddsSnapshot.homeML);
     if (matchesAway && !matchesHome) return americanOddsToProbability(oddsSnapshot.awayML);
