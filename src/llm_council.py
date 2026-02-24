@@ -1701,6 +1701,12 @@ def _run_deep_research_sync(
     
     logger.info("Starting Gemini Deep Research Agent...")
     
+    def _progress(msg: str):
+        if progress_callback:
+            progress_callback(msg)
+    
+    _progress("Creating Deep Research interaction...")
+    
     # Create the interaction (background execution) - per official docs
     interaction = client.interactions.create(
         input=prompt,
@@ -1710,17 +1716,12 @@ def _run_deep_research_sync(
     
     interaction_id = interaction.id
     logger.info(f"Deep Research started: {interaction_id}")
-    
-    def _progress(msg: str):
-        if progress_callback:
-            progress_callback(msg)
+    _progress(f"Deep Research started (interaction_id={interaction_id})")
     
     # Poll for completion
     start_time = time.time()
-    poll_count = 0
     while True:
         elapsed = time.time() - start_time
-        poll_count += 1
         
         if elapsed > DEEP_RESEARCH_MAX_WAIT:
             raise TimeoutError(f"Deep Research timed out after {DEEP_RESEARCH_MAX_WAIT} seconds")
@@ -1736,12 +1737,14 @@ def _run_deep_research_sync(
             if interaction.outputs:
                 result = interaction.outputs[-1].text
                 logger.info(f"Deep Research completed ({len(result)} chars)")
+                _progress(f"Deep Research completed ({len(result)} chars)")
                 return result
             else:
                 raise ValueError("Deep Research completed but no outputs found")
         
         elif status == "failed":
             error_msg = getattr(interaction, 'error', 'Unknown error')
+            _progress(f"Deep Research failed: {error_msg}")
             raise RuntimeError(f"Deep Research failed: {error_msg}")
         
         # Wait before next poll
@@ -1808,14 +1811,14 @@ async def run_nba_combo_deep_research(
                 _run_deep_research_sync,
                 settings.google_api_key,
                 prompt,
-                progress_callback,
+                log_progress,
             ),
         )
         
         log_progress("Deep Research complete")
         
         return CouncilResult(
-            research="(Research performed by Deep Research agent)",
+            research=result_text,
             analyses={},
             reviews={},
             final_recommendation=result_text,
