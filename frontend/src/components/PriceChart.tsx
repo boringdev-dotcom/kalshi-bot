@@ -1,6 +1,8 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import { createChart, IChartApi, ISeriesApi, LineData, Time } from 'lightweight-charts';
 import type { SelectedMarket, ChartDataPoint, TickerData } from '../types';
+import { fetchNBAOdds } from '../api';
+import type { OddsApiGame } from '../api';
 
 interface PriceChartProps {
   markets: SelectedMarket[];
@@ -19,10 +21,140 @@ const COLORS = [
   '#ff6d00', // Orange
 ];
 
+interface MarketOddsSnapshot {
+  homeML: number | null;
+  awayML: number | null;
+  overOdds: number | null;
+  underOdds: number | null;
+}
+
+function americanOddsToProbability(odds: number | null): number | null {
+  if (odds === null || odds === 0) return null;
+  if (odds > 0) {
+    return (100 / (odds + 100)) * 100;
+  }
+  return (Math.abs(odds) / (Math.abs(odds) + 100)) * 100;
+}
+
+function formatProbability(probability: number | null | undefined): string {
+  if (probability === null || probability === undefined || Number.isNaN(probability)) return '--';
+  return `${probability.toFixed(1)}%`;
+}
+
+function tokenizeWords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2);
+}
+
+function countWordMatches(targetText: string, words: string[]): number {
+  let score = 0;
+  for (const word of words) {
+    if (word.length > 3 && targetText.includes(word)) {
+      score += 1;
+    }
+  }
+  return score;
+}
+
+function extractGameOdds(game: OddsApiGame): MarketOddsSnapshot | null {
+  const bookmaker = game.bookmakers?.find(b => b.key === 'fanduel') || game.bookmakers?.[0];
+  if (!bookmaker) return null;
+
+  const h2h = bookmaker.markets?.find(m => m.key === 'h2h');
+  const totals = bookmaker.markets?.find(m => m.key === 'totals');
+
+  const homeH2H = h2h?.outcomes?.find(o => o.name === game.home_team);
+  const awayH2H = h2h?.outcomes?.find(o => o.name === game.away_team);
+  const over = totals?.outcomes?.find(o => o.name === 'Over');
+  const under = totals?.outcomes?.find(o => o.name === 'Under');
+
+  return {
+    homeML: homeH2H?.price ?? null,
+    awayML: awayH2H?.price ?? null,
+    overOdds: over?.price ?? null,
+    underOdds: under?.price ?? null,
+  };
+}
+
+function getExternalMarketProbability(market: SelectedMarket, games: OddsApiGame[]): number | null {
+  const subtitle = market.subtitle.toLowerCase();
+  const marketText = `${market.eventTitle} ${market.subtitle}`.toLowerCase();
+  const subtitleWords = tokenizeWords(subtitle);
+
+  for (const game of games) {
+    const homeWords = tokenizeWords(game.home_team);
+    const awayWords = tokenizeWords(game.away_team);
+    const homeMatchScore = countWordMatches(marketText, homeWords);
+    const awayMatchScore = countWordMatches(marketText, awayWords);
+    const matchesHome = homeMatchScore > 0;
+    const matchesAway = awayMatchScore > 0;
+
+    if (!matchesHome && !matchesAway) continue;
+
+    const oddsSnapshot = extractGameOdds(game);
+    if (!oddsSnapshot) continue;
+
+    if (subtitle.includes('over')) return americanOddsToProbability(oddsSnapshot.overOdds);
+    if (subtitle.includes('under')) return americanOddsToProbability(oddsSnapshot.underOdds);
+
+    const subtitleHomeScore = countWordMatches(subtitle, homeWords);
+    const subtitleAwayScore = countWordMatches(subtitle, awayWords);
+
+    if (subtitleHomeScore > subtitleAwayScore) return americanOddsToProbability(oddsSnapshot.homeML);
+    if (subtitleAwayScore > subtitleHomeScore) return americanOddsToProbability(oddsSnapshot.awayML);
+
+    const subtitleHasHomeCity = homeWords.some(word => word.length > 3 && subtitleWords.includes(word));
+    const subtitleHasAwayCity = awayWords.some(word => word.length > 3 && subtitleWords.includes(word));
+
+    if (subtitleHasHomeCity && !subtitleHasAwayCity) return americanOddsToProbability(oddsSnapshot.homeML);
+    if (subtitleHasAwayCity && !subtitleHasHomeCity) return americanOddsToProbability(oddsSnapshot.awayML);
+
+    if (homeMatchScore > awayMatchScore) return americanOddsToProbability(oddsSnapshot.homeML);
+    if (awayMatchScore > homeMatchScore) return americanOddsToProbability(oddsSnapshot.awayML);
+
+    if (matchesHome && !matchesAway) return americanOddsToProbability(oddsSnapshot.homeML);
+    if (matchesAway && !matchesHome) return americanOddsToProbability(oddsSnapshot.awayML);
+  }
+
+  return null;
+}
+
 export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
+  const [marketProbabilities, setMarketProbabilities] = useState<Record<string, number | null>>({});
+
+  const refreshMarketProbabilities = useCallback(async () => {
+    if (markets.length === 0) {
+      setMarketProbabilities({});
+      return;
+    }
+
+    try {
+      const games = await fetchNBAOdds();
+      const next: Record<string, number | null> = {};
+
+      for (const market of markets) {
+        const yesSideProbability = getExternalMarketProbability(market, games);
+        next[market.ticker] = market.viewSide === 'no' && yesSideProbability !== null
+          ? 100 - yesSideProbability
+          : yesSideProbability;
+      }
+
+      setMarketProbabilities(next);
+    } catch {
+      // Odds feed is optional; keep chart functional even when unavailable.
+      const fallback: Record<string, number | null> = {};
+      for (const market of markets) {
+        fallback[market.ticker] = null;
+      }
+      setMarketProbabilities(fallback);
+    }
+  }, [markets]);
 
   // Initialize chart
   useEffect(() => {
@@ -178,6 +310,16 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
     }
   }, [markets, priceHistory]);
 
+  // Pull external market odds so chart legend can compare Kalshi vs market probability
+  useEffect(() => {
+    void refreshMarketProbabilities();
+    const interval = setInterval(() => {
+      void refreshMarketProbabilities();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [refreshMarketProbabilities]);
+
   // Legend with current prices
   const legend = useMemo(() => {
     return markets.map((market, index) => {
@@ -192,6 +334,8 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
           lastPrice = isNoView ? 100 - yesPrice : yesPrice;
         }
       }
+      const kalshiProbability = typeof lastPrice === 'number' ? lastPrice : null;
+      const marketProbability = marketProbabilities[market.ticker] ?? null;
       
       const color = COLORS[index % COLORS.length];
       const isFocused = focusedTicker === market.ticker;
@@ -201,11 +345,13 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
         ticker: market.ticker,
         color,
         price: lastPrice,
+        kalshiProbability,
+        marketProbability,
         isFocused,
         viewSide: market.viewSide || 'yes',
       };
     });
-  }, [markets, tickerData, focusedTicker]);
+  }, [markets, tickerData, focusedTicker, marketProbabilities]);
 
   return (
     <div className="relative h-full w-full">
@@ -235,7 +381,10 @@ export function PriceChart({ markets, priceHistory, tickerData, focusedTicker }:
                 className="text-xs font-mono font-semibold"
                 style={{ color: item.color }}
               >
-                {item.price}¢
+                {typeof item.price === 'number' ? `${item.price}¢` : '--'}
+              </span>
+              <span className="text-[10px] text-text-muted font-mono">
+                Kalshi: {formatProbability(item.kalshiProbability)} | Market: {formatProbability(item.marketProbability)}
               </span>
             </div>
           ))}

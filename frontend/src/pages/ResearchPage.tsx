@@ -564,8 +564,8 @@ export function ResearchPage() {
                 <p className="text-text-muted text-sm mt-2 max-w-md">
                   {analysisMode === 'combo' ? (
                     <>
-                      Stage 1: Multi-stage research for each game<br />
-                      Stage 2: Deep Research analyzing for combo recommendations
+                      Deep Research is performing web research + market analysis<br />
+                      Then generating combo recommendations with edge estimates
                     </>
                   ) : (
                     <>
