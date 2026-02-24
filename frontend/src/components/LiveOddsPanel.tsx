@@ -46,6 +46,20 @@ function formatSpread(spread: number | null): string {
   return spread > 0 ? `+${spread}` : `${spread}`;
 }
 
+// Convert American odds to implied probability percentage
+function americanOddsToProbability(odds: number | null): number | null {
+  if (odds === null || odds === 0) return null;
+  if (odds > 0) {
+    return (100 / (odds + 100)) * 100;
+  }
+  return (Math.abs(odds) / (Math.abs(odds) + 100)) * 100;
+}
+
+function formatProbability(probability: number | null | undefined): string {
+  if (probability === null || probability === undefined || Number.isNaN(probability)) return '--';
+  return `${probability.toFixed(1)}%`;
+}
+
 export function LiveOddsPanel({ selectedMarkets, tickerData }: LiveOddsPanelProps) {
   const [odds, setOdds] = useState<GameOdds[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -238,6 +252,11 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
     return null;
   };
 
+  const awayKalshiPrice = getKalshiPrice('away');
+  const homeKalshiPrice = getKalshiPrice('home');
+  const overKalshiPrice = getKalshiPrice('over');
+  const underKalshiPrice = getKalshiPrice('under');
+
   return (
     <div className="border-b border-border-subtle">
       {/* Game Header - Mobile */}
@@ -264,13 +283,23 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
         <div className="bg-bg-secondary/50 rounded p-2">
           <div className="text-[10px] text-text-muted uppercase mb-1">Spread</div>
           <div className="space-y-1 text-xs">
-            <div className="flex justify-between">
+            <div className="flex justify-between items-start">
               <span className="text-text-secondary">{game.awayTeam.split(' ').pop()}</span>
-              <span className="font-mono text-accent-blue">{formatSpread(game.awaySpread)}</span>
+              <div className="text-right">
+                <span className="block font-mono text-accent-blue">{formatSpread(game.awaySpread)}</span>
+                <span className="text-[10px] text-text-muted">
+                  Mkt {formatProbability(americanOddsToProbability(game.awaySpreadOdds))}
+                </span>
+              </div>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-start">
               <span className="text-text-secondary">{game.homeTeam.split(' ').pop()}</span>
-              <span className="font-mono text-accent-blue">{formatSpread(game.homeSpread)}</span>
+              <div className="text-right">
+                <span className="block font-mono text-accent-blue">{formatSpread(game.homeSpread)}</span>
+                <span className="text-[10px] text-text-muted">
+                  Mkt {formatProbability(americanOddsToProbability(game.homeSpreadOdds))}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -279,17 +308,27 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
         <div className="bg-bg-secondary/50 rounded p-2">
           <div className="text-[10px] text-text-muted uppercase mb-1">Money</div>
           <div className="space-y-1 text-xs">
-            <div className="flex justify-between">
+            <div className="flex justify-between items-start">
               <span className="text-text-secondary">{game.awayTeam.split(' ').pop()}</span>
-              <span className={clsx('font-mono', game.awayML && game.awayML > 0 ? 'text-accent-green' : 'text-accent-blue')}>
-                {formatOdds(game.awayML)}
-              </span>
+              <div className="text-right">
+                <span className={clsx('block font-mono', game.awayML && game.awayML > 0 ? 'text-accent-green' : 'text-accent-blue')}>
+                  {formatOdds(game.awayML)}
+                </span>
+                <span className="text-[10px] text-text-muted">
+                  Mkt {formatProbability(americanOddsToProbability(game.awayML))} · Kalshi {formatProbability(awayKalshiPrice)}
+                </span>
+              </div>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-start">
               <span className="text-text-secondary">{game.homeTeam.split(' ').pop()}</span>
-              <span className={clsx('font-mono', game.homeML && game.homeML > 0 ? 'text-accent-green' : 'text-accent-blue')}>
-                {formatOdds(game.homeML)}
-              </span>
+              <div className="text-right">
+                <span className={clsx('block font-mono', game.homeML && game.homeML > 0 ? 'text-accent-green' : 'text-accent-blue')}>
+                  {formatOdds(game.homeML)}
+                </span>
+                <span className="text-[10px] text-text-muted">
+                  Mkt {formatProbability(americanOddsToProbability(game.homeML))} · Kalshi {formatProbability(homeKalshiPrice)}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -298,13 +337,23 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
         <div className="bg-bg-secondary/50 rounded p-2">
           <div className="text-[10px] text-text-muted uppercase mb-1">Total {game.totalPoints}</div>
           <div className="space-y-1 text-xs">
-            <div className="flex justify-between">
+            <div className="flex justify-between items-start">
               <span className="text-text-secondary">Over</span>
-              <span className="font-mono text-accent-blue">{formatOdds(game.overOdds)}</span>
+              <div className="text-right">
+                <span className="block font-mono text-accent-blue">{formatOdds(game.overOdds)}</span>
+                <span className="text-[10px] text-text-muted">
+                  Mkt {formatProbability(americanOddsToProbability(game.overOdds))} · Kalshi {formatProbability(overKalshiPrice)}
+                </span>
+              </div>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-start">
               <span className="text-text-secondary">Under</span>
-              <span className="font-mono text-accent-blue">{formatOdds(game.underOdds)}</span>
+              <div className="text-right">
+                <span className="block font-mono text-accent-blue">{formatOdds(game.underOdds)}</span>
+                <span className="text-[10px] text-text-muted">
+                  Mkt {formatProbability(americanOddsToProbability(game.underOdds))} · Kalshi {formatProbability(underKalshiPrice)}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -320,19 +369,22 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
         <OddsCell 
           line={formatSpread(game.awaySpread)} 
           odds={formatOdds(game.awaySpreadOdds)}
+          marketProbability={americanOddsToProbability(game.awaySpreadOdds)}
           kalshiPrice={null}
         />
         
         <OddsCell 
           odds={formatOdds(game.awayML)}
-          kalshiPrice={getKalshiPrice('away')}
+          marketProbability={americanOddsToProbability(game.awayML)}
+          kalshiPrice={awayKalshiPrice}
           highlight={game.awayML !== null && game.awayML > 0}
         />
         
         <OddsCell 
           line={game.totalPoints ? `O ${game.totalPoints}` : '--'} 
           odds={formatOdds(game.overOdds)}
-          kalshiPrice={getKalshiPrice('over')}
+          marketProbability={americanOddsToProbability(game.overOdds)}
+          kalshiPrice={overKalshiPrice}
         />
       </div>
       
@@ -351,19 +403,22 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
         <OddsCell 
           line={formatSpread(game.homeSpread)} 
           odds={formatOdds(game.homeSpreadOdds)}
+          marketProbability={americanOddsToProbability(game.homeSpreadOdds)}
           kalshiPrice={null}
         />
         
         <OddsCell 
           odds={formatOdds(game.homeML)}
-          kalshiPrice={getKalshiPrice('home')}
+          marketProbability={americanOddsToProbability(game.homeML)}
+          kalshiPrice={homeKalshiPrice}
           highlight={game.homeML !== null && game.homeML > 0}
         />
         
         <OddsCell 
           line={game.totalPoints ? `U ${game.totalPoints}` : '--'} 
           odds={formatOdds(game.underOdds)}
-          kalshiPrice={getKalshiPrice('under')}
+          marketProbability={americanOddsToProbability(game.underOdds)}
+          kalshiPrice={underKalshiPrice}
         />
       </div>
       
@@ -383,9 +438,10 @@ function GameRow({ game, markets, tickerData }: { game: GameOdds; markets: Selec
 }
 
 // Individual Odds Cell
-function OddsCell({ line, odds, kalshiPrice, highlight }: { 
+function OddsCell({ line, odds, marketProbability, kalshiPrice, highlight }: { 
   line?: string; 
   odds: string; 
+  marketProbability?: number | null;
   kalshiPrice?: number | null;
   highlight?: boolean;
 }) {
@@ -401,9 +457,10 @@ function OddsCell({ line, odds, kalshiPrice, highlight }: {
       )}>
         {odds}
       </span>
-      {kalshiPrice !== null && (
-        <span className="text-text-muted text-[10px]">K: {kalshiPrice}¢</span>
-      )}
+      <div className="text-text-muted text-[10px] leading-tight text-center">
+        <span className="block">Mkt: {formatProbability(marketProbability)}</span>
+        <span className="block">Kalshi: {formatProbability(kalshiPrice)}</span>
+      </div>
     </div>
   );
 }
