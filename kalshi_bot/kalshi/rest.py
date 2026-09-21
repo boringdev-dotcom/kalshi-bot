@@ -13,6 +13,22 @@ from .auth import auth_headers
 
 logger = logging.getLogger(__name__)
 
+PATH_ONLY_SIGN_PREFIXES = (
+    "/trade-api/v2/portfolio/",
+    "/trade-api/v2/historical/",
+)
+
+
+def sign_target(method: str, path: str, query: str = "") -> str:
+    """Portfolio/historical GETs sign the path only; query is sent unsigned.
+
+    Including ``?limit=`` in the RSA-PSS message returns INCORRECT_API_KEY_SIGNATURE
+    on fills/orders/settlements (Phase 0 pattern-report.md).
+    """
+    if method.upper() == "GET" and path.startswith(PATH_ONLY_SIGN_PREFIXES):
+        return path
+    return path + query
+
 SOCCER_TOTAL_SERIES = [
     "KXEPLTOTAL",
     "KXLALIGATOTAL",
@@ -61,17 +77,14 @@ class KalshiClient:
         params: Optional[dict[str, Any]] = None,
         json_body: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        query = ""
-        if params:
-            cleaned = {k: v for k, v in params.items() if v is not None}
-            if cleaned:
-                query = "?" + urlencode(cleaned)
-        sign_path = path + query
+        cleaned = {k: v for k, v in (params or {}).items() if v is not None} if params else {}
+        query = "?" + urlencode(cleaned) if cleaned else ""
+        sign_path = sign_target(method, path, query)
         headers = auth_headers(self.key_id, self.private_key_pem, method, sign_path)
         headers["Content-Type"] = "application/json"
-        url = self.base_url + sign_path
+        url = self.base_url + path
         with httpx.Client(timeout=self.timeout) as client:
-            response = client.request(method, url, headers=headers, json=json_body)
+            response = client.request(method, url, headers=headers, params=cleaned or None, json=json_body)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError:
