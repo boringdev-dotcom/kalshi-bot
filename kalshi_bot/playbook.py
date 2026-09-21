@@ -85,6 +85,11 @@ def league_tier(league: Optional[str]) -> int:
     return LEAGUE_TIERS.get(key, 3)
 
 
+def is_1h_total(ticker: Optional[str] = None, series: Optional[str] = None, title: Optional[str] = None) -> bool:
+    blob = " ".join(part or "" for part in (ticker, series, title)).upper()
+    return "1H" in blob or "FIRST HALF" in blob
+
+
 @dataclass
 class PlaybookDecision:
     allowed: bool

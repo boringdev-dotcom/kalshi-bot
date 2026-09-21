@@ -12,6 +12,15 @@ def test_watch_and_controls(tmp_path):
     app = create_app(Settings(sqlite_path=str(tmp_path / "api.sqlite")), store)
     client = TestClient(app)
     assert client.get("/health").json()["ok"] is True
+    playbook = client.get("/api/status").json()["playbook"]
+    assert playbook["entry_min_minute"] == 60
+    assert playbook["entry_max_minute"] == 92
+    assert playbook["entry_max_rem"] == 2
+    assert playbook["entry_no_price_min"] == 80
+    assert playbook["entry_no_price_max"] == 92
+    assert playbook["max_contracts_per_match"] == 150
+    assert playbook["allowed_tiers"] == [1, 2]
+    assert playbook["paper_mode_default"] is True
     paused = client.post("/api/control/pause").json()
     assert paused["paused"] is True
     client.post("/api/control/resume")

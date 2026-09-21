@@ -16,6 +16,7 @@ from kalshi_bot.playbook import (
     constraints_text,
     evaluate_entry,
     evaluate_exit,
+    is_1h_total,
 )
 from kalshi_bot.store import Store
 
@@ -119,6 +120,7 @@ def _apply_hard_stops(store: Store, ctx: ToolContext, payload: dict[str, Any]) -
             no_mid=no_mid,
             entry_price=position.get("avg_price"),
             has_position=True,
+            strike=market.get("strike"),
         )
         if decision.allowed and decision.action == "flatten":
             flatten_position(
@@ -178,6 +180,12 @@ def _playbook_only(
             contracts_this_match=used_match,
             contracts_today=used_day,
             phase=(payload.get("state") or {}).get("phase") or "second_half",
+            strike=market.get("strike"),
+            is_1h=is_1h_total(
+                ticker=ticker,
+                series=market.get("series_ticker"),
+                title=market.get("title"),
+            ),
         )
         if not decision.allowed:
             continue

@@ -214,6 +214,7 @@ class Watcher:
                 no_mid=no_mid,
                 entry_price=position.get("avg_price"),
                 has_position=True,
+                strike=market.get("strike"),
             )
             if decision.allowed:
                 flatten_position(

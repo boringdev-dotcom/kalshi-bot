@@ -19,6 +19,14 @@ def test_portfolio_gets_sign_path_only():
         sign_target("GET", "/trade-api/v2/historical/fills", query)
         == "/trade-api/v2/historical/fills"
     )
+    assert (
+        sign_target("GET", "/trade-api/v2/portfolio/positions", query)
+        == "/trade-api/v2/portfolio/positions"
+    )
+    assert (
+        sign_target("GET", "/trade-api/v2/historical/orders", query)
+        == "/trade-api/v2/historical/orders"
+    )
 
 
 def test_public_markets_still_sign_query():
