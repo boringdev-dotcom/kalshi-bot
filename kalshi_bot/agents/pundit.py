@@ -38,7 +38,9 @@ def run_pundit(
     if not grok.available():
         logger.warning("XAI_API_KEY missing; Pundit using heuristic")
         verdicts = _heuristic(payload)
-        persist_pundit_verdicts(store, ctx.game["id"], ctx.event.get("id"), verdicts, paper=ctx.paper)
+        persist_pundit_verdicts(
+            store, ctx.game["id"], ctx.event.get("id"), verdicts, paper=ctx.paper, payload=payload
+        )
         store.set_memory(ctx.game["id"], "pundit", "heuristic fallback (no XAI_API_KEY)")
         return verdicts
 
@@ -59,25 +61,19 @@ def run_pundit(
             store.set_memory(ctx.game["id"], "pundit", notes)
             verdicts = []
             for item in parsed.get("markets") or []:
-                verdict = PunditVerdict(
-                    ticker=item.get("ticker") or "",
-                    verdict=item.get("verdict") or "pass",
-                    size_hint=int(item.get("size_hint") or 0),
-                    reason=item.get("reason") or "",
-                    strike=item.get("strike"),
-                    rem=item.get("rem"),
+                verdicts.append(
+                    PunditVerdict(
+                        ticker=item.get("ticker") or "",
+                        verdict=item.get("verdict") or "pass",
+                        size_hint=int(item.get("size_hint") or 0),
+                        reason=item.get("reason") or "",
+                        strike=item.get("strike"),
+                        rem=item.get("rem"),
+                    )
                 )
-                verdicts.append(verdict)
-                store.add_verdict(
-                    ctx.game["id"],
-                    "pundit",
-                    ctx.event.get("id"),
-                    verdict.ticker,
-                    verdict.verdict,
-                    verdict.size_hint,
-                    verdict.reason,
-                    item,
-                )
+            persist_pundit_verdicts(
+                store, ctx.game["id"], ctx.event.get("id"), verdicts, paper=ctx.paper, payload=payload
+            )
             return verdicts
         for call in tool_calls:
             fn = call.get("function") or {}
