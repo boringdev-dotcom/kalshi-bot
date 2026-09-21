@@ -1,6 +1,9 @@
 import type { CostSummary, Game, Portfolio, Status } from "./types";
 
-const API = import.meta.env.VITE_API_URL || "";
+// Vite injects Cloud Agent / Render VITE_API_URL even during `npm run dev`.
+// Local development must stay on the same-origin proxy so watch/pause hit
+// the local FastAPI instead of a deployed host.
+const API = import.meta.env.DEV ? "" : import.meta.env.VITE_API_URL || "";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
@@ -44,7 +47,7 @@ export const api = {
 };
 
 export function wsUrl(): string {
-  if (import.meta.env.VITE_API_URL) {
+  if (!import.meta.env.DEV && import.meta.env.VITE_API_URL) {
     const base = String(import.meta.env.VITE_API_URL).replace(/^http/, "ws");
     return `${base}/ws/events`;
   }
