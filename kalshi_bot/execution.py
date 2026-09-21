@@ -113,13 +113,13 @@ def flatten_position(
     paper: bool,
     mark_stopped: bool = True,
 ) -> Optional[dict[str, Any]]:
-    position = store.get_position(ticker)
-    if not position or position["count"] <= 0:
-        return None
     key = idempotency_key(game_id, ticker, event_id, "flatten")
     existing = store.find_order(key)
     if existing:
         return existing
+    position = store.get_position(ticker)
+    if not position or position["count"] <= 0:
+        return None
 
     count = position["count"]
     price = max(1, 100 - (position.get("avg_price") or 50))
