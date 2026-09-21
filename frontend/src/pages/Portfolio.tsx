@@ -1,5 +1,9 @@
+import { FormEvent, useState } from "react";
+import { api } from "../api";
+import { CapsBar } from "../components/CapsBar";
 import { Controls } from "../components/Controls";
-import type { Portfolio as PortfolioT, Status } from "../types";
+import { DecisionsTable } from "../components/DecisionsTable";
+import type { Portfolio as PortfolioT, Pnl, Status } from "../types";
 
 export function Portfolio({
   portfolio,
@@ -10,21 +14,70 @@ export function Portfolio({
   status: Status | null;
   reload: () => void;
 }) {
+  const limits = portfolio?.limits || status?.limits;
+  const [match, setMatch] = useState(String(limits?.max_contracts_per_match ?? 150));
+  const [day, setDay] = useState(String(limits?.max_contracts_per_day ?? 600));
+  const [loss, setLoss] = useState(String(limits?.max_daily_loss_cents ?? 2500));
+  const [msg, setMsg] = useState("");
+
   if (!portfolio) return <div className="empty">Loading portfolio…</div>;
+  const pnl = (portfolio.pnl || portfolio.daily_pnl) as Pnl;
+
+  const onSave = (event: FormEvent) => {
+    event.preventDefault();
+    setMsg("");
+    api
+      .limits({
+        max_contracts_per_match: Number(match),
+        max_contracts_per_day: Number(day),
+        max_daily_loss_cents: Number(loss),
+      })
+      .then(() => {
+        setMsg("Limits saved. Loss cap is enforced on paper P&L.");
+        reload();
+      })
+      .catch((err: unknown) => {
+        setMsg(err instanceof Error ? err.message : "Could not save limits");
+      });
+  };
+
   return (
     <>
       <div className="topbar">
         <div>
           <h1>Portfolio</h1>
-          <p className="lede">
-            Open positions, daily notional, playbook caps {portfolio.caps.used_today}/{portfolio.caps.per_day} today.
-          </p>
+          <p className="lede">Paper fills, remaining caps, and the daily loss brake.</p>
         </div>
         <Controls status={status} onChange={reload} />
       </div>
+      <CapsBar caps={portfolio.caps} pnl={pnl} />
+      {portfolio.pause_reason && portfolio.pause_reason.includes("loss") ? (
+        <p className="form-error" role="alert">
+          Trading paused: {portfolio.pause_reason}. Raise the loss cap or resume after review.
+        </p>
+      ) : null}
       <div className="grid">
         <div className="card">
-          <h3>Open</h3>
+          <h3>Limits</h3>
+          <form className="form limits-form" onSubmit={onSave}>
+            <label>
+              Max / match
+              <input type="number" min={1} value={match} onChange={(e) => setMatch(e.target.value)} />
+            </label>
+            <label>
+              Max / day
+              <input type="number" min={1} value={day} onChange={(e) => setDay(e.target.value)} />
+            </label>
+            <label>
+              Max daily loss (¢)
+              <input type="number" min={0} value={loss} onChange={(e) => setLoss(e.target.value)} />
+            </label>
+            <button className="primary" type="submit">Save limits</button>
+          </form>
+          {msg ? <p className="meta">{msg}</p> : null}
+        </div>
+        <div className="card">
+          <h3>Open (paper)</h3>
           <table className="table">
             <thead>
               <tr>
@@ -47,8 +100,7 @@ export function Portfolio({
           </table>
         </div>
         <div className="card">
-          <h3>Today</h3>
-          <p className="meta">Buy-No notional {String(portfolio.daily_pnl.buy_no_notional_cents)}¢</p>
+          <h3>Today&apos;s paper orders</h3>
           <table className="table">
             <thead>
               <tr>
@@ -67,6 +119,10 @@ export function Portfolio({
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="card">
+          <h3>Recent would-decisions</h3>
+          <DecisionsTable decisions={portfolio.decisions || []} />
         </div>
       </div>
     </>

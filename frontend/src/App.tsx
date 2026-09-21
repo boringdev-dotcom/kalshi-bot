@@ -6,6 +6,7 @@ import { Costs } from "./pages/Costs";
 import { GameDetail } from "./pages/GameDetail";
 import { Live } from "./pages/Live";
 import { Portfolio } from "./pages/Portfolio";
+import { Replay } from "./pages/Replay";
 import { Upcoming } from "./pages/Upcoming";
 import type { CostSummary, Game, Portfolio as PortfolioT, Status } from "./types";
 import { useLiveTick } from "./useEvents";
@@ -44,6 +45,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Upcoming games={upcoming} status={status} reload={reload} />} />
         <Route path="/live" element={<Live games={live} status={status} reload={reload} />} />
+        <Route path="/replay" element={<Replay status={status} reload={reload} />} />
         <Route path="/games/:id" element={<GameDetail tick={tick} />} />
         <Route path="/portfolio" element={<Portfolio portfolio={portfolio} status={status} reload={reload} />} />
         <Route path="/costs" element={<Costs today={today} all={allCosts} />} />

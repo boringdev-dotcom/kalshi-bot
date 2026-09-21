@@ -26,6 +26,8 @@ export type Game = {
   markets: Market[];
   verdicts?: Record<string, { verdict: string; reason: string }>;
   positions?: Position[];
+  decisions?: Decision[];
+  caps?: Caps;
 };
 
 export type Position = {
@@ -57,6 +59,21 @@ export type Verdict = {
   created_at: number;
 };
 
+export type Decision = {
+  id: number;
+  game_id: string;
+  event_id: number | null;
+  agent: string;
+  market_ticker: string | null;
+  action: string;
+  size: number;
+  price: number | null;
+  rem: number | null;
+  reason: string;
+  paper: number;
+  created_at: number;
+};
+
 export type Order = {
   id: number;
   market_ticker: string;
@@ -69,23 +86,69 @@ export type Order = {
   created_at: number;
 };
 
+export type Limits = {
+  max_contracts_per_match: number;
+  max_contracts_per_day: number;
+  max_daily_loss_cents: number;
+};
+
+export type Caps = {
+  per_match: number;
+  per_day: number;
+  used_match: number;
+  used_today: number;
+  remaining_match: number;
+  remaining_day: number;
+  max_daily_loss_cents: number;
+};
+
+export type Pnl = {
+  realized_cents: number;
+  unrealized_cents: number;
+  total_cents: number;
+  cap_cents?: number;
+  breached?: boolean;
+};
+
 export type Status = {
   paper: boolean;
   paused: boolean;
+  pause_reason?: string | null;
+  paper_only?: boolean;
   kalshi_env: string;
   model: string;
   xai_configured: boolean;
   live_games: number;
   open_positions: number;
   playbook: Record<string, unknown>;
+  limits?: Limits;
+  caps?: Caps;
+  pnl?: Pnl;
 };
 
 export type Portfolio = {
   paper: boolean;
+  paused?: boolean;
+  pause_reason?: string | null;
   positions: Position[];
   orders_today: Order[];
-  daily_pnl: Record<string, unknown>;
-  caps: { per_match: number; per_day: number; used_today: number };
+  decisions?: Decision[];
+  daily_pnl: Pnl | Record<string, unknown>;
+  caps: Caps;
+  limits?: Limits;
+  pnl?: Pnl;
+};
+
+export type ReplayFixture = {
+  id: string;
+  label: string;
+  source: string;
+  path?: string;
+  ticker?: string;
+  home_team?: string;
+  away_team?: string;
+  league?: string;
+  date?: string;
 };
 
 export type CostSummary = {

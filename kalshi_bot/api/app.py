@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -13,7 +12,16 @@ from pydantic import BaseModel
 
 from kalshi_bot.agents.orchestrator import day_start_ts
 from kalshi_bot.config import Settings
-from kalshi_bot.playbook import MAX_CONTRACTS_PER_DAY, MAX_CONTRACTS_PER_MATCH, PLAYBOOK_NOTES
+from kalshi_bot.limits import (
+    cap_usage,
+    enforce_loss_cap,
+    ensure_default_limits,
+    get_limits,
+    session_pnl,
+    set_limits,
+)
+from kalshi_bot.playbook import PLAYBOOK_NOTES
+from kalshi_bot.replay import list_fixtures, replay_fixture, resolve_fixture
 from kalshi_bot.store import Store
 from kalshi_bot.watcher.discovery import infer_league, infer_teams
 
@@ -29,6 +37,45 @@ class WatchBody(BaseModel):
     event_ticker: Optional[str] = None
 
 
+class LimitsBody(BaseModel):
+    max_contracts_per_match: Optional[int] = None
+    max_contracts_per_day: Optional[int] = None
+    max_daily_loss_cents: Optional[int] = None
+
+
+class ReplayBody(BaseModel):
+    fixture_id: Optional[str] = None
+    ticker: Optional[str] = None
+    date: Optional[str] = None
+    path: Optional[str] = None
+
+
+def _snapshot(store: Store, game_id: Optional[str] = None) -> dict[str, Any]:
+    start = day_start_ts()
+    loss = enforce_loss_cap(store, start)
+    limits = get_limits(store)
+    usage = cap_usage(store, game_id or "", start) if game_id else {
+        "per_match": limits["max_contracts_per_match"],
+        "per_day": limits["max_contracts_per_day"],
+        "used_match": 0,
+        "used_today": sum(
+            o["count"] for o in store.orders_today(start) if o["action"] == "buy_no"
+        ),
+        "remaining_match": limits["max_contracts_per_match"],
+        "remaining_day": limits["max_contracts_per_day"]
+        - sum(o["count"] for o in store.orders_today(start) if o["action"] == "buy_no"),
+        "max_daily_loss_cents": limits["max_daily_loss_cents"],
+    }
+    return {
+        "paper": store.is_paper(),
+        "paused": store.is_paused(),
+        "pause_reason": store.pause_reason(),
+        "limits": limits,
+        "caps": usage,
+        "pnl": loss,
+    }
+
+
 def create_app(settings: Optional[Settings] = None, store: Optional[Store] = None) -> FastAPI:
     settings = settings or Settings()
     store = store or Store(settings.sqlite_path)
@@ -36,6 +83,7 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
         store.set_paper(settings.paper_mode)
     if store.get_control("trading_paused") is None:
         store.set_paused(settings.trading_paused)
+    ensure_default_limits(store)
 
     app = FastAPI(title="Kalshi Soccer Bot", version="0.2.0")
     app.add_middleware(
@@ -54,9 +102,10 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
+        snap = _snapshot(store)
         return {
-            "paper": store.is_paper(),
-            "paused": store.is_paused(),
+            **snap,
+            "paper_only": True,
             "kalshi_env": settings.kalshi_env,
             "model": settings.xai_model,
             "xai_configured": bool(settings.xai_api_key),
@@ -72,51 +121,52 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
 
     @app.get("/api/games/live")
     def live() -> dict[str, Any]:
+        start = day_start_ts()
+        snap = _snapshot(store)
         games = store.live_games()
         for game in games:
             game["verdicts"] = store.latest_verdicts(game["id"])
             game["positions"] = store.positions_for_game(game["id"])
-        return {"games": games}
+            game["decisions"] = store.decisions_for_game(game["id"])
+            game["caps"] = cap_usage(store, game["id"], start)
+        return {"games": games, **snap}
 
     @app.get("/api/games/{game_id}")
     def game_detail(game_id: str) -> dict[str, Any]:
         game = store.get_game(game_id)
         if not game:
             raise HTTPException(404, "game not found")
+        start = day_start_ts()
         orders = store.orders_for_game(game_id)
-        pnl = _paper_pnl(game, orders, store.positions_for_game(game_id))
         return {
             "game": game,
             "events": store.events_for_game(game_id),
             "verdicts": store.verdicts_for_game(game_id),
+            "decisions": store.decisions_for_game(game_id),
             "orders": orders,
             "positions": store.positions_for_game(game_id),
             "costs": store.costs(game_id=game_id),
-            "pnl": pnl,
+            "pnl": session_pnl(store, start),
+            "caps": cap_usage(store, game_id, start),
+            "paper": store.is_paper(),
         }
 
     @app.get("/api/portfolio")
     def portfolio() -> dict[str, Any]:
         start = day_start_ts()
-        orders = store.orders_today(start)
-        positions = store.open_positions()
-        used_day = sum(o["count"] for o in orders if o["action"] == "buy_no")
-        realized = 0.0
-        for order in orders:
-            if order["action"] == "flatten":
-                # paper mark: flatten vs entry is unknown without paired lots; report notional
-                realized += 0
+        snap = _snapshot(store)
         return {
-            "paper": store.is_paper(),
-            "positions": positions,
-            "orders_today": orders,
-            "daily_pnl": _daily_pnl(store),
-            "caps": {
-                "per_match": MAX_CONTRACTS_PER_MATCH,
-                "per_day": MAX_CONTRACTS_PER_DAY,
-                "used_today": used_day,
-            },
+            **snap,
+            "positions": store.open_positions(),
+            "orders_today": store.orders_today(start),
+            "decisions": store.recent_decisions(40),
+            "daily_pnl": snap["pnl"],
         }
+
+    @app.get("/api/decisions")
+    def decisions(game_id: Optional[str] = None) -> dict[str, Any]:
+        rows = store.decisions_for_game(game_id) if game_id else store.recent_decisions(80)
+        return {"decisions": rows, "paper": store.is_paper()}
 
     @app.get("/api/costs")
     def costs() -> dict[str, Any]:
@@ -129,12 +179,15 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
     @app.post("/api/control/pause")
     def pause() -> dict[str, Any]:
         store.set_paused(True)
-        return {"paused": True}
+        store.set_pause_reason("manual")
+        return {"paused": True, "pause_reason": "manual"}
 
     @app.post("/api/control/resume")
     def resume() -> dict[str, Any]:
         store.set_paused(False)
-        return {"paused": False}
+        store.set_pause_reason(None)
+        snap = _snapshot(store)
+        return {"paused": snap["paused"], "pause_reason": snap["pause_reason"], "pnl": snap["pnl"]}
 
     @app.post("/api/control/paper")
     def paper_on() -> dict[str, Any]:
@@ -144,7 +197,36 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
     @app.post("/api/control/live")
     def paper_off() -> dict[str, Any]:
         store.set_paper(False)
-        return {"paper": False}
+        return {"paper": False, "warning": "Live mode sends real Kalshi orders."}
+
+    @app.post("/api/control/limits")
+    def limits_update(payload: LimitsBody) -> dict[str, Any]:
+        set_limits(
+            store,
+            max_contracts_per_match=payload.max_contracts_per_match,
+            max_contracts_per_day=payload.max_contracts_per_day,
+            max_daily_loss_cents=payload.max_daily_loss_cents,
+        )
+        return _snapshot(store)
+
+    @app.get("/api/replay/fixtures")
+    def replay_fixtures() -> dict[str, Any]:
+        return {"fixtures": list_fixtures(), "runs": store.replay_games()}
+
+    @app.post("/api/replay")
+    def replay_run(payload: ReplayBody) -> dict[str, Any]:
+        store.set_paper(True)
+        try:
+            fixture = resolve_fixture(
+                fixture_id=payload.fixture_id,
+                ticker=payload.ticker,
+                date=payload.date,
+                path=payload.path,
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        result = replay_fixture(store, fixture, settings)
+        return result
 
     @app.post("/api/games/watch")
     def watch(payload: WatchBody) -> dict[str, Any]:
@@ -186,31 +268,6 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
             return
 
     return app
-
-
-def _paper_pnl(game: dict, orders: list[dict], positions: list[dict]) -> dict[str, Any]:
-    open_notional = 0
-    for pos in positions:
-        if pos["count"] and pos.get("avg_price"):
-            open_notional += pos["count"] * pos["avg_price"]
-    return {
-        "open_contracts": sum(p["count"] for p in positions),
-        "open_notional_cents": open_notional,
-        "order_count": len(orders),
-        "score": f"{game.get('home_goals', 0)}-{game.get('away_goals', 0)}",
-    }
-
-
-def _daily_pnl(store: Store) -> dict[str, Any]:
-    start = day_start_ts()
-    orders = store.orders_today(start)
-    buy = sum(o["count"] * (o.get("price") or 0) for o in orders if o["action"] == "buy_no")
-    flatten = sum(o["count"] for o in orders if o["action"] == "flatten")
-    return {
-        "buy_no_notional_cents": buy,
-        "flatten_contracts": flatten,
-        "note": "Mark-to-market P&L is approximate until settlement import.",
-    }
 
 
 app = create_app()

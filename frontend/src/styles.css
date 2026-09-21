@@ -205,6 +205,46 @@ button, input, select {
 }
 .empty { color: var(--muted); padding: 32px 0; }
 
+.paper-banner {
+  background: #1d2a14;
+  border: 1px solid #3d5a1f;
+  color: var(--lime);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  margin-bottom: 14px;
+}
+.paper-banner.live-warn {
+  background: #3a1814;
+  border-color: var(--coral);
+  color: var(--coral);
+}
+.caps-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.caps-bar em { font-style: normal; color: var(--ink); }
+.caps-bar .loss { color: var(--coral); }
+.chip.would-place { background: #2a3a14; color: var(--lime); }
+.chip.would-skip { color: var(--muted); }
+.chip.would-flatten { background: #3a1814; color: var(--coral); }
+.limits-form { grid-template-columns: repeat(3, 1fr) auto; align-items: end; }
+.limits-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.replay-form { grid-template-columns: 2fr 1fr auto; }
+select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
   .rail { height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--line); }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api";
-import type { Game, GameEvent, Order, Position, Verdict } from "../types";
+import { CapsBar } from "../components/CapsBar";
+import { DecisionsTable } from "../components/DecisionsTable";
+import type { Caps, Decision, Game, GameEvent, Order, Position, Pnl, Verdict } from "../types";
 
 export function GameDetail({ tick }: { tick: number }) {
   const { id } = useParams();
@@ -9,14 +11,16 @@ export function GameDetail({ tick }: { tick: number }) {
     game: Game;
     events: GameEvent[];
     verdicts: Verdict[];
+    decisions: Decision[];
     orders: Order[];
     positions: Position[];
-    pnl: Record<string, unknown>;
+    pnl: Pnl;
+    caps: Caps;
   } | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    api.game(id).then(setData).catch(() => setData(null));
+    api.game(id).then((row) => setData(row as typeof data)).catch(() => setData(null));
   }, [id, tick]);
 
   if (!data) return <div className="empty">Loading game…</div>;
@@ -29,10 +33,11 @@ export function GameDetail({ tick }: { tick: number }) {
             {game.home_team} {game.home_goals}–{game.away_goals} {game.away_team}
           </h1>
           <p className="lede">
-            {game.league} · {game.minute}' {game.phase} · P&L open {String(data.pnl.open_contracts)} ct
+            {game.league} · {game.minute}' {game.phase} · paper would-decisions
           </p>
         </div>
       </div>
+      <CapsBar caps={data.caps} pnl={data.pnl} />
       <div className="grid">
         <div className="card">
           <h3>Markets</h3>
@@ -58,27 +63,31 @@ export function GameDetail({ tick }: { tick: number }) {
           </table>
         </div>
         <div className="card">
+          <h3>Would-decisions</h3>
+          <DecisionsTable decisions={data.decisions || []} />
+        </div>
+        <div className="card">
           <h3>Timeline</h3>
           <div className="timeline">
             {data.events.length === 0 && <div className="empty">No material events yet.</div>}
             {data.events.map((event) => (
               <div className="event" key={event.id}>
                 <strong>{event.event_type}</strong> · {event.minute}'
-                <div className="meta">{JSON.stringify(event.payload)}</div>
-                {data.verdicts
-                  .filter((v) => v.created_at >= event.created_at - 2)
-                  .slice(0, 4)
-                  .map((v) => (
-                    <div key={v.id}>
-                      {v.agent}: {v.verdict || "note"} — {v.reason}
-                    </div>
-                  ))}
+                <div className="meta">
+                  {(data.decisions || [])
+                    .filter((d) => d.event_id === event.id)
+                    .map((d) => (
+                      <div key={d.id}>
+                        {d.agent}: {d.action} {d.market_ticker || ""} — {d.reason}
+                      </div>
+                    ))}
+                </div>
               </div>
             ))}
           </div>
         </div>
         <div className="card">
-          <h3>Orders</h3>
+          <h3>Paper orders</h3>
           <table className="table">
             <thead>
               <tr>
@@ -94,17 +103,11 @@ export function GameDetail({ tick }: { tick: number }) {
                   <td>{o.action}</td>
                   <td>{o.market_ticker}</td>
                   <td>{o.count}</td>
-                  <td>{o.price}¢ {o.paper ? "paper" : "live"}</td>
+                  <td>{o.price}¢ paper</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-        <div className="card">
-          <h3>Pre-match</h3>
-          <pre style={{ whiteSpace: "pre-wrap", color: "var(--muted)", fontSize: 13 }}>
-            {JSON.stringify(game.prematch, null, 2) || "Not pulled yet"}
-          </pre>
         </div>
       </div>
     </>
