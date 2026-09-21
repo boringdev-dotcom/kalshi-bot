@@ -1,0 +1,21 @@
+{
+  "game": {
+    "id": "REPLAY-EPL-DEMO",
+    "home_team": "Arsenal",
+    "away_team": "Chelsea",
+    "league": "premier_league",
+    "kickoff_ts": 1700000000
+  },
+  "markets": [
+    {"ticker": "KXEPLTOTAL-REPLAY-25", "strike": 2.5, "no_bid": 84, "no_ask": 86}
+  ],
+  "ticks": [
+    {"home_goals": 0, "away_goals": 0, "minute": 12, "phase": "first_half", "red_cards": 0},
+    {"home_goals": 0, "away_goals": 0, "minute": 22, "phase": "first_half", "red_cards": 0},
+    {"home_goals": 1, "away_goals": 0, "minute": 23, "phase": "first_half", "red_cards": 0},
+    {"home_goals": 1, "away_goals": 0, "minute": 45, "phase": "half_time", "red_cards": 0},
+    {"home_goals": 1, "away_goals": 0, "minute": 46, "phase": "second_half", "red_cards": 0},
+    {"home_goals": 1, "away_goals": 1, "minute": 67, "phase": "second_half", "red_cards": 0},
+    {"home_goals": 1, "away_goals": 1, "minute": 90, "phase": "full_time", "red_cards": 0}
+  ]
+}

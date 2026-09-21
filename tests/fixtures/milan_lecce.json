@@ -1,0 +1,120 @@
+{
+  "id": "milan-lecce-2026-09-20",
+  "label": "Milan vs Lecce · 20 Sep 2026 · recorded",
+  "source": "recorded",
+  "game": {
+    "id": "REPLAY-SERIEA-ACMLEC",
+    "kalshi_event_ticker": "KXSERIEATOTAL-26SEP20ACMLEC",
+    "home_team": "Milan",
+    "away_team": "Lecce",
+    "league": "serie_a",
+    "league_tier": 1,
+    "kickoff_ts": 1789925100
+  },
+  "markets": [
+    {
+      "ticker": "KXSERIEATOTAL-26SEP20ACMLEC-3",
+      "series_ticker": "KXSERIEATOTAL",
+      "strike": 2.5,
+      "title": "Milan vs Lecce Over 2.5"
+    },
+    {
+      "ticker": "KXSERIEATOTAL-26SEP20ACMLEC-4",
+      "series_ticker": "KXSERIEATOTAL",
+      "strike": 3.5,
+      "title": "Milan vs Lecce Over 3.5"
+    },
+    {
+      "ticker": "KXSERIEATOTAL-26SEP20ACMLEC-5",
+      "series_ticker": "KXSERIEATOTAL",
+      "strike": 4.5,
+      "title": "Milan vs Lecce Over 4.5"
+    }
+  ],
+  "ticks": [
+    {
+      "home_goals": 0,
+      "away_goals": 0,
+      "minute": 12,
+      "phase": "first_half",
+      "red_cards": 0,
+      "quotes": {
+        "KXSERIEATOTAL-26SEP20ACMLEC-3": {"no_bid": 62, "no_ask": 64},
+        "KXSERIEATOTAL-26SEP20ACMLEC-4": {"no_bid": 78, "no_ask": 80},
+        "KXSERIEATOTAL-26SEP20ACMLEC-5": {"no_bid": 88, "no_ask": 90}
+      }
+    },
+    {
+      "home_goals": 1,
+      "away_goals": 0,
+      "minute": 16,
+      "phase": "first_half",
+      "red_cards": 0,
+      "quotes": {
+        "KXSERIEATOTAL-26SEP20ACMLEC-3": {"no_bid": 73, "no_ask": 75},
+        "KXSERIEATOTAL-26SEP20ACMLEC-4": {"no_bid": 84, "no_ask": 86},
+        "KXSERIEATOTAL-26SEP20ACMLEC-5": {"no_bid": 91, "no_ask": 93}
+      }
+    },
+    {
+      "home_goals": 1,
+      "away_goals": 0,
+      "minute": 45,
+      "phase": "half_time",
+      "red_cards": 0,
+      "quotes": {
+        "KXSERIEATOTAL-26SEP20ACMLEC-3": {"no_bid": 76, "no_ask": 78},
+        "KXSERIEATOTAL-26SEP20ACMLEC-4": {"no_bid": 86, "no_ask": 88},
+        "KXSERIEATOTAL-26SEP20ACMLEC-5": {"no_bid": 92, "no_ask": 94}
+      }
+    },
+    {
+      "home_goals": 1,
+      "away_goals": 0,
+      "minute": 46,
+      "phase": "second_half",
+      "red_cards": 0,
+      "quotes": {
+        "KXSERIEATOTAL-26SEP20ACMLEC-3": {"no_bid": 76, "no_ask": 78},
+        "KXSERIEATOTAL-26SEP20ACMLEC-4": {"no_bid": 86, "no_ask": 88},
+        "KXSERIEATOTAL-26SEP20ACMLEC-5": {"no_bid": 92, "no_ask": 94}
+      }
+    },
+    {
+      "home_goals": 1,
+      "away_goals": 0,
+      "minute": 72,
+      "phase": "second_half",
+      "red_cards": 0,
+      "quotes": {
+        "KXSERIEATOTAL-26SEP20ACMLEC-3": {"no_bid": 84, "no_ask": 86},
+        "KXSERIEATOTAL-26SEP20ACMLEC-4": {"no_bid": 90, "no_ask": 92},
+        "KXSERIEATOTAL-26SEP20ACMLEC-5": {"no_bid": 94, "no_ask": 96}
+      }
+    },
+    {
+      "home_goals": 1,
+      "away_goals": 1,
+      "minute": 81,
+      "phase": "second_half",
+      "red_cards": 0,
+      "quotes": {
+        "KXSERIEATOTAL-26SEP20ACMLEC-3": {"no_bid": 68, "no_ask": 71},
+        "KXSERIEATOTAL-26SEP20ACMLEC-4": {"no_bid": 82, "no_ask": 84},
+        "KXSERIEATOTAL-26SEP20ACMLEC-5": {"no_bid": 90, "no_ask": 92}
+      }
+    },
+    {
+      "home_goals": 1,
+      "away_goals": 1,
+      "minute": 90,
+      "phase": "full_time",
+      "red_cards": 0,
+      "quotes": {
+        "KXSERIEATOTAL-26SEP20ACMLEC-3": {"no_bid": 99, "no_ask": 99},
+        "KXSERIEATOTAL-26SEP20ACMLEC-4": {"no_bid": 99, "no_ask": 99},
+        "KXSERIEATOTAL-26SEP20ACMLEC-5": {"no_bid": 99, "no_ask": 99}
+      }
+    }
+  ]
+}

@@ -1,56 +1,55 @@
-import { NavLink, Outlet } from 'react-router-dom';
-import { Activity, TrendingUp, FlaskConical } from 'lucide-react';
-import { clsx } from 'clsx';
+import { NavLink } from "react-router-dom";
+import type { Status } from "../types";
 
-export function Layout() {
+const links = [
+  { to: "/", label: "Upcoming" },
+  { to: "/live", label: "Live" },
+  { to: "/replay", label: "Replay" },
+  { to: "/portfolio", label: "Portfolio" },
+  { to: "/costs", label: "Costs" },
+];
+
+export function Layout({
+  children,
+  status,
+  connected,
+}: {
+  children: React.ReactNode;
+  status: Status | null;
+  connected: boolean;
+}) {
+  const paper = status?.paper !== false;
   return (
-    <div className="h-screen bg-bg-primary flex flex-col overflow-hidden">
-      {/* Top Navigation Bar */}
-      <header className="flex-none px-3 md:px-4 py-2 md:py-3 border-b border-border-subtle flex items-center justify-between">
-        <div className="flex items-center gap-4 md:gap-6">
-          <div className="flex items-center gap-2 md:gap-3">
-            <Activity className="w-5 h-5 md:w-6 md:h-6 text-accent-blue" />
-            <h1 className="text-base md:text-lg font-semibold text-text-primary">Kalshi</h1>
-          </div>
-          
-          {/* Navigation Links */}
-          <nav className="flex items-center gap-1">
-            <NavLink
-              to="/"
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-accent-blue/15 text-accent-blue'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
-                )
-              }
-            >
-              <TrendingUp className="w-4 h-4" />
-              <span className="hidden sm:inline">Chart</span>
-            </NavLink>
-            <NavLink
-              to="/research"
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-accent-blue/15 text-accent-blue'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
-                )
-              }
-            >
-              <FlaskConical className="w-4 h-4" />
-              <span className="hidden sm:inline">Research</span>
-            </NavLink>
-          </nav>
+    <div className="app">
+      <aside className="rail">
+        <div className="wordmark">
+          Under
+          <span>No</span>
         </div>
-      </header>
-
-      {/* Page Content */}
-      <main className="flex-1 overflow-hidden">
-        <Outlet />
-      </main>
+        <nav className="nav">
+          {links.map((link) => (
+            <NavLink key={link.to} to={link.to} end={link.to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>
+              {link.label}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+      <section className="main">
+        <div className={`paper-banner ${paper ? "" : "live-warn"}`}>
+          {paper
+            ? "PAPER ONLY — no live orders. Every Pundit/Kalshi call is would-place / would-skip / would-flatten."
+            : "LIVE ORDERS ON — real Kalshi fills. Switch back to paper unless you intend to send size."}
+        </div>
+        <div className="pills" style={{ marginBottom: 18 }}>
+          <span className={`pill ${paper ? "ok" : "warn"}`}>{paper ? "paper only" : "live orders"}</span>
+          <span className={`pill ${status?.paused ? "warn" : "live"}`}>
+            {status?.paused ? `paused${status.pause_reason ? ` · ${status.pause_reason}` : ""}` : "armed"}
+          </span>
+          <span className={`pill ${connected ? "ok" : ""}`}>{connected ? "stream on" : "stream off"}</span>
+          <span className="pill">{status?.kalshi_env || "env"}</span>
+        </div>
+        {children}
+      </section>
     </div>
   );
 }
