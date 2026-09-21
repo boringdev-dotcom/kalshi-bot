@@ -56,26 +56,26 @@ export function Portfolio({
           Trading paused: {portfolio.pause_reason}. Raise the loss cap or resume after review.
         </p>
       ) : null}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>Limits</h3>
+        <form className="form limits-form" onSubmit={onSave}>
+          <label>
+            Max / match
+            <input type="number" min={1} value={match} onChange={(e) => setMatch(e.target.value)} />
+          </label>
+          <label>
+            Max / day
+            <input type="number" min={1} value={day} onChange={(e) => setDay(e.target.value)} />
+          </label>
+          <label>
+            Max daily loss (¢)
+            <input type="number" min={0} value={loss} onChange={(e) => setLoss(e.target.value)} />
+          </label>
+          <button className="primary" type="submit">Save limits</button>
+        </form>
+        {msg ? <p className="meta">{msg}</p> : null}
+      </div>
       <div className="grid">
-        <div className="card">
-          <h3>Limits</h3>
-          <form className="form limits-form" onSubmit={onSave}>
-            <label>
-              Max / match
-              <input type="number" min={1} value={match} onChange={(e) => setMatch(e.target.value)} />
-            </label>
-            <label>
-              Max / day
-              <input type="number" min={1} value={day} onChange={(e) => setDay(e.target.value)} />
-            </label>
-            <label>
-              Max daily loss (¢)
-              <input type="number" min={0} value={loss} onChange={(e) => setLoss(e.target.value)} />
-            </label>
-            <button className="primary" type="submit">Save limits</button>
-          </form>
-          {msg ? <p className="meta">{msg}</p> : null}
-        </div>
         <div className="card">
           <h3>Open (paper)</h3>
           <table className="table">

@@ -233,7 +233,7 @@ button, input, select {
 .chip.would-place { background: #2a3a14; color: var(--lime); }
 .chip.would-skip { color: var(--muted); }
 .chip.would-flatten { background: #3a1814; color: var(--coral); }
-.limits-form { grid-template-columns: repeat(3, 1fr) auto; align-items: end; }
+.limits-form { grid-template-columns: repeat(4, minmax(120px, 1fr)); align-items: end; max-width: 880px; }
 .limits-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
 .replay-form { grid-template-columns: 2fr 1fr auto; }
 select {
