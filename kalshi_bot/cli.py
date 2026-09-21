@@ -111,6 +111,39 @@ def replay_cmd(
     store.close()
 
 
+@cli.command("learn-nightly")
+def learn_nightly_cmd() -> None:
+    """Mine journal + Phase 0, validate lessons, update calibration, draft proposals."""
+    from kalshi_bot.learning.mine import run_nightly
+    from kalshi_bot.store import Store
+
+    settings = _settings()
+    store = Store(settings.sqlite_path)
+    result = run_nightly(store)
+    logger.info(
+        "Nightly mine lessons=%s proposals=%s calibration=%s",
+        len(result.get("lessons") or []),
+        len(result.get("proposals") or []),
+        len(result.get("calibration") or []),
+    )
+    store.close()
+
+
+@cli.command("learn-reflect")
+def learn_reflect_cmd(
+    game_id: str = typer.Option(..., help="Finished game id to grade and reflect"),
+) -> None:
+    """Post-game grading + reflection. Off the event path."""
+    from kalshi_bot.learning.reflect import reflect_game
+    from kalshi_bot.store import Store
+
+    settings = _settings()
+    store = Store(settings.sqlite_path)
+    result = reflect_game(store, game_id, settings)
+    logger.info("Reflection %s: %s", game_id, (result or {}).get("notes"))
+    store.close()
+
+
 @cli.command("run-all")
 def run_all_cmd() -> None:
     """API and watcher in one process (local / single-box)."""

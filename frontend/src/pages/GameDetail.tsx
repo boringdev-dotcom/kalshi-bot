@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { api } from "../api";
 import { CapsBar } from "../components/CapsBar";
 import { DecisionsTable } from "../components/DecisionsTable";
-import type { Caps, Decision, Game, GameEvent, Order, Position, Pnl, Verdict } from "../types";
+import type { Caps, Decision, Game, GameEvent, Order, Position, Pnl, Reflection, Verdict } from "../types";
 
 export function GameDetail({ tick }: { tick: number }) {
   const { id } = useParams();
@@ -16,6 +16,7 @@ export function GameDetail({ tick }: { tick: number }) {
     positions: Position[];
     pnl: Pnl;
     caps: Caps;
+    reflection?: Reflection | null;
   } | null>(null);
 
   useEffect(() => {
@@ -34,10 +35,19 @@ export function GameDetail({ tick }: { tick: number }) {
           </h1>
           <p className="lede">
             {game.league} · {game.minute}' {game.phase} · paper would-decisions
+            {data.decisions?.some((d) => d.process_grade) ? " · graded" : ""}
           </p>
         </div>
       </div>
       <CapsBar caps={data.caps} pnl={data.pnl} />
+      {data.decisions?.some((d) => d.process_grade) ? (
+        <div className="pills" style={{ marginBottom: 16 }}>
+          <span className="pill ok">graded</span>
+          {(data.reflection?.notes || data.reflection?.raw?.notes) ? (
+            <span className="pill">reflection on</span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="grid">
         <div className="card">
           <h3>Markets</h3>
@@ -66,6 +76,18 @@ export function GameDetail({ tick }: { tick: number }) {
           <h3>Would-decisions</h3>
           <DecisionsTable decisions={data.decisions || []} />
         </div>
+        {(data.reflection?.notes || data.reflection?.raw?.notes) ? (
+          <div className="card">
+            <h3>Reflection notes</h3>
+            <p className="meta">{data.reflection?.raw?.source === "grok" ? "Grok" : "Deterministic"} post-game review</p>
+            <p>{data.reflection?.notes || data.reflection?.raw?.notes}</p>
+            {(data.reflection?.raw?.decisions || []).slice(0, 6).map((row, idx) => (
+              <div className="meta" key={`${row.id}-${idx}`}>
+                #{row.id} {row.verdict}: {row.would_do_differently}
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="card">
           <h3>Timeline</h3>
           <div className="timeline">

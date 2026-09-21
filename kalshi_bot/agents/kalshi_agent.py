@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from kalshi_bot.agents.grok import GrokClient, extract_json, message_content
 from kalshi_bot.agents.tools import KALSHI_TOOLS, ToolContext, dispatch
 from kalshi_bot.decisions import WOULD_FLATTEN, WOULD_PLACE, WOULD_SKIP, record_decision
 from kalshi_bot.execution import flatten_position, submit_buy_no
+from kalshi_bot.learning.playbook_version import active_rules, current_version_number
 from kalshi_bot.limits import cap_usage, get_limits
 from kalshi_bot.models import PunditVerdict
 from kalshi_bot.playbook import (
@@ -19,6 +20,17 @@ from kalshi_bot.playbook import (
     is_1h_total,
 )
 from kalshi_bot.store import Store
+
+
+def _journal_kwargs(store: Store, ctx: ToolContext, payload: dict, market: Optional[dict] = None, verdict=None) -> dict:
+    return {
+        "game": ctx.game,
+        "market": market,
+        "state": payload.get("state"),
+        "playbook_version": payload.get("playbook_version") or current_version_number(store),
+        "brief_id": payload.get("brief_id"),
+        "pundit_verdict": getattr(verdict, "verdict", None) if verdict is not None else None,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +158,7 @@ def _apply_hard_stops(store: Store, ctx: ToolContext, payload: dict[str, Any]) -
                 rem=market.get("rem"),
                 reason=decision.reason,
                 paper=ctx.paper,
+                **_journal_kwargs(store, ctx, payload, market),
             )
 
 
@@ -170,6 +183,7 @@ def _playbook_only(
             action=WOULD_SKIP,
             reason=store.pause_reason() or "paused",
             paper=ctx.paper,
+            **_journal_kwargs(store, ctx, payload),
         )
         return [{"action": "hold", "reason": store.pause_reason() or "paused"}]
     for market in payload.get("markets") or []:
@@ -201,6 +215,7 @@ def _playbook_only(
                 rem=rem,
                 reason=verdict.reason,
                 paper=ctx.paper,
+                **_journal_kwargs(store, ctx, payload, market, verdict),
             )
             if result:
                 actions.append(result)
@@ -218,6 +233,7 @@ def _playbook_only(
                 rem=rem,
                 reason="already holding",
                 paper=ctx.paper,
+                **_journal_kwargs(store, ctx, payload, market, verdict),
             )
             continue
         decision = evaluate_entry(
@@ -238,6 +254,7 @@ def _playbook_only(
             ),
             max_match=limits["max_contracts_per_match"],
             max_day=limits["max_contracts_per_day"],
+            rules=active_rules(store),
         )
         if not decision.allowed:
             record_decision(
@@ -252,6 +269,7 @@ def _playbook_only(
                 rem=rem,
                 reason=decision.reason,
                 paper=ctx.paper,
+                **_journal_kwargs(store, ctx, payload, market, verdict),
             )
             continue
         result = submit_buy_no(
@@ -277,6 +295,7 @@ def _playbook_only(
             rem=rem,
             reason=decision.reason,
             paper=ctx.paper,
+            **_journal_kwargs(store, ctx, payload, market, verdict),
         )
         used_match += decision.size
         used_day += decision.size

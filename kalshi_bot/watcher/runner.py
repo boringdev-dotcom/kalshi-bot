@@ -13,6 +13,10 @@ from kalshi_bot.config import Settings
 from kalshi_bot.feeds.prematch import build_prematch
 from kalshi_bot.kalshi.rest import KalshiClient
 from kalshi_bot.kalshi.ws import stream_tickers
+from kalshi_bot.learning.brief import compile_brief
+from kalshi_bot.learning.mine import run_nightly, should_mine_tonight
+from kalshi_bot.learning.playbook_version import ensure_playbook_v1
+from kalshi_bot.learning.reflect import reflect_game
 from kalshi_bot.models import MatchState
 from kalshi_bot.notify.telegram import TelegramNotifier, build_notifier, poll_commands
 from kalshi_bot.playbook import evaluate_exit
@@ -58,6 +62,7 @@ class Watcher:
             self.store.set_paper(self.settings.paper_mode)
         if self.store.get_control("trading_paused") is None:
             self.store.set_paused(self.settings.trading_paused)
+        ensure_playbook_v1(self.store)
 
         self.notifier.send("Kalshi soccer watcher started (paper default, event-triggered agents).")
         last_prematch = 0.0
@@ -74,6 +79,8 @@ class Watcher:
             if now - last_telegram >= 5:
                 await asyncio.to_thread(poll_commands, self.notifier, self.store, self.settings)
                 last_telegram = now
+            if should_mine_tonight(self.store):
+                await asyncio.to_thread(run_nightly, self.store)
             try:
                 await asyncio.wait_for(self.stop_event.wait(), timeout=1.0)
             except asyncio.TimeoutError:
@@ -152,6 +159,8 @@ class Watcher:
             return
         previous = self._last_state.get(game["id"])
         quotes = refresh_quotes(self.store, self.client, game, state)
+        if previous is None or (previous.phase in {"upcoming", "unknown"} and state.phase not in {"upcoming", "unknown"}):
+            compile_brief(self.store, {**game, "phase": state.phase or "first_half"}, phase="kickoff")
         self.store.update_game_state(
             game["id"],
             home_goals=state.home_goals,
@@ -168,6 +177,8 @@ class Watcher:
             return
         fresh = self.store.get_game(game["id"]) or game
         for event in events:
+            if event.event_type in {"half_time", "second_half_start"}:
+                compile_brief(self.store, fresh, phase=event.event_type)
             event_id = self.store.add_event(game["id"], event.event_type, event.minute, event.payload)
             payload = {
                 "game_id": game["id"],
@@ -194,6 +205,8 @@ class Watcher:
                 payload,
                 notify=self.notifier.send,
             )
+            if event.event_type == "full_time":
+                reflect_game(self.store, game["id"], self.settings)
 
     def _price_stops(self, game: dict, quotes: list[dict]) -> None:
         """Price-only stop check. No LLM."""

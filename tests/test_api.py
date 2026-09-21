@@ -42,6 +42,10 @@ def test_watch_and_controls(tmp_path):
     port = client.get("/api/portfolio").json()
     assert "remaining_day" in port["caps"]
     assert port["caps"]["used_today"] >= 0
+    learning = client.get("/api/learning").json()
+    assert learning["propose_only"] is True
+    assert "max_daily_loss_cents" in learning["hard_cap_keys"]
+    assert learning["playbook"]["current"] >= 1
     fixtures = client.get("/api/replay/fixtures").json()["fixtures"]
     assert any(f["id"] == "milan-lecce-2026-09-20" for f in fixtures)
     replayed = client.post("/api/replay", json={"fixture_id": "milan-lecce-2026-09-20"}).json()

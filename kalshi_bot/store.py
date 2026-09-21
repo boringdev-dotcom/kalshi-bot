@@ -175,6 +175,87 @@ class Store:
             )
             """
         )
+        extra = {
+            "features_json": "TEXT",
+            "confidence": "REAL",
+            "playbook_version": "INTEGER",
+            "brief_id": "INTEGER",
+            "pundit_verdict": "TEXT",
+            "outcome": "TEXT",
+            "process_grade": "TEXT",
+            "realized_pnl_cents": "INTEGER",
+            "counterfactual_pnl_cents": "INTEGER",
+            "goals_after": "INTEGER",
+            "settled": "INTEGER",
+            "graded_at": "INTEGER",
+        }
+        existing = {row["name"] for row in self._query("PRAGMA table_info(decisions)")}
+        for col, typ in extra.items():
+            if col not in existing:
+                self._execute(f"ALTER TABLE decisions ADD COLUMN {col} {typ}")
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS memory_briefs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                playbook_version INTEGER,
+                text TEXT NOT NULL,
+                token_estimate INTEGER,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS lessons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                condition TEXT NOT NULL,
+                observation TEXT NOT NULL,
+                suggested_action TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'hypothesis',
+                confidence REAL NOT NULL DEFAULT 0,
+                support_count INTEGER NOT NULL DEFAULT 1,
+                evidence_game TEXT,
+                league TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_validated_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS playbook_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version INTEGER UNIQUE NOT NULL,
+                notes TEXT,
+                body_json TEXT NOT NULL,
+                parent_version INTEGER,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS proposals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                title TEXT NOT NULL,
+                motivation TEXT,
+                lesson_id INTEGER,
+                diff_json TEXT NOT NULL,
+                backtest_json TEXT,
+                created_at INTEGER NOT NULL,
+                decided_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS reflections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                notes TEXT,
+                raw_json TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS calibration (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent TEXT NOT NULL,
+                league TEXT,
+                n INTEGER NOT NULL,
+                brier REAL NOT NULL,
+                hit_rate REAL,
+                updated_at INTEGER NOT NULL
+            );
+            """
+        )
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -228,8 +309,9 @@ class Store:
             """
             INSERT INTO decisions(
                 game_id, event_id, agent, market_ticker, action,
-                size, price, rem, reason, paper, created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                size, price, rem, reason, paper, created_at,
+                features_json, confidence, playbook_version, brief_id, pundit_verdict
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 row["game_id"],
@@ -243,15 +325,63 @@ class Store:
                 row.get("reason") or "",
                 1 if row.get("paper", True) else 0,
                 _now(),
+                json.dumps(row["features"]) if row.get("features") is not None else row.get("features_json"),
+                row.get("confidence"),
+                row.get("playbook_version"),
+                row.get("brief_id"),
+                row.get("pundit_verdict"),
             ),
         )
         return int(cur.lastrowid)
 
     def decisions_for_game(self, game_id: str) -> list[dict[str, Any]]:
-        return self._query("SELECT * FROM decisions WHERE game_id=? ORDER BY id", (game_id,))
+        rows = self._query("SELECT * FROM decisions WHERE game_id=? ORDER BY id", (game_id,))
+        return [self._hydrate_decision(r) for r in rows]
 
     def recent_decisions(self, limit: int = 50) -> list[dict[str, Any]]:
-        return self._query("SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (limit,))
+        rows = self._query("SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (limit,))
+        return [self._hydrate_decision(r) for r in rows]
+
+    def all_decisions(self) -> list[dict[str, Any]]:
+        return [self._hydrate_decision(r) for r in self._query("SELECT * FROM decisions ORDER BY id")]
+
+    _DECISION_UPDATABLE = {
+        "outcome",
+        "process_grade",
+        "realized_pnl_cents",
+        "counterfactual_pnl_cents",
+        "goals_after",
+        "settled",
+        "graded_at",
+        "features_json",
+        "confidence",
+        "playbook_version",
+        "brief_id",
+        "pundit_verdict",
+        "reason",
+        "action",
+        "size",
+        "price",
+        "rem",
+    }
+
+    def update_decision(self, decision_id: int, **fields: Any) -> None:
+        if "features" in fields:
+            fields["features_json"] = json.dumps(fields.pop("features"))
+        fields = {k: v for k, v in fields.items() if k in self._DECISION_UPDATABLE}
+        if not fields:
+            return
+        assignments = ", ".join(f"{k}=?" for k in fields)
+        self._execute(
+            f"UPDATE decisions SET {assignments} WHERE id=?",
+            tuple(fields.values()) + (decision_id,),
+        )
+
+    def _hydrate_decision(self, row: dict[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        raw = row.get("features_json")
+        row["features"] = json.loads(raw) if raw else None
+        return row
 
     def replay_games(self) -> list[dict[str, Any]]:
         rows = self._query(
@@ -260,8 +390,258 @@ class Store:
         return [self._hydrate_game(row) for row in rows]
 
     def clear_game_journal(self, game_id: str) -> None:
-        for table in ("decisions", "orders", "positions", "events", "agent_verdicts", "agent_memory"):
+        for table in (
+            "decisions",
+            "orders",
+            "positions",
+            "events",
+            "agent_verdicts",
+            "agent_memory",
+            "memory_briefs",
+            "reflections",
+        ):
             self._execute(f"DELETE FROM {table} WHERE game_id=?", (game_id,))
+
+    def finished_games(self) -> list[dict[str, Any]]:
+        rows = self._query(
+            """
+            SELECT * FROM games
+            WHERE status IN ('finished', 'replay') OR phase='full_time'
+            ORDER BY updated_at DESC
+            """
+        )
+        return [self._hydrate_game(row) for row in rows]
+
+    def add_brief(self, row: dict[str, Any]) -> int:
+        cur = self._execute(
+            """
+            INSERT INTO memory_briefs(game_id, phase, playbook_version, text, token_estimate, created_at)
+            VALUES(?,?,?,?,?,?)
+            """,
+            (
+                row["game_id"],
+                row.get("phase") or "kickoff",
+                row.get("playbook_version"),
+                row["text"],
+                int(row.get("token_estimate") or 0),
+                _now(),
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def latest_brief(self, game_id: str) -> Optional[dict[str, Any]]:
+        rows = self._query(
+            "SELECT * FROM memory_briefs WHERE game_id=? ORDER BY id DESC LIMIT 1",
+            (game_id,),
+        )
+        return rows[0] if rows else None
+
+    def briefs_for_game(self, game_id: str) -> list[dict[str, Any]]:
+        return self._query("SELECT * FROM memory_briefs WHERE game_id=? ORDER BY id", (game_id,))
+
+    def add_lesson(self, row: dict[str, Any]) -> int:
+        now = _now()
+        cur = self._execute(
+            """
+            INSERT INTO lessons(
+                condition, observation, suggested_action, status, confidence,
+                support_count, evidence_game, league, created_at, updated_at, last_validated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                row["condition"],
+                row["observation"],
+                row["suggested_action"],
+                row.get("status") or "hypothesis",
+                float(row.get("confidence") or 0),
+                int(row.get("support_count") or 1),
+                row.get("evidence_game"),
+                row.get("league"),
+                now,
+                now,
+                row.get("last_validated_at"),
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def update_lesson(self, lesson_id: int, **fields: Any) -> None:
+        allowed = {
+            "condition",
+            "observation",
+            "suggested_action",
+            "status",
+            "confidence",
+            "support_count",
+            "evidence_game",
+            "league",
+            "updated_at",
+            "last_validated_at",
+        }
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return
+        fields.setdefault("updated_at", _now())
+        assignments = ", ".join(f"{k}=?" for k in fields)
+        self._execute(
+            f"UPDATE lessons SET {assignments} WHERE id=?",
+            tuple(fields.values()) + (lesson_id,),
+        )
+
+    def get_lesson(self, lesson_id: int) -> Optional[dict[str, Any]]:
+        rows = self._query("SELECT * FROM lessons WHERE id=?", (lesson_id,))
+        return rows[0] if rows else None
+
+    def list_lessons(self, status: Optional[str] = None) -> list[dict[str, Any]]:
+        if status:
+            return self._query(
+                "SELECT * FROM lessons WHERE status=? ORDER BY confidence DESC, id DESC",
+                (status,),
+            )
+        return self._query("SELECT * FROM lessons ORDER BY id DESC")
+
+    def add_playbook_version(self, row: dict[str, Any]) -> int:
+        cur = self._execute(
+            """
+            INSERT INTO playbook_versions(version, notes, body_json, parent_version, created_at)
+            VALUES(?,?,?,?,?)
+            """,
+            (
+                int(row["version"]),
+                row.get("notes") or "",
+                row["body_json"] if isinstance(row.get("body_json"), str) else json.dumps(row.get("body") or {}),
+                row.get("parent_version"),
+                _now(),
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def list_playbook_versions(self) -> list[dict[str, Any]]:
+        rows = self._query("SELECT * FROM playbook_versions ORDER BY version DESC")
+        for row in rows:
+            try:
+                row["body"] = json.loads(row["body_json"]) if row.get("body_json") else {}
+            except json.JSONDecodeError:
+                row["body"] = {}
+        return rows
+
+    def get_playbook_version(self, version: int) -> Optional[dict[str, Any]]:
+        rows = self._query("SELECT * FROM playbook_versions WHERE version=?", (version,))
+        if not rows:
+            return None
+        row = rows[0]
+        try:
+            row["body"] = json.loads(row["body_json"]) if row.get("body_json") else {}
+        except json.JSONDecodeError:
+            row["body"] = {}
+        return row
+
+    def latest_playbook_version(self) -> Optional[dict[str, Any]]:
+        rows = self._query("SELECT * FROM playbook_versions ORDER BY version DESC LIMIT 1")
+        if not rows:
+            return None
+        row = rows[0]
+        try:
+            row["body"] = json.loads(row["body_json"]) if row.get("body_json") else {}
+        except json.JSONDecodeError:
+            row["body"] = {}
+        return row
+
+    def add_proposal(self, row: dict[str, Any]) -> int:
+        cur = self._execute(
+            """
+            INSERT INTO proposals(status, title, motivation, lesson_id, diff_json, backtest_json, created_at, decided_at)
+            VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (
+                row.get("status") or "pending",
+                row["title"],
+                row.get("motivation") or "",
+                row.get("lesson_id"),
+                row["diff_json"] if isinstance(row.get("diff_json"), str) else json.dumps(row.get("diff") or {}),
+                row["backtest_json"] if isinstance(row.get("backtest_json"), str) else json.dumps(row.get("backtest") or {}),
+                _now(),
+                row.get("decided_at"),
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def update_proposal(self, proposal_id: int, **fields: Any) -> None:
+        allowed = {"status", "title", "motivation", "lesson_id", "diff_json", "backtest_json", "decided_at"}
+        if "diff" in fields:
+            fields["diff_json"] = json.dumps(fields.pop("diff"))
+        if "backtest" in fields:
+            fields["backtest_json"] = json.dumps(fields.pop("backtest"))
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return
+        assignments = ", ".join(f"{k}=?" for k in fields)
+        self._execute(
+            f"UPDATE proposals SET {assignments} WHERE id=?",
+            tuple(fields.values()) + (proposal_id,),
+        )
+
+    def get_proposal(self, proposal_id: int) -> Optional[dict[str, Any]]:
+        rows = self._query("SELECT * FROM proposals WHERE id=?", (proposal_id,))
+        return self._hydrate_proposal(rows[0]) if rows else None
+
+    def list_proposals(self, status: Optional[str] = None) -> list[dict[str, Any]]:
+        if status:
+            rows = self._query("SELECT * FROM proposals WHERE status=? ORDER BY id DESC", (status,))
+        else:
+            rows = self._query("SELECT * FROM proposals ORDER BY id DESC")
+        return [self._hydrate_proposal(row) for row in rows]
+
+    def _hydrate_proposal(self, row: dict[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        try:
+            row["diff"] = json.loads(row["diff_json"]) if row.get("diff_json") else {}
+        except json.JSONDecodeError:
+            row["diff"] = {}
+        try:
+            row["backtest"] = json.loads(row["backtest_json"]) if row.get("backtest_json") else {}
+        except json.JSONDecodeError:
+            row["backtest"] = {}
+        return row
+
+    def add_reflection(self, game_id: str, notes: str, raw: Any) -> int:
+        cur = self._execute(
+            "INSERT INTO reflections(game_id, notes, raw_json, created_at) VALUES(?,?,?,?)",
+            (game_id, notes, json.dumps(raw), _now()),
+        )
+        return int(cur.lastrowid)
+
+    def reflection_for_game(self, game_id: str) -> Optional[dict[str, Any]]:
+        rows = self._query(
+            "SELECT * FROM reflections WHERE game_id=? ORDER BY id DESC LIMIT 1",
+            (game_id,),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        try:
+            row["raw"] = json.loads(row["raw_json"]) if row.get("raw_json") else None
+        except json.JSONDecodeError:
+            row["raw"] = None
+        return row
+
+    def upsert_calibration(self, agent: str, league: Optional[str], n: int, brier: float, hit_rate: Optional[float]) -> None:
+        existing = self._query(
+            "SELECT id FROM calibration WHERE agent=? AND IFNULL(league,'')=IFNULL(?, '')",
+            (agent, league),
+        )
+        if existing:
+            self._execute(
+                "UPDATE calibration SET n=?, brier=?, hit_rate=?, updated_at=? WHERE id=?",
+                (n, brier, hit_rate, _now(), existing[0]["id"]),
+            )
+            return
+        self._execute(
+            "INSERT INTO calibration(agent, league, n, brier, hit_rate, updated_at) VALUES(?,?,?,?,?,?)",
+            (agent, league, n, brier, hit_rate, _now()),
+        )
+
+    def list_calibration(self) -> list[dict[str, Any]]:
+        return self._query("SELECT * FROM calibration ORDER BY agent, league")
 
     def upsert_game(self, game: dict[str, Any]) -> None:
         now = _now()

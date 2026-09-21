@@ -12,6 +12,14 @@ from pydantic import BaseModel
 
 from kalshi_bot.agents.orchestrator import day_start_ts
 from kalshi_bot.config import Settings
+from kalshi_bot.learning.mine import run_nightly
+from kalshi_bot.learning.playbook_version import HARD_CAP_KEYS, ensure_playbook_v1, version_payload
+from kalshi_bot.learning.proposals import (
+    HardCapError,
+    approve_proposal,
+    reject_proposal,
+    shadow_proposal,
+)
 from kalshi_bot.limits import (
     cap_usage,
     enforce_loss_cap,
@@ -84,6 +92,7 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
     if store.get_control("trading_paused") is None:
         store.set_paused(settings.trading_paused)
     ensure_default_limits(store)
+    ensure_playbook_v1(store)
 
     app = FastAPI(title="Kalshi Soccer Bot", version="0.2.0")
     app.add_middleware(
@@ -149,6 +158,8 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
             "pnl": session_pnl(store, start),
             "caps": cap_usage(store, game_id, start),
             "paper": store.is_paper(),
+            "reflection": store.reflection_for_game(game_id),
+            "brief": store.latest_brief(game_id),
         }
 
     @app.get("/api/portfolio")
@@ -227,6 +238,47 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
             raise HTTPException(404, str(exc)) from exc
         result = replay_fixture(store, fixture, settings)
         return result
+
+    @app.get("/api/learning")
+    def learning() -> dict[str, Any]:
+        versions = version_payload(store)
+        return {
+            "lessons": store.list_lessons(),
+            "calibration": store.list_calibration(),
+            "proposals": store.list_proposals(),
+            "playbook": versions,
+            "hard_cap_keys": sorted(HARD_CAP_KEYS),
+            "propose_only": True,
+        }
+
+    @app.post("/api/learning/mine")
+    def learning_mine() -> dict[str, Any]:
+        return run_nightly(store)
+
+    @app.post("/api/learning/proposals/{proposal_id}/approve")
+    def learning_approve(proposal_id: int) -> dict[str, Any]:
+        try:
+            return approve_proposal(store, proposal_id)
+        except HardCapError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/learning/proposals/{proposal_id}/reject")
+    def learning_reject(proposal_id: int) -> dict[str, Any]:
+        try:
+            return {"proposal": reject_proposal(store, proposal_id)}
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/learning/proposals/{proposal_id}/shadow")
+    def learning_shadow(proposal_id: int) -> dict[str, Any]:
+        try:
+            return {"proposal": shadow_proposal(store, proposal_id)}
+        except HardCapError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @app.post("/api/games/watch")
     def watch(payload: WatchBody) -> dict[str, Any]:

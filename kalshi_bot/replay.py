@@ -9,6 +9,9 @@ from typing import Any, Optional
 
 from kalshi_bot.agents.orchestrator import day_start_ts, handle_event
 from kalshi_bot.config import Settings
+from kalshi_bot.learning.brief import compile_brief
+from kalshi_bot.learning.playbook_version import ensure_playbook_v1
+from kalshi_bot.learning.reflect import reflect_game
 from kalshi_bot.limits import enforce_loss_cap, ensure_default_limits, session_pnl
 from kalshi_bot.models import MatchState
 from kalshi_bot.rem import remaining_goals
@@ -314,11 +317,14 @@ def replay_fixture(
     store: Store,
     fixture: dict[str, Any],
     settings: Optional[Settings] = None,
+    *,
+    learn: bool = True,
 ) -> dict[str, Any]:
     """Paper-only: detector ticks → Pundit + Kalshi on each material event."""
     settings = settings or Settings()
     store.set_paper(True)
     ensure_default_limits(store)
+    ensure_playbook_v1(store)
 
     game = dict(fixture["game"])
     gid = game["id"]
@@ -335,6 +341,7 @@ def replay_fixture(
     )
     for market in fixture["markets"]:
         store.upsert_market({**market, "game_id": gid})
+    compile_brief(store, store.get_game(gid) or game, phase="kickoff")
 
     previous: Optional[MatchState] = None
     fired: list[str] = []
@@ -363,6 +370,8 @@ def replay_fixture(
             status="replay",
         )
         for event in detect_events(previous, current):
+            if event.event_type in {"half_time", "second_half_start"}:
+                compile_brief(store, store.get_game(gid) or game, phase=event.event_type)
             event_id = store.add_event(gid, event.event_type, event.minute, event.payload)
             fired.append(event.event_type)
             payload = {
@@ -384,6 +393,8 @@ def replay_fixture(
         previous = current
 
     store.update_game_state(gid, status="finished", phase="full_time")
+    if learn:
+        reflect_game(store, gid, settings)
     start = day_start_ts()
     pnl = session_pnl(store, start)
     decisions = store.decisions_for_game(gid)

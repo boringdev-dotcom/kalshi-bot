@@ -7,10 +7,14 @@ intentionally not copied — that slice lost money.
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Iterator, Optional
 
 from kalshi_bot.rem import playbook_rem
+
+_tls = threading.local()
 
 # Seeded from docs/pattern-report.md "Proposed playbook".
 SIDE = "no"
@@ -78,11 +82,42 @@ PLAYBOOK_NOTES = {
 }
 
 
-def league_tier(league: Optional[str]) -> int:
+def default_rules() -> dict[str, Any]:
+    return dict(PLAYBOOK_NOTES)
+
+
+def current_rules() -> dict[str, Any]:
+    overlay = getattr(_tls, "rules", None)
+    return overlay if overlay is not None else default_rules()
+
+
+@contextmanager
+def override_playbook(rules: Optional[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    """Temporarily overlay playbook thresholds (used by proposal backtests)."""
+    prev = getattr(_tls, "rules", None)
+    merged = default_rules()
+    if rules:
+        merged.update(rules)
+    _tls.rules = merged
+    try:
+        yield merged
+    finally:
+        _tls.rules = prev
+
+
+def _rule(rules: Optional[dict[str, Any]], key: str, default: Any) -> Any:
+    src = rules if rules is not None else current_rules()
+    if key in src and src[key] is not None:
+        return src[key]
+    return default
+
+
+def league_tier(league: Optional[str], rules: Optional[dict[str, Any]] = None) -> int:
     if not league:
         return 3
     key = league.lower().replace(" ", "_")
-    return LEAGUE_TIERS.get(key, 3)
+    tiers = _rule(rules, "league_tiers", LEAGUE_TIERS)
+    return int(tiers.get(key, 3)) if isinstance(tiers, dict) else 3
 
 
 def is_1h_total(ticker: Optional[str] = None, series: Optional[str] = None, title: Optional[str] = None) -> bool:
@@ -117,25 +152,44 @@ def _as_int_rem(rem: float, strike: Optional[float] = None) -> int:
     return int(rem) + 1
 
 
-def rem_allowed(rem: float, strike: Optional[float], tier: int) -> bool:
+def rem_allowed(
+    rem: float,
+    strike: Optional[float],
+    tier: int,
+    rules: Optional[dict[str, Any]] = None,
+) -> bool:
     ival = _as_int_rem(rem, strike)
-    if ival <= ENTRY_MAX_REM:
+    max_rem = int(_rule(rules, "entry_max_rem", ENTRY_MAX_REM))
+    if ival <= max_rem:
         return True
-    if (
-        ival == 3
-        and strike is not None
-        and float(strike) >= REM_3_OK_STRIKE
-        and tier == 1
-    ):
+    rem3_strike = float(_rule(rules, "rem_3_ok_strike", REM_3_OK_STRIKE))
+    if ival == 3 and strike is not None and float(strike) >= rem3_strike and tier == 1:
         return True
     return False
 
 
-def size_for_tier(tier: int, remaining_match_cap: int, remaining_day_cap: int) -> int:
-    if tier not in ALLOWED_TIERS:
+def size_for_tier(
+    tier: int,
+    remaining_match_cap: int,
+    remaining_day_cap: int,
+    rules: Optional[dict[str, Any]] = None,
+) -> int:
+    allowed = tuple(_rule(rules, "allowed_tiers", ALLOWED_TIERS))
+    if tier not in allowed:
         return 0
-    raw = TIER_SIZE.get(tier, 0)
-    return max(0, min(raw, remaining_match_cap, remaining_day_cap, MAX_CONTRACTS_PER_MATCH_HARD))
+    sizes = _rule(rules, "tier_size", TIER_SIZE)
+    if isinstance(sizes, dict):
+        coerced = {}
+        for key, value in sizes.items():
+            try:
+                coerced[int(key)] = value
+            except (TypeError, ValueError):
+                coerced[key] = value
+        raw = int(coerced.get(tier, 0))
+    else:
+        raw = 0
+    hard = int(_rule(rules, "max_contracts_per_match_hard", MAX_CONTRACTS_PER_MATCH_HARD))
+    return max(0, min(raw, remaining_match_cap, remaining_day_cap, hard))
 
 
 def evaluate_entry(
@@ -153,46 +207,55 @@ def evaluate_entry(
     is_1h: bool = False,
     max_match: Optional[int] = None,
     max_day: Optional[int] = None,
+    rules: Optional[dict[str, Any]] = None,
 ) -> PlaybookDecision:
-    if already_stopped and NO_REENTRY_AFTER_STOP:
+    no_reentry = bool(_rule(rules, "no_reentry_after_stop", NO_REENTRY_AFTER_STOP))
+    if already_stopped and no_reentry:
         return PlaybookDecision(False, "pass", 0, "no re-entry after stop")
     if phase == "full_time":
         return PlaybookDecision(False, "pass", 0, "match is finished")
-    if SKIP_1H_TOTALS and is_1h:
+    skip_1h = bool(_rule(rules, "skip_1h_totals", SKIP_1H_TOTALS))
+    if skip_1h and is_1h:
         return PlaybookDecision(False, "pass", 0, "1H totals off until more sample")
-    if minute < ENTRY_MIN_MINUTE or minute > ENTRY_MAX_MINUTE:
-        return PlaybookDecision(
-            False, "pass", 0, f"minute {minute} outside {ENTRY_MIN_MINUTE}-{ENTRY_MAX_MINUTE}"
-        )
-    tier = league_tier(league)
-    if tier not in ALLOWED_TIERS:
-        return PlaybookDecision(False, "pass", 0, f"tier {tier} not in {ALLOWED_TIERS}")
+    min_min = int(_rule(rules, "entry_min_minute", ENTRY_MIN_MINUTE))
+    max_min = int(_rule(rules, "entry_max_minute", ENTRY_MAX_MINUTE))
+    if minute < min_min or minute > max_min:
+        return PlaybookDecision(False, "pass", 0, f"minute {minute} outside {min_min}-{max_min}")
+    tier = league_tier(league, rules)
+    allowed = tuple(_rule(rules, "allowed_tiers", ALLOWED_TIERS))
+    if tier not in allowed:
+        return PlaybookDecision(False, "pass", 0, f"tier {tier} not in {allowed}")
     if rem < 0:
         return PlaybookDecision(False, "pass", 0, "over already landed")
-    if not rem_allowed(rem, strike, tier):
-        return PlaybookDecision(False, "pass", 0, f"rem {rem} above playbook max {ENTRY_MAX_REM}")
+    max_rem = int(_rule(rules, "entry_max_rem", ENTRY_MAX_REM))
+    if not rem_allowed(rem, strike, tier, rules):
+        return PlaybookDecision(False, "pass", 0, f"rem {rem} above playbook max {max_rem}")
     if no_ask is None:
         return PlaybookDecision(False, "pass", 0, "no ask unavailable")
-    if no_ask < ENTRY_NO_PRICE_MIN or no_ask > ENTRY_NO_PRICE_MAX:
+    px_min = int(_rule(rules, "entry_no_price_min", ENTRY_NO_PRICE_MIN))
+    px_max = int(_rule(rules, "entry_no_price_max", ENTRY_NO_PRICE_MAX))
+    if no_ask < px_min or no_ask > px_max:
         return PlaybookDecision(
             False,
             "pass",
             0,
-            f"No ask {no_ask}¢ outside {ENTRY_NO_PRICE_MIN}-{ENTRY_NO_PRICE_MAX}",
+            f"No ask {no_ask}¢ outside {px_min}-{px_max}",
         )
     spread = _spread(no_bid, no_ask)
-    if spread is not None and spread > MAX_SPREAD_CENTS:
-        return PlaybookDecision(False, "pass", 0, f"spread {spread}¢ > {MAX_SPREAD_CENTS}¢")
+    max_spread = int(_rule(rules, "max_spread_cents", MAX_SPREAD_CENTS))
+    if spread is not None and spread > max_spread:
+        return PlaybookDecision(False, "pass", 0, f"spread {spread}¢ > {max_spread}¢")
 
     match_cap = MAX_CONTRACTS_PER_MATCH if max_match is None else int(max_match)
     day_cap = MAX_CONTRACTS_PER_DAY if max_day is None else int(max_day)
     remaining_match = match_cap - contracts_this_match
     remaining_day = day_cap - contracts_today
-    size = size_for_tier(tier, remaining_match, remaining_day)
+    size = size_for_tier(tier, remaining_match, remaining_day, rules)
     if size <= 0:
         return PlaybookDecision(False, "pass", 0, "match or daily contract cap reached")
 
-    stop_price = max(1, no_ask - STOP_PRICE_DROP_CENTS)
+    stop_drop = int(_rule(rules, "stop_price_drop_cents", STOP_PRICE_DROP_CENTS))
+    stop_price = max(1, no_ask - stop_drop)
     return PlaybookDecision(
         True,
         "buy_no",
@@ -214,22 +277,25 @@ def evaluate_exit(
     entry_price: Optional[int],
     has_position: bool,
     strike: Optional[float] = None,
+    rules: Optional[dict[str, Any]] = None,
 ) -> PlaybookDecision:
     if not has_position:
         return PlaybookDecision(False, "hold", 0, "no open position")
-    if FLATTEN_ON_GOAL and event_type == "goal":
+    if bool(_rule(rules, "flatten_on_goal", FLATTEN_ON_GOAL)) and event_type == "goal":
         return PlaybookDecision(True, "flatten", 0, "flatten on goal")
     if event_type == "full_time":
         return PlaybookDecision(True, "flatten", 0, "flatten at full-time")
+    flatten_at = int(_rule(rules, "flatten_rem_at", FLATTEN_REM_AT))
     ival = _as_int_rem(rem, strike) if rem is not None else None
-    if ival is not None and ival <= FLATTEN_REM_AT:
-        return PlaybookDecision(True, "flatten", 0, f"rem {ival} -> {FLATTEN_REM_AT} stop")
+    if ival is not None and ival <= flatten_at:
+        return PlaybookDecision(True, "flatten", 0, f"rem {ival} -> {flatten_at} stop")
     if rem is not None and rem < 0:
         return PlaybookDecision(True, "flatten", 0, "over landed; rem negative")
+    stop_drop = int(_rule(rules, "stop_price_drop_cents", STOP_PRICE_DROP_CENTS))
     if (
         entry_price is not None
         and no_mid is not None
-        and (entry_price - no_mid) >= STOP_PRICE_DROP_CENTS
+        and (entry_price - no_mid) >= stop_drop
     ):
         return PlaybookDecision(
             True,

@@ -1,4 +1,4 @@
-import type { CostSummary, Decision, Game, Portfolio, ReplayFixture, Status } from "./types";
+import type { CostSummary, Decision, Game, LearningPayload, Portfolio, ReplayFixture, Status } from "./types";
 
 const API = import.meta.env.DEV ? "" : import.meta.env.VITE_API_URL || "";
 
@@ -30,6 +30,8 @@ export const api = {
       pnl: Record<string, unknown>;
       caps: import("./types").Caps;
       paper: boolean;
+      reflection?: import("./types").Reflection | null;
+      brief?: { id: number; text: string; token_estimate: number; phase: string } | null;
     }>(`/api/games/${id}`),
   portfolio: () => req<Portfolio>("/api/portfolio"),
   costs: () => req<{ today: CostSummary; all: CostSummary }>("/api/costs"),
@@ -52,6 +54,10 @@ export const api = {
       pnl: Record<string, unknown>;
       fired: string[];
     }>("/api/replay", { method: "POST", body: JSON.stringify(body) }),
+  learning: () => req<LearningPayload>("/api/learning"),
+  approveProposal: (id: number) => req(`/api/learning/proposals/${id}/approve`, { method: "POST" }),
+  rejectProposal: (id: number) => req(`/api/learning/proposals/${id}/reject`, { method: "POST" }),
+  shadowProposal: (id: number) => req(`/api/learning/proposals/${id}/shadow`, { method: "POST" }),
   watch: (body: {
     home_team: string;
     away_team: string;
