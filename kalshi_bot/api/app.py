@@ -18,6 +18,17 @@ from kalshi_bot.store import Store
 from kalshi_bot.watcher.discovery import game_id_for, infer_league, infer_teams
 
 
+class WatchBody(BaseModel):
+    home_team: str
+    away_team: str
+    kickoff_ts: Optional[int] = None
+    league: Optional[str] = None
+    tickers: list[str] = []
+    fotmob_id: Optional[str] = None
+    espn_id: Optional[str] = None
+    event_ticker: Optional[str] = None
+
+
 def create_app(settings: Optional[Settings] = None, store: Optional[Store] = None) -> FastAPI:
     settings = settings or Settings()
     store = store or Store(settings.sqlite_path)
@@ -135,38 +146,32 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
         store.set_paper(False)
         return {"paper": False}
 
-    class WatchBody(BaseModel):
-        home_team: str
-        away_team: str
-        kickoff_ts: Optional[int] = None
-        league: Optional[str] = None
-        tickers: list[str] = []
-        fotmob_id: Optional[str] = None
-        espn_id: Optional[str] = None
-        event_ticker: Optional[str] = None
-
     @app.post("/api/games/watch")
-    def watch(body: WatchBody) -> dict[str, Any]:
-        gid = body.event_ticker or game_id_for(
-            {"event_ticker": body.event_ticker, "ticker": (body.tickers[0] if body.tickers else ""), "title": f"{body.home_team} vs {body.away_team}"}
+    def watch(payload: WatchBody) -> dict[str, Any]:
+        gid = payload.event_ticker or game_id_for(
+            {
+                "event_ticker": payload.event_ticker,
+                "ticker": (payload.tickers[0] if payload.tickers else ""),
+                "title": f"{payload.home_team} vs {payload.away_team}",
+            }
         )
         if not gid:
             gid = f"manual-{int(time.time())}"
         store.upsert_game(
             {
                 "id": gid,
-                "kalshi_event_ticker": body.event_ticker or gid,
-                "home_team": body.home_team,
-                "away_team": body.away_team,
-                "league": body.league or infer_league({"ticker": body.tickers[0] if body.tickers else ""}),
-                "kickoff_ts": body.kickoff_ts or int(time.time()) + 3600,
+                "kalshi_event_ticker": payload.event_ticker or gid,
+                "home_team": payload.home_team,
+                "away_team": payload.away_team,
+                "league": payload.league or infer_league({"ticker": payload.tickers[0] if payload.tickers else ""}),
+                "kickoff_ts": payload.kickoff_ts or int(time.time()) + 3600,
                 "status": "upcoming",
-                "fotmob_id": body.fotmob_id,
-                "espn_id": body.espn_id,
+                "fotmob_id": payload.fotmob_id,
+                "espn_id": payload.espn_id,
             }
         )
-        for ticker in body.tickers:
-            home, away = infer_teams({"title": f"{body.home_team} vs {body.away_team}", "ticker": ticker})
+        for ticker in payload.tickers:
+            home, away = infer_teams({"title": f"{payload.home_team} vs {payload.away_team}", "ticker": ticker})
             store.upsert_market({"ticker": ticker, "game_id": gid, "title": f"{home} vs {away}"})
         return {"game": store.get_game(gid)}
 
