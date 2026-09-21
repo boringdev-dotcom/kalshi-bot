@@ -72,6 +72,12 @@ export type Decision = {
   reason: string;
   paper: number;
   created_at: number;
+  outcome?: string | null;
+  process_grade?: string | null;
+  realized_pnl_cents?: number | null;
+  counterfactual_pnl_cents?: number | null;
+  confidence?: number | null;
+  playbook_version?: number | null;
 };
 
 export type Order = {
@@ -149,6 +155,64 @@ export type ReplayFixture = {
   away_team?: string;
   league?: string;
   date?: string;
+};
+
+export type Lesson = {
+  id: number;
+  condition: string;
+  observation: string;
+  suggested_action: string;
+  status: string;
+  confidence: number;
+  support_count: number;
+  evidence_game: string | null;
+  league: string | null;
+};
+
+export type Calibration = {
+  id: number;
+  agent: string;
+  league: string | null;
+  n: number;
+  brier: number;
+  hit_rate: number | null;
+};
+
+export type Proposal = {
+  id: number;
+  status: string;
+  title: string;
+  motivation: string | null;
+  lesson_id: number | null;
+  diff: Record<string, unknown>;
+  backtest: Record<string, unknown>;
+  created_at: number;
+  decided_at: number | null;
+};
+
+export type Reflection = {
+  id: number;
+  game_id: string;
+  notes: string | null;
+  raw?: {
+    notes?: string;
+    decisions?: Array<{ id?: number; verdict?: string; would_do_differently?: string }>;
+    lessons?: unknown[];
+    source?: string;
+  } | null;
+};
+
+export type LearningPayload = {
+  lessons: Lesson[];
+  calibration: Calibration[];
+  proposals: Proposal[];
+  playbook: {
+    current: number;
+    versions: Array<{ version: number; notes: string | null; body?: Record<string, unknown> }>;
+    rules: Record<string, unknown>;
+  };
+  hard_cap_keys: string[];
+  propose_only: boolean;
 };
 
 export type CostSummary = {

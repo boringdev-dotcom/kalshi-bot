@@ -140,5 +140,49 @@ def seed_demo(store: Store, settings: Settings | None = None) -> dict:
             },
         )
 
+    from kalshi_bot.learning.brief import compile_brief
+    from kalshi_bot.learning.lessons import add_hypothesis
+    from kalshi_bot.learning.playbook_version import ensure_playbook_v1
+    from kalshi_bot.learning.proposals import HardCapError, create_proposal
+
+    ensure_playbook_v1(store)
+    compile_brief(store, store.get_game(upcoming_id) or {"id": upcoming_id}, phase="kickoff")
     replay = replay_fixture(store, resolve_fixture(fixture_id="milan-lecce-2026-09-20"), settings)
+    add_hypothesis(
+        store,
+        condition="league=serie_a;minute>=70;rem<=2",
+        observation="late Serie A unders held more often in the journal",
+        suggested_action="prefer playbook entries after 70' in Serie A",
+        evidence_game=replay["game"]["id"],
+        league="serie_a",
+    )
+    add_hypothesis(
+        store,
+        condition="league=la_liga;minute>=60;rem<=1.5",
+        observation="El Clasico demo board was inside the window",
+        suggested_action="keep the rem<=2 rule; do not chase earlier",
+        evidence_game=live_id,
+        league="la_liga",
+    )
+    if not store.list_proposals(status="pending"):
+        try:
+            create_proposal(
+                store,
+                title="Nudge Serie A entry minute to 68",
+                motivation="Demo inbox: reflection on Milan vs Lecce. Hard caps are not in this diff.",
+                diff={"entry_min_minute": 68},
+            )
+        except HardCapError:
+            pass
+        except Exception:
+            store.add_proposal(
+                {
+                    "title": "Nudge Serie A entry minute to 68",
+                    "motivation": "Demo inbox placeholder (backtest skipped).",
+                    "diff": {"entry_min_minute": 68},
+                    "backtest": {"champion": {}, "challenger": {}, "games": ["milan-lecce-2026-09-20"]},
+                }
+            )
+    store.upsert_calibration("kalshi", "serie_a", 8, 0.18, 0.62)
+    store.upsert_calibration("kalshi", None, 12, 0.21, 0.58)
     return {"replay_game_id": replay["game"]["id"], "replay_decisions": len(replay["decisions"])}

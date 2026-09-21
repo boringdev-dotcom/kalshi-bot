@@ -233,6 +233,20 @@ button, input, select {
 .chip.would-place { background: #2a3a14; color: var(--lime); }
 .chip.would-skip { color: var(--muted); }
 .chip.would-flatten { background: #3a1814; color: var(--coral); }
+.chip.grade-skill { background: #2a3a14; color: var(--lime); }
+.chip.grade-unlucky { background: #3a3014; color: var(--gold); }
+.chip.grade-luck { background: #1d2a28; color: var(--mint); }
+.chip.grade-error { background: #3a1814; color: var(--coral); }
+.chip.hypothesis { color: var(--muted); }
+.chip.active { background: #2a3a14; color: var(--lime); }
+.chip.demoted, .chip.retired { color: var(--coral); }
+.learning-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+.proposal {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+.proposal .controls { margin-top: 8px; }
+.version-list { color: var(--muted); padding-left: 18px; }
 .limits-form { grid-template-columns: repeat(4, minmax(120px, 1fr)); align-items: end; max-width: 880px; }
 .limits-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
 .replay-form { grid-template-columns: 2fr 1fr auto; }

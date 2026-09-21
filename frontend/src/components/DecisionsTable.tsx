@@ -4,6 +4,7 @@ export function DecisionsTable({ decisions }: { decisions: Decision[] }) {
   if (!decisions.length) {
     return <div className="empty">No would-place / would-skip / would-flatten rows yet.</div>;
   }
+  const graded = decisions.some((row) => row.process_grade || row.outcome);
   return (
     <table className="table">
       <thead>
@@ -14,6 +15,8 @@ export function DecisionsTable({ decisions }: { decisions: Decision[] }) {
           <th>Size</th>
           <th>Px</th>
           <th>Rem</th>
+          {graded ? <th>Grade</th> : null}
+          {graded ? <th>Outcome</th> : null}
           <th>Reason</th>
         </tr>
       </thead>
@@ -28,6 +31,12 @@ export function DecisionsTable({ decisions }: { decisions: Decision[] }) {
             <td>{row.size}</td>
             <td>{row.price != null ? `${row.price}¢` : "—"}</td>
             <td>{row.rem != null ? row.rem : "—"}</td>
+            {graded ? (
+              <td>
+                {row.process_grade ? <span className={`chip grade-${row.process_grade}`}>{row.process_grade}</span> : "—"}
+              </td>
+            ) : null}
+            {graded ? <td>{row.outcome || "—"}</td> : null}
             <td>{row.reason}</td>
           </tr>
         ))}

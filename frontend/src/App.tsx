@@ -4,6 +4,7 @@ import { api } from "./api";
 import { Layout } from "./components/Layout";
 import { Costs } from "./pages/Costs";
 import { GameDetail } from "./pages/GameDetail";
+import { Learning } from "./pages/Learning";
 import { Live } from "./pages/Live";
 import { Portfolio } from "./pages/Portfolio";
 import { Replay } from "./pages/Replay";
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="/" element={<Upcoming games={upcoming} status={status} reload={reload} />} />
         <Route path="/live" element={<Live games={live} status={status} reload={reload} />} />
         <Route path="/replay" element={<Replay status={status} reload={reload} />} />
+        <Route path="/learning" element={<Learning />} />
         <Route path="/games/:id" element={<GameDetail tick={tick} />} />
         <Route path="/portfolio" element={<Portfolio portfolio={portfolio} status={status} reload={reload} />} />
         <Route path="/costs" element={<Costs today={today} all={allCosts} />} />
