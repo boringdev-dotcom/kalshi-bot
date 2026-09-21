@@ -6,7 +6,7 @@ import logging
 from typing import Any, Optional
 
 from kalshi_bot.kalshi.rest import KalshiClient
-from kalshi_bot.playbook import MAX_CONTRACTS_PER_DAY, MAX_CONTRACTS_PER_MATCH
+from kalshi_bot.limits import get_limits
 from kalshi_bot.store import Store
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,8 @@ def contracts_used(store: Store, game_id: str, day_start_ts: int) -> tuple[int, 
 
 def remaining_caps(store: Store, game_id: str, day_start_ts: int) -> tuple[int, int]:
     used_match, used_day = contracts_used(store, game_id, day_start_ts)
-    return MAX_CONTRACTS_PER_MATCH - used_match, MAX_CONTRACTS_PER_DAY - used_day
+    limits = get_limits(store)
+    return limits["max_contracts_per_match"] - used_match, limits["max_contracts_per_day"] - used_day
 
 
 def submit_buy_no(
@@ -112,6 +113,7 @@ def flatten_position(
     reason: str,
     paper: bool,
     mark_stopped: bool = True,
+    price: Optional[int] = None,
 ) -> Optional[dict[str, Any]]:
     key = idempotency_key(game_id, ticker, event_id, "flatten")
     existing = store.find_order(key)
@@ -122,7 +124,8 @@ def flatten_position(
         return None
 
     count = position["count"]
-    price = max(1, 100 - (position.get("avg_price") or 50))
+    if price is None:
+        price = max(1, 100 - (position.get("avg_price") or 50))
     order = {
         "idempotency_key": key,
         "game_id": game_id,

@@ -121,6 +121,21 @@ CREATE TABLE IF NOT EXISTS control (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    event_id INTEGER,
+    agent TEXT NOT NULL,
+    market_ticker TEXT,
+    action TEXT NOT NULL,
+    size INTEGER,
+    price INTEGER,
+    rem REAL,
+    reason TEXT,
+    paper INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+);
 """
 
 
@@ -139,6 +154,27 @@ class Store:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        self._execute(
+            """
+            CREATE TABLE IF NOT EXISTS decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                event_id INTEGER,
+                agent TEXT NOT NULL,
+                market_ticker TEXT,
+                action TEXT NOT NULL,
+                size INTEGER,
+                price INTEGER,
+                rem REAL,
+                reason TEXT,
+                paper INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
 
     def close(self) -> None:
         self._conn.close()
@@ -177,6 +213,55 @@ class Store:
 
     def set_paper(self, paper: bool) -> None:
         self.set_control("paper_mode", "true" if paper else "false")
+
+    def pause_reason(self) -> Optional[str]:
+        return self.get_control("pause_reason")
+
+    def set_pause_reason(self, reason: Optional[str]) -> None:
+        if reason:
+            self.set_control("pause_reason", reason)
+        else:
+            self._execute("DELETE FROM control WHERE key=?", ("pause_reason",))
+
+    def add_decision(self, row: dict[str, Any]) -> int:
+        cur = self._execute(
+            """
+            INSERT INTO decisions(
+                game_id, event_id, agent, market_ticker, action,
+                size, price, rem, reason, paper, created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                row["game_id"],
+                row.get("event_id"),
+                row.get("agent") or "kalshi",
+                row.get("market_ticker"),
+                row["action"],
+                row.get("size") or 0,
+                row.get("price"),
+                row.get("rem"),
+                row.get("reason") or "",
+                1 if row.get("paper", True) else 0,
+                _now(),
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def decisions_for_game(self, game_id: str) -> list[dict[str, Any]]:
+        return self._query("SELECT * FROM decisions WHERE game_id=? ORDER BY id", (game_id,))
+
+    def recent_decisions(self, limit: int = 50) -> list[dict[str, Any]]:
+        return self._query("SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (limit,))
+
+    def replay_games(self) -> list[dict[str, Any]]:
+        rows = self._query(
+            "SELECT * FROM games WHERE id LIKE 'REPLAY-%' OR status='replay' ORDER BY updated_at DESC"
+        )
+        return [self._hydrate_game(row) for row in rows]
+
+    def clear_game_journal(self, game_id: str) -> None:
+        for table in ("decisions", "orders", "positions", "events", "agent_verdicts", "agent_memory"):
+            self._execute(f"DELETE FROM {table} WHERE game_id=?", (game_id,))
 
     def upsert_game(self, game: dict[str, Any]) -> None:
         now = _now()

@@ -36,4 +36,20 @@ def test_watch_and_controls(tmp_path):
     assert any(g["home_team"] == "Real Madrid" for g in live)
     costs = client.get("/api/costs").json()
     assert costs["all"]["calls"] >= 2
+    status = client.get("/api/status").json()
+    assert status["paper"] is True
+    assert status["limits"]["max_contracts_per_match"] == 150
+    port = client.get("/api/portfolio").json()
+    assert "remaining_day" in port["caps"]
+    assert port["caps"]["used_today"] >= 0
+    fixtures = client.get("/api/replay/fixtures").json()["fixtures"]
+    assert any(f["id"] == "milan-lecce-2026-09-20" for f in fixtures)
+    replayed = client.post("/api/replay", json={"fixture_id": "milan-lecce-2026-09-20"}).json()
+    assert replayed["paper"] is True
+    assert any(d["action"] == "would-place" for d in replayed["decisions"])
+    limits = client.post(
+        "/api/control/limits",
+        json={"max_contracts_per_match": 40, "max_contracts_per_day": 80, "max_daily_loss_cents": 900},
+    ).json()
+    assert limits["limits"]["max_contracts_per_match"] == 40
     store.close()

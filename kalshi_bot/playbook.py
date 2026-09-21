@@ -151,6 +151,8 @@ def evaluate_entry(
     phase: str = "second_half",
     strike: Optional[float] = None,
     is_1h: bool = False,
+    max_match: Optional[int] = None,
+    max_day: Optional[int] = None,
 ) -> PlaybookDecision:
     if already_stopped and NO_REENTRY_AFTER_STOP:
         return PlaybookDecision(False, "pass", 0, "no re-entry after stop")
@@ -182,8 +184,10 @@ def evaluate_entry(
     if spread is not None and spread > MAX_SPREAD_CENTS:
         return PlaybookDecision(False, "pass", 0, f"spread {spread}¢ > {MAX_SPREAD_CENTS}¢")
 
-    remaining_match = MAX_CONTRACTS_PER_MATCH - contracts_this_match
-    remaining_day = MAX_CONTRACTS_PER_DAY - contracts_today
+    match_cap = MAX_CONTRACTS_PER_MATCH if max_match is None else int(max_match)
+    day_cap = MAX_CONTRACTS_PER_DAY if max_day is None else int(max_day)
+    remaining_match = match_cap - contracts_this_match
+    remaining_day = day_cap - contracts_today
     size = size_for_tier(tier, remaining_match, remaining_day)
     if size <= 0:
         return PlaybookDecision(False, "pass", 0, "match or daily contract cap reached")

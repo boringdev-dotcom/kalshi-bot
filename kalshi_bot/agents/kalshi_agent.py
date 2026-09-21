@@ -8,11 +8,11 @@ from typing import Any
 
 from kalshi_bot.agents.grok import GrokClient, extract_json, message_content
 from kalshi_bot.agents.tools import KALSHI_TOOLS, ToolContext, dispatch
-from kalshi_bot.execution import flatten_position, remaining_caps, submit_buy_no
+from kalshi_bot.decisions import WOULD_FLATTEN, WOULD_PLACE, WOULD_SKIP, record_decision
+from kalshi_bot.execution import flatten_position, submit_buy_no
+from kalshi_bot.limits import cap_usage, get_limits
 from kalshi_bot.models import PunditVerdict
 from kalshi_bot.playbook import (
-    MAX_CONTRACTS_PER_DAY,
-    MAX_CONTRACTS_PER_MATCH,
     constraints_text,
     evaluate_entry,
     evaluate_exit,
@@ -123,12 +123,27 @@ def _apply_hard_stops(store: Store, ctx: ToolContext, payload: dict[str, Any]) -
             strike=market.get("strike"),
         )
         if decision.allowed and decision.action == "flatten":
+            flatten_px = int(no_mid) if no_mid is not None else None
             flatten_position(
                 store,
                 ctx.client,
                 game_id=ctx.game["id"],
                 ticker=position["market_ticker"],
                 event_id=ctx.event.get("id"),
+                reason=decision.reason,
+                paper=ctx.paper,
+                price=flatten_px,
+            )
+            record_decision(
+                store,
+                game_id=ctx.game["id"],
+                event_id=ctx.event.get("id"),
+                agent="kalshi",
+                market_ticker=position["market_ticker"],
+                action=WOULD_FLATTEN,
+                size=position["count"],
+                price=flatten_px,
+                rem=market.get("rem"),
                 reason=decision.reason,
                 paper=ctx.paper,
             )
@@ -140,17 +155,29 @@ def _playbook_only(
     payload: dict[str, Any],
     verdicts: list[PunditVerdict],
 ) -> list[dict[str, Any]]:
-    if ctx.paused:
-        return [{"action": "hold", "reason": "paused"}]
     actions: list[dict[str, Any]] = []
-    match_left, day_left = remaining_caps(store, ctx.game["id"], ctx.day_start_ts)
-    used_match = MAX_CONTRACTS_PER_MATCH - match_left
-    used_day = MAX_CONTRACTS_PER_DAY - day_left
+    usage = cap_usage(store, ctx.game["id"], ctx.day_start_ts)
+    used_match = usage["used_match"]
+    used_day = usage["used_today"]
+    limits = get_limits(store)
     by_ticker = {v.ticker: v for v in verdicts}
+    if ctx.paused:
+        record_decision(
+            store,
+            game_id=ctx.game["id"],
+            event_id=ctx.event.get("id"),
+            agent="kalshi",
+            action=WOULD_SKIP,
+            reason=store.pause_reason() or "paused",
+            paper=ctx.paper,
+        )
+        return [{"action": "hold", "reason": store.pause_reason() or "paused"}]
     for market in payload.get("markets") or []:
         ticker = market.get("ticker")
         position = store.get_position(ticker) if ticker else None
         verdict = by_ticker.get(ticker)
+        rem = market.get("rem")
+        ask = market.get("no_ask")
         if verdict and verdict.verdict == "flatten_hint" and position and position["count"] > 0:
             result = flatten_position(
                 store,
@@ -160,20 +187,43 @@ def _playbook_only(
                 event_id=ctx.event.get("id"),
                 reason=verdict.reason,
                 paper=ctx.paper,
+                price=int(ask) if ask is not None else None,
+            )
+            record_decision(
+                store,
+                game_id=ctx.game["id"],
+                event_id=ctx.event.get("id"),
+                agent="kalshi",
+                market_ticker=ticker,
+                action=WOULD_FLATTEN,
+                size=position["count"],
+                price=ask,
+                rem=rem,
+                reason=verdict.reason,
+                paper=ctx.paper,
             )
             if result:
                 actions.append(result)
             continue
-        if not verdict or verdict.verdict != "real_bet":
-            continue
-        if position and position.get("stopped"):
-            continue
         if position and position["count"] > 0:
+            record_decision(
+                store,
+                game_id=ctx.game["id"],
+                event_id=ctx.event.get("id"),
+                agent="kalshi",
+                market_ticker=ticker,
+                action=WOULD_SKIP,
+                size=position["count"],
+                price=ask,
+                rem=rem,
+                reason="already holding",
+                paper=ctx.paper,
+            )
             continue
         decision = evaluate_entry(
             minute=int((payload.get("state") or {}).get("minute") or 0),
-            rem=float(market.get("rem") if market.get("rem") is not None else 99),
-            no_ask=market.get("no_ask"),
+            rem=float(rem if rem is not None else 99),
+            no_ask=ask,
             no_bid=market.get("no_bid"),
             league=ctx.game.get("league"),
             already_stopped=bool(position and position.get("stopped")),
@@ -186,8 +236,23 @@ def _playbook_only(
                 series=market.get("series_ticker"),
                 title=market.get("title"),
             ),
+            max_match=limits["max_contracts_per_match"],
+            max_day=limits["max_contracts_per_day"],
         )
         if not decision.allowed:
+            record_decision(
+                store,
+                game_id=ctx.game["id"],
+                event_id=ctx.event.get("id"),
+                agent="kalshi",
+                market_ticker=ticker,
+                action=WOULD_SKIP,
+                size=0,
+                price=ask,
+                rem=rem,
+                reason=decision.reason,
+                paper=ctx.paper,
+            )
             continue
         result = submit_buy_no(
             store,
@@ -196,7 +261,20 @@ def _playbook_only(
             ticker=ticker,
             event_id=ctx.event.get("id"),
             count=decision.size,
-            price=int(market["no_ask"]),
+            price=int(ask),
+            reason=decision.reason,
+            paper=ctx.paper,
+        )
+        record_decision(
+            store,
+            game_id=ctx.game["id"],
+            event_id=ctx.event.get("id"),
+            agent="kalshi",
+            market_ticker=ticker,
+            action=WOULD_PLACE,
+            size=decision.size,
+            price=ask,
+            rem=rem,
             reason=decision.reason,
             paper=ctx.paper,
         )

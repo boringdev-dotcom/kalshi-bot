@@ -8,6 +8,7 @@ from typing import Any
 
 from kalshi_bot.agents.grok import GrokClient, extract_json, message_content
 from kalshi_bot.agents.tools import PUNDIT_TOOLS, ToolContext, dispatch
+from kalshi_bot.decisions import persist_pundit_verdicts
 from kalshi_bot.models import PunditVerdict
 from kalshi_bot.store import Store
 
@@ -35,8 +36,11 @@ def run_pundit(
         {"role": "user", "content": json.dumps(payload)},
     ]
     if not grok.available():
-        logger.warning("XAI_API_KEY missing; Pundit skipped")
-        return _heuristic(payload)
+        logger.warning("XAI_API_KEY missing; Pundit using heuristic")
+        verdicts = _heuristic(payload)
+        persist_pundit_verdicts(store, ctx.game["id"], ctx.event.get("id"), verdicts, paper=ctx.paper)
+        store.set_memory(ctx.game["id"], "pundit", "heuristic fallback (no XAI_API_KEY)")
+        return verdicts
 
     for _ in range(8):
         data = grok.complete(messages, PUNDIT_TOOLS, agent="pundit", game_id=ctx.game["id"])
