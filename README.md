@@ -49,7 +49,7 @@ Vite proxies `/api` and `/ws` to `http://127.0.0.1:8000`.
 
 ## Playbook
 
-`docs/pattern-report.md` was not available at rebuild time. `kalshi_bot/playbook.py` uses conservative placeholders: enter after minute 70, rem ≤ 1.0, No ask 78–93¢, flatten on goal / rem drop / 8¢ price stop, no re-entry after stop, 5 contracts/match and 15/day. Review before going live.
+Playbook is seeded from `docs/pattern-report.md`: buy No only, minute 60–92, rem ≤ 2 (rem=3 only on Over ≥ 4.5 tier 1), No ask 80–92¢, flatten on goal / rem→1 / −12¢, 150 contracts/match and 600/day, tier 1–2 only, 1H totals off, paper default. Portfolio GETs are signed path-only.
 
 ## Render
 

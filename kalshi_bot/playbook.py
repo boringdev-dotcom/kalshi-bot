@@ -1,9 +1,8 @@
-"""Sizing, stops, and entry gates.
+"""Sizing, stops, and entry gates seeded from Phase 0 pattern report.
 
-Phase 0 pattern report was not present at
-`docs/pattern-report.md`, so these are conservative placeholders.
-They bias toward late-game, low-rem, high-priced No (under) entries
-and flatten immediately on a goal or rem drop.
+Source: docs/pattern-report.md proposed playbook (2026-09-21).
+Buy No only. History's HT / rem≥3 / 95¢ / 2,000-contract habit is
+intentionally not copied — that slice lost money.
 """
 
 from __future__ import annotations
@@ -11,49 +10,70 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from kalshi_bot.rem import playbook_rem
 
-# Conservative placeholders (no historical fill study available).
-ENTRY_MIN_MINUTE = 70
-ENTRY_MAX_REM = 1.0
-ENTRY_NO_PRICE_MIN = 78
-ENTRY_NO_PRICE_MAX = 93
+# Seeded from docs/pattern-report.md "Proposed playbook".
+SIDE = "no"
+ENTRY_MIN_MINUTE = 60
+ENTRY_MAX_MINUTE = 92
+ENTRY_MAX_REM = 2
+REM_3_OK_STRIKE = 4.5  # rem=3 allowed only on Over >= 4.5 in tier 1
+ENTRY_NO_PRICE_MIN = 80
+ENTRY_NO_PRICE_MAX = 92
 MAX_SPREAD_CENTS = 6
-STOP_PRICE_DROP_CENTS = 8
+STOP_PRICE_DROP_CENTS = 12
 FLATTEN_ON_GOAL = True
-FLATTEN_ON_REM_DROP = True
+FLATTEN_REM_AT = 1
 NO_REENTRY_AFTER_STOP = True
-MAX_CONTRACTS_PER_MATCH = 5
-MAX_CONTRACTS_PER_DAY = 15
+MAX_CONTRACTS_PER_MATCH = 150
+MAX_CONTRACTS_PER_MATCH_HARD = 250
+MAX_CONTRACTS_PER_DAY = 600
+ALLOWED_TIERS = (1, 2)
+SKIP_1H_TOTALS = True
+PAPER_MODE_DEFAULT = True
 
-TIER_SIZE = {1: 3, 2: 2, 3: 1}
+# Clip size near historical medians (tier 1 p50=103, tier 2 p50=27), under the 150/match cap.
+TIER_SIZE = {1: 100, 2: 25}
 
 LEAGUE_TIERS = {
     "premier_league": 1,
     "epl": 1,
     "ucl": 1,
     "champions_league": 1,
+    "world_cup": 1,
     "la_liga": 1,
     "serie_a": 1,
-    "bundesliga": 2,
-    "ligue_1": 2,
-    "eredivisie": 3,
-    "mls": 3,
-    "championship": 3,
+    "bundesliga": 1,
+    "ligue_1": 1,
+    "mls": 2,
+    "uel": 2,
+    "europa_league": 2,
+    "liga_mx": 2,
+    "eredivisie": 2,
+    "championship": 2,
+    "liga_portugal": 2,
+    "nwsl": 3,
+    "uwcl": 3,
 }
 
 PLAYBOOK_NOTES = {
-    "source": "conservative placeholders",
-    "reason": "docs/pattern-report.md was missing at rebuild time",
+    "source": "docs/pattern-report.md proposed playbook",
+    "side": SIDE,
     "entry_min_minute": ENTRY_MIN_MINUTE,
+    "entry_max_minute": ENTRY_MAX_MINUTE,
     "entry_max_rem": ENTRY_MAX_REM,
+    "rem_3_ok_strike": REM_3_OK_STRIKE,
     "entry_no_price_min": ENTRY_NO_PRICE_MIN,
     "entry_no_price_max": ENTRY_NO_PRICE_MAX,
     "stop_price_drop_cents": STOP_PRICE_DROP_CENTS,
     "flatten_on_goal": FLATTEN_ON_GOAL,
-    "flatten_on_rem_drop": FLATTEN_ON_REM_DROP,
+    "flatten_rem_at": FLATTEN_REM_AT,
     "no_reentry_after_stop": NO_REENTRY_AFTER_STOP,
     "max_contracts_per_match": MAX_CONTRACTS_PER_MATCH,
     "max_contracts_per_day": MAX_CONTRACTS_PER_DAY,
+    "allowed_tiers": list(ALLOWED_TIERS),
+    "skip_1h_totals": SKIP_1H_TOTALS,
+    "paper_mode_default": PAPER_MODE_DEFAULT,
     "tier_size": TIER_SIZE,
 }
 
@@ -80,9 +100,37 @@ def _spread(no_bid: Optional[int], no_ask: Optional[int]) -> Optional[int]:
     return int(no_ask) - int(no_bid)
 
 
+def _as_int_rem(rem: float, strike: Optional[float] = None) -> int:
+    """Accept integer playbook rem or float remaining_goals (strike - goals)."""
+    if strike is not None:
+        goals = max(0, int(round(float(strike) - float(rem))))
+        return playbook_rem(strike, goals)
+    if rem == int(rem):
+        return int(rem)
+    if rem < 0:
+        return int(rem)
+    return int(rem) + 1
+
+
+def rem_allowed(rem: float, strike: Optional[float], tier: int) -> bool:
+    ival = _as_int_rem(rem, strike)
+    if ival <= ENTRY_MAX_REM:
+        return True
+    if (
+        ival == 3
+        and strike is not None
+        and float(strike) >= REM_3_OK_STRIKE
+        and tier == 1
+    ):
+        return True
+    return False
+
+
 def size_for_tier(tier: int, remaining_match_cap: int, remaining_day_cap: int) -> int:
-    raw = TIER_SIZE.get(tier, 1)
-    return max(0, min(raw, remaining_match_cap, remaining_day_cap))
+    if tier not in ALLOWED_TIERS:
+        return 0
+    raw = TIER_SIZE.get(tier, 0)
+    return max(0, min(raw, remaining_match_cap, remaining_day_cap, MAX_CONTRACTS_PER_MATCH_HARD))
 
 
 def evaluate_entry(
@@ -96,17 +144,26 @@ def evaluate_entry(
     contracts_this_match: int,
     contracts_today: int,
     phase: str = "second_half",
+    strike: Optional[float] = None,
+    is_1h: bool = False,
 ) -> PlaybookDecision:
     if already_stopped and NO_REENTRY_AFTER_STOP:
         return PlaybookDecision(False, "pass", 0, "no re-entry after stop")
     if phase == "full_time":
         return PlaybookDecision(False, "pass", 0, "match is finished")
-    if minute < ENTRY_MIN_MINUTE:
-        return PlaybookDecision(False, "pass", 0, f"minute {minute} < {ENTRY_MIN_MINUTE}")
-    if rem > ENTRY_MAX_REM:
-        return PlaybookDecision(False, "pass", 0, f"rem {rem} > {ENTRY_MAX_REM}")
+    if SKIP_1H_TOTALS and is_1h:
+        return PlaybookDecision(False, "pass", 0, "1H totals off until more sample")
+    if minute < ENTRY_MIN_MINUTE or minute > ENTRY_MAX_MINUTE:
+        return PlaybookDecision(
+            False, "pass", 0, f"minute {minute} outside {ENTRY_MIN_MINUTE}-{ENTRY_MAX_MINUTE}"
+        )
+    tier = league_tier(league)
+    if tier not in ALLOWED_TIERS:
+        return PlaybookDecision(False, "pass", 0, f"tier {tier} not in {ALLOWED_TIERS}")
     if rem < 0:
         return PlaybookDecision(False, "pass", 0, "over already landed")
+    if not rem_allowed(rem, strike, tier):
+        return PlaybookDecision(False, "pass", 0, f"rem {rem} above playbook max {ENTRY_MAX_REM}")
     if no_ask is None:
         return PlaybookDecision(False, "pass", 0, "no ask unavailable")
     if no_ask < ENTRY_NO_PRICE_MIN or no_ask > ENTRY_NO_PRICE_MAX:
@@ -122,7 +179,7 @@ def evaluate_entry(
 
     remaining_match = MAX_CONTRACTS_PER_MATCH - contracts_this_match
     remaining_day = MAX_CONTRACTS_PER_DAY - contracts_today
-    size = size_for_tier(league_tier(league), remaining_match, remaining_day)
+    size = size_for_tier(tier, remaining_match, remaining_day)
     if size <= 0:
         return PlaybookDecision(False, "pass", 0, "match or daily contract cap reached")
 
@@ -132,8 +189,8 @@ def evaluate_entry(
         "buy_no",
         size,
         (
-            f"late-game under: min={minute} rem={rem} ask={no_ask}¢ "
-            f"tier={league_tier(league)} size={size}"
+            f"buy No: min={minute} rem={rem} ask={no_ask}¢ "
+            f"tier={tier} size={size}"
         ),
         stop_price=stop_price,
     )
@@ -147,6 +204,7 @@ def evaluate_exit(
     no_mid: Optional[float],
     entry_price: Optional[int],
     has_position: bool,
+    strike: Optional[float] = None,
 ) -> PlaybookDecision:
     if not has_position:
         return PlaybookDecision(False, "hold", 0, "no open position")
@@ -154,8 +212,9 @@ def evaluate_exit(
         return PlaybookDecision(True, "flatten", 0, "flatten on goal")
     if event_type == "full_time":
         return PlaybookDecision(True, "flatten", 0, "flatten at full-time")
-    if FLATTEN_ON_REM_DROP and rem is not None and prior_rem is not None and rem < prior_rem:
-        return PlaybookDecision(True, "flatten", 0, f"rem dropped {prior_rem} -> {rem}")
+    ival = _as_int_rem(rem, strike) if rem is not None else None
+    if ival is not None and ival <= FLATTEN_REM_AT:
+        return PlaybookDecision(True, "flatten", 0, f"rem {ival} -> {FLATTEN_REM_AT} stop")
     if rem is not None and rem < 0:
         return PlaybookDecision(True, "flatten", 0, "over landed; rem negative")
     if (
@@ -174,12 +233,12 @@ def evaluate_exit(
 
 def constraints_text() -> str:
     return (
-        "Playbook constraints (conservative placeholders; no Phase 0 pattern report):\n"
-        f"- Buy No only after minute {ENTRY_MIN_MINUTE}, rem <= {ENTRY_MAX_REM}, "
-        f"No ask in {ENTRY_NO_PRICE_MIN}-{ENTRY_NO_PRICE_MAX}¢, spread <= {MAX_SPREAD_CENTS}¢.\n"
-        f"- Max {MAX_CONTRACTS_PER_MATCH} contracts/match, {MAX_CONTRACTS_PER_DAY}/day.\n"
-        f"- Size by league tier: {TIER_SIZE}.\n"
-        f"- Flatten on goal, rem drop, full-time, or No mid down {STOP_PRICE_DROP_CENTS}¢ from entry.\n"
-        "- No re-entry after a stop on that market.\n"
-        "- Paper mode is the default until explicitly flipped live."
+        "Playbook constraints (seeded from docs/pattern-report.md):\n"
+        f"- Buy No only, minute {ENTRY_MIN_MINUTE}-{ENTRY_MAX_MINUTE}, "
+        f"rem <= {ENTRY_MAX_REM} (rem=3 only on Over >= {REM_3_OK_STRIKE} tier 1), "
+        f"No ask {ENTRY_NO_PRICE_MIN}-{ENTRY_NO_PRICE_MAX}¢.\n"
+        f"- Max {MAX_CONTRACTS_PER_MATCH} contracts/match, {MAX_CONTRACTS_PER_DAY}/day. "
+        f"Tiers {ALLOWED_TIERS} only; 1H totals off.\n"
+        f"- Flatten on goal, rem -> {FLATTEN_REM_AT}, or No mid down {STOP_PRICE_DROP_CENTS}¢.\n"
+        "- No re-entry after a stop. Paper mode is the default."
     )

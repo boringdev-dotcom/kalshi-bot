@@ -106,10 +106,10 @@ def _heuristic(payload: dict[str, Any]) -> list[PunditVerdict]:
         if rem is not None and rem < 0:
             verdict = "flatten_hint"
             reason = "over landed"
-        elif minute >= 70 and rem is not None and rem <= 1.0 and ask and 78 <= ask <= 93:
+        elif minute >= 60 and rem is not None and rem <= 2 and ask and 80 <= ask <= 92:
             verdict = "real_bet"
             reason = f"late quiet board rem={rem} ask={ask}"
-        elif minute >= 55 and rem is not None and rem <= 1.5:
+        elif minute >= 55 and rem is not None and rem <= 2.5:
             verdict = "watch"
             reason = f"approaching window rem={rem}"
         verdicts.append(
