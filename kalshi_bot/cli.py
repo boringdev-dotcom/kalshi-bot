@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from typing import Optional
 
 import typer
 import uvicorn
@@ -64,6 +65,50 @@ def seed_demo_cmd() -> None:
     seed_demo(store)
     store.close()
     logger.info("Seeded demo data into %s", settings.sqlite_path)
+
+
+@cli.command("replay")
+def replay_cmd(
+    fixture: Optional[str] = typer.Option(None, help="Recorded fixture id (default: milan-lecce-2026-09-20)"),
+    ticker: Optional[str] = typer.Option(None, help="Kalshi soccer-total ticker or Phase 0 fill ticker"),
+    date: Optional[str] = typer.Option(None, help="YYYY-MM-DD to pick a Phase 0 match"),
+    path: Optional[str] = typer.Option(None, help="Path to a replay JSON fixture"),
+) -> None:
+    """Replay a past scoreline paper-only: detector + Pundit/Kalshi would-decisions."""
+    from kalshi_bot.replay import resolve_fixture, replay_fixture
+    from kalshi_bot.store import Store
+
+    settings = _settings()
+    store = Store(settings.sqlite_path)
+    store.set_paper(True)
+    try:
+        spec = resolve_fixture(fixture_id=fixture, ticker=ticker, date=date, path=path)
+    except ValueError as exc:
+        logger.error("%s", exc)
+        raise typer.Exit(code=1) from exc
+    result = replay_fixture(store, spec, settings)
+    game = result["game"]
+    pnl = result["pnl"]
+    logger.info(
+        "Replay %s vs %s events=%s decisions=%s paper pnl=%s¢",
+        game.get("home_team"),
+        game.get("away_team"),
+        result["fired"],
+        len(result["decisions"]),
+        pnl.get("total_cents"),
+    )
+    for row in result["decisions"]:
+        logger.info(
+            "  %s %s %s size=%s px=%s rem=%s — %s",
+            row.get("agent"),
+            row.get("action"),
+            row.get("market_ticker"),
+            row.get("size"),
+            row.get("price"),
+            row.get("rem"),
+            row.get("reason"),
+        )
+    store.close()
 
 
 @cli.command("run-all")
