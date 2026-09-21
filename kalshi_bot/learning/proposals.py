@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from kalshi_bot.config import Settings
@@ -66,19 +68,24 @@ def backtest_diff(store: Store, diff: dict[str, Any], settings: Optional[Setting
     champ_rows: list[dict[str, Any]] = []
     chal_rows: list[dict[str, Any]] = []
     games: list[str] = []
-    for item in fixtures:
-        fixture = load_fixture_file(__import__("pathlib").Path(item["path"]))
-        with override_playbook(champion_rules):
-            champ = replay_fixture(store, fixture, settings, learn=False)
-            grade_game(store, champ["game"]["id"])
-            champ["decisions"] = store.decisions_for_game(champ["game"]["id"])
-            champ_rows.append(_metrics(champ))
-        with override_playbook(proposed):
-            chal = replay_fixture(store, fixture, settings, learn=False)
-            grade_game(store, chal["game"]["id"])
-            chal["decisions"] = store.decisions_for_game(chal["game"]["id"])
-            chal_rows.append(_metrics(chal))
-        games.append(item["id"])
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Store(str(Path(tmp) / "backtest.sqlite"))
+        try:
+            for item in fixtures:
+                fixture = load_fixture_file(Path(item["path"]))
+                with override_playbook(champion_rules):
+                    champ = replay_fixture(scratch, fixture, settings, learn=False)
+                    grade_game(scratch, champ["game"]["id"])
+                    champ["decisions"] = scratch.decisions_for_game(champ["game"]["id"])
+                    champ_rows.append(_metrics(champ))
+                with override_playbook(proposed):
+                    chal = replay_fixture(scratch, fixture, settings, learn=False)
+                    grade_game(scratch, chal["game"]["id"])
+                    chal["decisions"] = scratch.decisions_for_game(chal["game"]["id"])
+                    chal_rows.append(_metrics(chal))
+                games.append(item["id"])
+        finally:
+            scratch.close()
     def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         trades = sum(r["n_trades"] for r in rows)
         hits = sum(r["hit_rate"] * r["n_trades"] for r in rows)
