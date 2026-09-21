@@ -188,6 +188,16 @@ button, input, select {
   border-radius: 10px;
   padding: 10px 12px;
 }
+.form-error {
+  grid-column: 1 / -1;
+  color: var(--coral);
+  margin: 0;
+  font-size: 13px;
+}
+.form button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .timeline { display: flex; flex-direction: column; gap: 12px; }
 .event {
   border-left: 2px solid var(--lime);

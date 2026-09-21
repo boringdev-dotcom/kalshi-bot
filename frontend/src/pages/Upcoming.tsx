@@ -17,9 +17,13 @@ export function Upcoming({
   const [away, setAway] = useState("");
   const [league, setLeague] = useState("");
   const [ticker, setTicker] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const onAdd = (event: FormEvent) => {
     event.preventDefault();
+    setError("");
+    setBusy(true);
     api
       .watch({
         home_team: home,
@@ -34,7 +38,11 @@ export function Upcoming({
         setLeague("");
         setTicker("");
         reload();
-      });
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Watch request failed");
+      })
+      .finally(() => setBusy(false));
   };
 
   return (
@@ -58,7 +66,10 @@ export function Upcoming({
         <input placeholder="Away team" value={away} onChange={(e) => setAway(e.target.value)} required />
         <input placeholder="League" value={league} onChange={(e) => setLeague(e.target.value)} />
         <input placeholder="Kalshi ticker (optional)" value={ticker} onChange={(e) => setTicker(e.target.value)} />
-        <button className="ghost" type="submit">Watch game</button>
+        <button className="ghost" type="submit" disabled={busy}>
+          {busy ? "Watching…" : "Watch game"}
+        </button>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
       </form>
     </>
   );

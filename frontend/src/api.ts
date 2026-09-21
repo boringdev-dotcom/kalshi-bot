@@ -8,7 +8,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
   });
   if (!res.ok) {
-    throw new Error(`${res.status} ${path}`);
+    const detail = (await res.text()).trim();
+    throw new Error(detail || `${res.status} ${path}`);
   }
   return res.json() as Promise<T>;
 }
