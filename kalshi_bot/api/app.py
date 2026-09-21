@@ -15,7 +15,7 @@ from kalshi_bot.agents.orchestrator import day_start_ts
 from kalshi_bot.config import Settings
 from kalshi_bot.playbook import MAX_CONTRACTS_PER_DAY, MAX_CONTRACTS_PER_MATCH, PLAYBOOK_NOTES
 from kalshi_bot.store import Store
-from kalshi_bot.watcher.discovery import game_id_for, infer_league, infer_teams
+from kalshi_bot.watcher.discovery import infer_league, infer_teams
 
 
 class WatchBody(BaseModel):
@@ -148,15 +148,10 @@ def create_app(settings: Optional[Settings] = None, store: Optional[Store] = Non
 
     @app.post("/api/games/watch")
     def watch(payload: WatchBody) -> dict[str, Any]:
-        gid = payload.event_ticker or game_id_for(
-            {
-                "event_ticker": payload.event_ticker,
-                "ticker": (payload.tickers[0] if payload.tickers else ""),
-                "title": f"{payload.home_team} vs {payload.away_team}",
-            }
-        )
+        gid = payload.event_ticker
         if not gid:
-            gid = f"manual-{int(time.time())}"
+            slug = f"{payload.home_team}-{payload.away_team}".upper().replace(" ", "")[:28]
+            gid = f"MANUAL-{slug}-{int(time.time())}"
         store.upsert_game(
             {
                 "id": gid,

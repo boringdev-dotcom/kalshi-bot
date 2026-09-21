@@ -22,6 +22,7 @@ def test_watch_and_controls(tmp_path):
     assert added.status_code == 200
     game = added.json()["game"]
     assert game["home_team"] == "Liverpool"
+    assert game["id"].startswith("MANUAL-LIVERPOOL-EVERTON")
     live = client.get("/api/games/live").json()["games"]
     assert any(g["home_team"] == "Real Madrid" for g in live)
     costs = client.get("/api/costs").json()
