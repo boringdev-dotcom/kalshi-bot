@@ -1,0 +1,56 @@
+# Courtside on Render: the API (engine + REST + WebSocket) and the UI.
+#
+# These match the two existing web services in the Kalshi project so a
+# Blueprint can adopt them rather than create new ones.
+
+previewsEnabled: false
+
+services:
+  - type: web
+    name: kalshi-bot
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: master
+    buildCommand: uv sync --frozen && uv cache prune --ci
+    startCommand: uv run python -m src.main
+    healthCheckPath: /health
+    # Memory, learning, trade history and settings live in one SQLite file.
+    # Without this disk every deploy or restart would wipe them.
+    disk:
+      name: courtside-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /var/data/courtside.db
+      # The sign-in password. Render generates it; read it (or replace it with
+      # your own) on the service's Environment page.
+      - key: APP_PASSWORD
+        generateValue: true
+      - key: KALSHI_API_KEY_ID
+        sync: false
+      - key: KALSHI_PRIVATE_KEY_PEM
+        sync: false
+      - key: KALSHI_ENV
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ODDS_API_KEY
+        sync: false
+
+  - type: web
+    name: kalshi-bot-1
+    runtime: docker
+    plan: starter
+    region: oregon
+    branch: master
+    rootDir: frontend
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    envVars:
+      # Where nginx proxies /api and /ws. Change both if the API's address changes.
+      - key: BACKEND_URL
+        value: https://kalshi-bot-j796.onrender.com
+      - key: BACKEND_HOST
+        value: kalshi-bot-j796.onrender.com

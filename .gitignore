@@ -210,3 +210,8 @@ __marimo__/
 node_modules/
 .npm
 dist/
+
+# Courtside
+data/
+.DS_Store
+frontend/dist/
