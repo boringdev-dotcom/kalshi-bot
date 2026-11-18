@@ -108,7 +108,31 @@ def test_entry_skips_fairly_priced_and_tight_games():
     quote(tight, discount=0.04)
     skip = find_entries(tight, p)
     assert isinstance(skip, Skip) and skip.code == "close_game"
-    assert find_entries(q4_game(clock=700), p) is None  # outside the time window
+    assert find_entries(q4_game(clock=100), p) is None  # inside the last 2:30: too late to open
+
+
+def test_entry_window_opens_the_moment_q3_ends():
+    p = Playbook(DB(":memory:")).params(Q4_UNDER)
+    assert p["max_minutes_left"] == 12
+
+    def at(period: int, clock: float) -> Game:
+        game = q4_game(total=172, clock=clock, margin=12)
+        game.period = period
+        refresh_game(game)
+        quote(game, discount=0.03)
+        return game
+
+    mid_third = at(3, 45.0)
+    assert not mid_third.in_fourth and find_entries(mid_third, p) is None
+
+    horn = at(3, 0.0)  # ESPN reports the break as period 3, clock 0
+    assert horn.at_q3_end and horn.in_fourth and horn.minutes_left == 12 and horn.q4_clock == "12:00"
+    assert find_entries(horn, p) is not None
+
+    tip = at(4, 720.0)
+    found = find_entries(tip, {**p, "min_price": 70})  # a 10-14 pt cushion is cheaper this early
+    assert isinstance(found, list) and found and found[0].context["minutes_left"] == 12
+    assert found[0].arm.split("|")[1] == "9-12"
 
 
 def test_exit_fires_when_the_game_turns():

@@ -36,7 +36,7 @@ STRATEGIES: dict[str, dict[str, Any]] = {
             "loss if the game starts threatening the number."
         ),
         "specs": [
-            Spec("max_minutes_left", "Start looking at", "Begin scanning once this much of Q4 remains.", "entry", 8, 1, 12, 0.5, "min"),
+            Spec("max_minutes_left", "Start looking at", "Begin scanning once this much of Q4 remains. 12 means from the moment Q3 ends, including the break before the fourth tips off.", "entry", 12, 1, 12, 0.5, "min"),
             Spec("min_minutes_left", "Stop opening at", "No new positions inside this much time. Late entries pay little and carry foul/OT risk.", "entry", 2.5, 0, 8, 0.5, "min"),
             Spec("buffer_min", "Minimum cushion", "The strike must sit at least this far above the live line (line 240 → 250+).", "entry", 10, 4, 25, 0.5, "pts"),
             Spec("buffer_max", "Maximum cushion", "Further out than this pays too little to be worth the tail risk.", "entry", 14, 5, 35, 0.5, "pts"),

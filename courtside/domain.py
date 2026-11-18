@@ -127,6 +127,21 @@ class Game:
     def minutes_left(self) -> float:
         return self.seconds_remaining / 60.0
 
+    @property
+    def at_q3_end(self) -> bool:
+        """The break between the third and fourth quarters."""
+        return self.state == "live" and self.period == 3 and self.clock_seconds <= 0
+
+    @property
+    def in_fourth(self) -> bool:
+        """Fourth-quarter territory for the Q4 play: from the Q3 horn onward."""
+        return self.state == "live" and (self.period == 4 or self.at_q3_end)
+
+    @property
+    def q4_clock(self) -> str:
+        """Time left in the fourth as text. The break after Q3 reads as a full 12:00."""
+        return "12:00" if self.at_q3_end else self.clock
+
     def rung(self, ticker: str) -> Optional[Rung]:
         for r in self.ladder:
             if r.ticker == ticker:

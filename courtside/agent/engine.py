@@ -322,7 +322,7 @@ class Engine:
         p = self.playbook.params(Q4_UNDER)
         in_window = [
             g for g in self.games
-            if g.state == "live" and g.period == 4 and p["min_minutes_left"] <= g.minutes_left <= p["max_minutes_left"]
+            if g.in_fourth and p["min_minutes_left"] <= g.minutes_left <= p["max_minutes_left"]
         ]
         live = [g for g in self.games if g.state == "live"]
         if not self.settings["agent_enabled"]:
@@ -965,7 +965,7 @@ class Engine:
         self.decide(
             "enter",
             f"Bought {game.label} under {cand.rung.strike:g} at {pos['entry_price']}c",
-            f"The {cand.reference_source} is {cand.reference:g} and the total is {game.total} with {game.clock} left in "
+            f"The {cand.reference_source} is {cand.reference:g} and the total is {game.total} with {game.q4_clock} left in "
             f"a {game.margin}-pt game. Under {cand.rung.strike:g} gives {cand.buffer:g} points of cushion: "
             f"${pos['cost']:,.2f} to win ${pos['max_profit']:,.2f}. Model says {cand.p_model:.1%} against a "
             f"{pos['entry_price']}% break-even ({cand.edge * 100:+.1f}% edge). {record} "

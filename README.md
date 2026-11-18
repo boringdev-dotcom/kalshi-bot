@@ -59,7 +59,7 @@ The Odds API bills one credit per market per request. The feed asks for the full
 
 ## How the agent works
 
-**The play.** In the fourth quarter, buy the under on a strike well above the live betting line (line 240, buy under 250 or 252) at roughly 90-96c: risk about $300 to make about $20. Sell for a small loss if the game starts threatening the number.
+**The play.** In the fourth quarter, buy the under on a strike well above the live betting line (line 240, buy under 250 or 252) at roughly 90-96c: risk about $300 to make about $20. It starts looking the moment Q3 ends. Sell for a small loss if the game starts threatening the number.
 
 **The model** (`courtside/model/totals.py`). Projects the final total from score, clock, margin, the pregame total and the live FanDuel line, as a mixture of three outcomes: the game stays calm, it turns into a close late foul game, or it goes to overtime. Every Kalshi strike gets a fair probability from that; an open position gets a live win probability.
 
