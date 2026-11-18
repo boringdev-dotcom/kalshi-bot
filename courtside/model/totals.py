@@ -188,20 +188,20 @@ def assess_risk(game: Game, dist: Optional[TotalDist]) -> Risk:
     level = "low"
     mins = game.minutes_left
     if game.period > 4:
-        flags.append(f"Overtime: {game.period - 4}OT in progress")
+        flags.append("overtime is being played, which adds points fast")
         level = "high"
     elif game.period == 4:
         if dist.p_ot >= 0.12:
-            flags.append(f"OT chance {dist.p_ot:.0%} ({game.margin}-pt game, {game.clock} left)")
+            flags.append(f"about a {dist.p_ot:.0%} chance of overtime ({game.margin}-point game, {game.clock} left), and overtime adds 20-plus points")
             level = "high"
         elif dist.p_ot >= 0.05:
-            flags.append(f"OT chance {dist.p_ot:.0%}")
+            flags.append(f"about a {dist.p_ot:.0%} chance of overtime")
             level = "medium"
         if mins <= 3 and game.margin <= 6:
-            flags.append(f"{game.margin}-pt game inside 3:00, expect fouls and fast scoring")
+            flags.append(f"a {game.margin}-point game inside the last 3:00, so expect fouls and fast scoring")
             level = "high" if game.margin <= 3 else max(level, "medium", key=_rank)
     if dist.pace >= (game.pregame_total or LEAGUE_TOTAL) + 14:
-        flags.append(f"Running hot: pace {dist.pace:.0f} vs {game.pregame_total or LEAGUE_TOTAL:.0f} expected")
+        flags.append(f"scoring is running hot, on pace for {dist.pace:.0f} against {game.pregame_total or LEAGUE_TOTAL:.0f} expected")
         level = max(level, "medium", key=_rank)
     return Risk(level=level, flags=flags)
 

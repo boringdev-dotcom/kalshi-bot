@@ -3,35 +3,38 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      // Calm, flat palette: neutral blacks, one green, one red. The names are kept
+      // from the first version so every screen picks up the new look together.
       colors: {
         ink: {
-          950: '#090b10',
-          900: '#10131a',
-          800: '#161a23',
-          700: '#1d222d',
-          600: '#2a303d',
+          950: '#0b0b0c', // page
+          900: '#151517', // card
+          800: '#1d1d20', // raised: inputs, hover, selected rows
+          700: '#28282c',
+          600: '#37373d',
         },
-        mint: '#3ddc97',
-        coral: '#ff6b6b',
-        gold: '#f5b74e',
-        peri: '#8b9cff',
-        mute: '#8d96a8',
-        dim: '#5d6577',
+        mint: '#19c37d', // up, win, the "yes this is fine" colour
+        coral: '#f2594b', // down, loss, danger
+        gold: '#e6a93c', // caution
+        peri: '#8fa3ff', // the agent
+        mute: '#a1a3ab', // secondary text
+        dim: '#6f7179', // tertiary text
       },
       borderColor: {
-        hair: 'rgba(255,255,255,0.06)',
-        hair2: 'rgba(255,255,255,0.1)',
+        hair: 'rgba(255,255,255,0.07)',
+        hair2: 'rgba(255,255,255,0.13)',
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        // Numbers are set in the same face as everything else, just tabular.
+        mono: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
-        xl2: '1.125rem',
+        xl2: '1.25rem',
       },
       boxShadow: {
-        lift: '0 12px 40px -12px rgba(0,0,0,0.6)',
-        glow: '0 0 0 1px rgba(139,156,255,0.35), 0 8px 40px -8px rgba(139,156,255,0.25)',
+        lift: '0 16px 48px -16px rgba(0,0,0,0.7)',
+        glow: '0 0 0 1px rgba(255,255,255,0.14)',
       },
       keyframes: {
         shimmer: { '100%': { transform: 'translateX(100%)' } },

@@ -49,11 +49,11 @@ export function SectionTitle({
 export type Tone = 'mint' | 'coral' | 'gold' | 'peri' | 'slate'
 
 const toneClass: Record<Tone, string> = {
-  mint: 'bg-mint/10 text-mint border-mint/20',
-  coral: 'bg-coral/10 text-coral border-coral/20',
-  gold: 'bg-gold/10 text-gold border-gold/20',
-  peri: 'bg-peri/10 text-peri border-peri/20',
-  slate: 'bg-white/[0.04] text-mute border-hair',
+  mint: 'bg-mint/[0.12] text-mint border-transparent',
+  coral: 'bg-coral/[0.12] text-coral border-transparent',
+  gold: 'bg-gold/[0.12] text-gold border-transparent',
+  peri: 'bg-peri/[0.12] text-peri border-transparent',
+  slate: 'bg-white/[0.06] text-mute border-transparent',
 }
 
 export function Badge({
@@ -71,7 +71,7 @@ export function Badge({
     <span
       title={title}
       className={clsx(
-        'inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-[1px] text-[10px] font-semibold uppercase tracking-wider',
+        'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-[2px] text-[11px] font-medium',
         toneClass[tone],
         className,
       )}
@@ -83,13 +83,13 @@ export function Badge({
 
 export function SimTag({ className }: { className?: string }) {
   return (
-    <Badge tone="gold" className={className} title="Simulated data — not a real game or market">
-      Sim
+    <Badge tone="gold" className={className} title="Practice data: not a real game or market">
+      Practice
     </Badge>
   )
 }
 
-export function LiveDot({ color = '#3ddc97', size = 7, pulse = true }: { color?: string; size?: number; pulse?: boolean }) {
+export function LiveDot({ color = '#19c37d', size = 7, pulse = true }: { color?: string; size?: number; pulse?: boolean }) {
   return (
     <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
       {pulse && (
@@ -118,18 +118,18 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 }
 
 const variantClass: Record<NonNullable<ButtonProps['variant']>, string> = {
-  primary: 'bg-slate-100 text-ink-950 hover:bg-white',
-  ghost: 'text-mute hover:text-slate-100 hover:bg-white/[0.05]',
-  outline: 'border border-hair2 text-slate-200 hover:border-white/20 hover:bg-white/[0.04]',
+  primary: 'bg-white text-ink-950 hover:bg-slate-200',
+  ghost: 'text-mute hover:text-white hover:bg-white/[0.06]',
+  outline: 'border border-hair2 text-slate-100 hover:bg-white/[0.06]',
   mint: 'bg-mint text-ink-950 hover:brightness-110',
-  coral: 'bg-coral text-ink-950 hover:brightness-110',
+  coral: 'bg-coral text-white hover:brightness-110',
   peri: 'bg-peri text-ink-950 hover:brightness-110',
 }
 
 const sizeClass = {
-  xs: 'h-6 px-2 text-[11px] rounded-md gap-1',
-  sm: 'h-8 px-3 text-xs rounded-lg gap-1.5',
-  md: 'h-10 px-4 text-sm rounded-xl gap-2',
+  xs: 'h-7 px-2.5 text-xs rounded-full gap-1',
+  sm: 'h-9 px-4 text-[13px] rounded-full gap-1.5',
+  md: 'h-12 px-6 text-[15px] rounded-full gap-2',
 }
 
 export function Button({
@@ -254,7 +254,7 @@ export function Segmented<T extends string>({
   size?: 'sm' | 'md'
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-hair bg-ink-950/60 p-0.5">
+    <div className="inline-flex rounded-full bg-ink-800 p-1">
       {options.map((o) => {
         const active = o.value === value
         return (
@@ -263,15 +263,15 @@ export function Segmented<T extends string>({
             type="button"
             onClick={() => onChange(o.value)}
             className={clsx(
-              'relative rounded-md font-semibold transition-colors',
-              size === 'sm' ? 'px-2.5 py-1 text-[11px]' : 'px-4 py-1.5 text-xs',
-              active ? 'text-slate-50' : 'text-dim hover:text-slate-300',
+              'relative whitespace-nowrap rounded-full font-medium transition-colors',
+              size === 'sm' ? 'px-3.5 py-1.5 text-[13px]' : 'px-4 py-2 text-sm',
+              active ? 'text-white' : 'text-mute hover:text-white',
             )}
           >
             {active && (
               <motion.span
                 layoutId={`seg-${id}`}
-                className="absolute inset-0 rounded-md bg-white/[0.09]"
+                className="absolute inset-0 rounded-full bg-white/[0.14]"
                 style={o.tone ? { background: `${o.tone}26`, boxShadow: `inset 0 0 0 1px ${o.tone}55` } : undefined}
                 transition={{ type: 'spring', stiffness: 500, damping: 36 }}
               />
@@ -307,8 +307,8 @@ export function Tabs<T extends string>({
             type="button"
             onClick={() => onChange(t.value)}
             className={clsx(
-              'relative flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold transition-colors',
-              active ? 'text-slate-50' : 'text-dim hover:text-slate-300',
+              'relative flex items-center gap-1.5 px-3.5 py-3 text-sm font-medium transition-colors',
+              active ? 'text-white' : 'text-mute hover:text-white',
             )}
           >
             {t.label}
@@ -318,7 +318,7 @@ export function Tabs<T extends string>({
             {active && (
               <motion.span
                 layoutId={`tab-${id}`}
-                className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-peri"
+                className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-white"
                 transition={{ type: 'spring', stiffness: 500, damping: 38 }}
               />
             )}
@@ -439,8 +439,8 @@ export function Empty({
           {icon}
         </div>
       )}
-      <div className="text-sm font-semibold text-slate-200">{title}</div>
-      {body && <div className="mt-1 max-w-sm text-xs leading-relaxed text-dim">{body}</div>}
+      <div className="text-[15px] font-semibold text-white">{title}</div>
+      {body && <div className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-mute">{body}</div>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   )
@@ -484,11 +484,11 @@ export function Dialog({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
         >
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+          <div className="absolute inset-0 bg-black/70" onClick={onClose} />
           <motion.div
             role="dialog"
             aria-modal="true"
-            className="relative w-full overflow-hidden rounded-2xl border border-hair2 bg-ink-900 shadow-lift"
+            className="relative w-full overflow-hidden rounded-3xl border border-hair bg-ink-900 shadow-lift"
             style={{ maxWidth: width }}
             initial={{ opacity: 0, y: 16, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -498,7 +498,7 @@ export function Dialog({
             {accent && <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: accent }} />}
             <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-5">
               <div className="min-w-0">
-                <div className="text-[15px] font-semibold text-slate-50">{title}</div>
+                <div className="text-lg font-semibold text-white">{title}</div>
                 {subtitle && <div className="mt-0.5 text-xs text-mute">{subtitle}</div>}
               </div>
               <button
@@ -533,8 +533,8 @@ export function Stat({
   return (
     <div className={clsx('min-w-0', className)}>
       <div className="label">{label}</div>
-      <div className="num mt-1 truncate text-[15px] font-semibold text-slate-100">{children}</div>
-      {sub && <div className="mt-0.5 truncate text-[11px] text-dim">{sub}</div>}
+      <div className="num mt-1 truncate text-xl font-semibold text-white">{children}</div>
+      {sub && <div className="mt-0.5 truncate text-xs text-dim">{sub}</div>}
     </div>
   )
 }

@@ -1,175 +1,121 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import clsx from 'clsx'
-import {
-  AlertTriangle,
-  BrainCircuit,
-  CheckCircle2,
-  Info,
-  LayoutDashboard,
-  Settings2,
-  Wallet,
-  X,
-  XCircle,
-} from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { money, pnlColor } from '../format'
 import { useStore, type Toast } from '../store'
 import type { AgentStatus } from '../types'
 import { LiveDot, Spinner, Ticker } from './ui'
 
 const NAV = [
-  { to: '/', label: 'Desk', icon: LayoutDashboard, key: 'd' },
-  { to: '/portfolio', label: 'Portfolio', icon: Wallet, key: 'p' },
-  { to: '/brain', label: 'Brain', icon: BrainCircuit, key: 'b' },
-  { to: '/settings', label: 'Settings', icon: Settings2, key: 's' },
+  { to: '/', label: 'Markets', key: 'm' },
+  { to: '/portfolio', label: 'Portfolio', key: 'p' },
+  { to: '/agent', label: 'Agent', key: 'a' },
+  { to: '/settings', label: 'Settings', key: 's' },
 ]
 
+/** How the agent's state is shown wherever it appears. */
 export const agentTone: Record<AgentStatus['state'], { color: string; label: string }> = {
-  paused: { color: '#5d6577', label: 'Paused' },
-  idle: { color: '#8b9cff', label: 'Idle' },
-  watching: { color: '#8b9cff', label: 'Watching' },
-  acting: { color: '#3ddc97', label: 'Acting' },
+  paused: { color: '#6f7179', label: 'Paused' },
+  idle: { color: '#8fa3ff', label: 'Waiting' },
+  watching: { color: '#8fa3ff', label: 'Watching' },
+  acting: { color: '#19c37d', label: 'Trading' },
 }
 
 function Logo() {
   return (
-    <div className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-hair2 bg-ink-800">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="8.5" stroke="#8b9cff" strokeWidth="1.8" />
-        <path d="M3.5 12h17" stroke="#3ddc97" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M12 3.5c3 2.6 3 14.4 0 17" stroke="#8b9cff" strokeWidth="1.4" strokeOpacity="0.55" />
-        <path d="M12 3.5c-3 2.6-3 14.4 0 17" stroke="#8b9cff" strokeWidth="1.4" strokeOpacity="0.55" />
-      </svg>
-    </div>
+    <Link to="/" className="flex items-center gap-2.5" aria-label="Courtside home">
+      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white">
+        <span className="h-2.5 w-2.5 rounded-full bg-ink-950" />
+      </span>
+      <span className="hidden text-[17px] font-semibold tracking-tight text-white sm:inline">Courtside</span>
+    </Link>
   )
 }
 
-function Rail() {
-  return (
-    <nav className="z-20 flex w-[60px] shrink-0 flex-col items-center gap-1 border-r border-hair bg-ink-950/80 py-3 backdrop-blur">
-      <Logo />
-      <div className="mt-4 flex flex-col gap-1">
-        {NAV.map(({ to, label, icon: Icon, key }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            title={`${label}  (g ${key})`}
-            className={({ isActive }) =>
-              clsx(
-                'group relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors',
-                isActive ? 'text-slate-50' : 'text-dim hover:text-slate-200',
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <motion.span
-                    layoutId="rail-active"
-                    className="absolute inset-0 rounded-xl border border-peri/30 bg-peri/10"
-                    transition={{ type: 'spring', stiffness: 480, damping: 34 }}
-                  />
-                )}
-                <Icon size={18} className="relative" strokeWidth={isActive ? 2.2 : 1.8} />
-                <span className="pointer-events-none absolute left-[52px] z-30 whitespace-nowrap rounded-md border border-hair2 bg-ink-800 px-2 py-1 text-[11px] font-medium text-slate-200 opacity-0 shadow-lift transition-opacity group-hover:opacity-100">
-                  {label}
-                </span>
-              </>
-            )}
-          </NavLink>
-        ))}
-      </div>
-    </nav>
-  )
-}
-
-function ModeBadge() {
+/** Paper or live, and whether the games are practice games. The two facts a user must never be unsure of. */
+function ModeBadges() {
   const settings = useStore((s) => s.app?.settings)
-  if (!settings) return <div className="skeleton h-6 w-16" />
+  if (!settings) return null
   const live = settings.trading_mode === 'live'
   return (
     <div className="flex items-center gap-1.5">
-      <span
+      <Link
+        to="/settings"
+        title={live ? 'Orders go to your real Kalshi account' : 'Pretend money: no real orders are sent'}
         className={clsx(
-          'relative inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em]',
-          live ? 'border-coral/50 bg-coral/15 text-coral' : 'border-peri/30 bg-peri/10 text-peri',
+          'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium',
+          live ? 'bg-coral/15 text-coral' : 'bg-white/[0.07] text-slate-200',
         )}
-        title={live ? 'Orders go to your real Kalshi account' : 'Orders are simulated — no real money'}
       >
-        {live && <LiveDot color="#ff6b6b" size={6} />}
-        {live ? 'Live' : 'Paper'}
-        {live && (
-          <span className="pointer-events-none absolute inset-0 animate-pulse rounded-lg ring-1 ring-coral/50" />
-        )}
-      </span>
+        {live && <LiveDot color="#f2594b" size={6} />}
+        {live ? 'Live money' : 'Paper'}
+      </Link>
       {settings.data_source === 'sim' && (
-        <span
-          className="rounded-lg border border-gold/30 bg-gold/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-gold"
-          title="Games, odds and markets are simulated"
+        <Link
+          to="/settings"
+          title="These are practice games with made-up scores and prices"
+          className="hidden whitespace-nowrap rounded-full bg-gold/[0.13] px-2.5 py-1 text-xs font-medium text-gold lg:inline-flex"
         >
-          Sim data
-        </span>
+          Practice games
+        </Link>
       )}
     </div>
   )
 }
 
-function TopBar() {
+function TopNav() {
   const app = useStore((s) => s.app)
-  const connected = useStore((s) => s.connected)
   const account = app?.account
   const agent = app?.agent
   const tone = agent ? agentTone[agent.state] : agentTone.paused
+  const { pathname } = useLocation()
 
   return (
-    <header className="z-10 flex h-[52px] shrink-0 items-center gap-4 border-b border-hair bg-ink-950/70 px-4 backdrop-blur">
-      <div className="flex items-baseline gap-2">
-        <span className="text-[15px] font-bold tracking-tight text-slate-50">Courtside</span>
-        <span className="hidden text-[11px] text-dim xl:inline">Kalshi trading desk</span>
-      </div>
-      <ModeBadge />
+    <header className="sticky top-0 z-40 border-b border-hair bg-ink-950/90 backdrop-blur">
+      <div className="mx-auto flex h-16 max-w-[1180px] items-center gap-3 px-5 sm:px-8 md:gap-6">
+        <Logo />
+        <nav className="flex items-center gap-1">
+          {NAV.map((n) => {
+            const active = n.to === '/' ? pathname === '/' || pathname.startsWith('/game') : pathname.startsWith(n.to)
+            return (
+              <NavLink
+                key={n.to}
+                to={n.to}
+                className={clsx(
+                  'rounded-full px-2.5 py-2 text-sm font-medium transition-colors md:px-3.5',
+                  active ? 'bg-white/[0.08] text-white' : 'text-mute hover:text-white',
+                )}
+              >
+                {n.label}
+              </NavLink>
+            )
+          })}
+        </nav>
 
-      <div className="ml-auto flex items-center gap-5">
-        <div className="hidden items-center gap-5 md:flex">
-          <div className="text-right">
-            <div className="label !text-[9.5px]">Equity</div>
+        <div className="ml-auto flex shrink-0 items-center gap-3 md:gap-4">
+          <ModeBadges />
+          <Link
+            to="/agent"
+            title={agent?.focus || 'Agent'}
+            className="hidden items-center gap-2 whitespace-nowrap rounded-full px-2 py-1 text-xs text-mute transition-colors hover:text-white lg:flex"
+          >
+            <LiveDot color={tone.color} pulse={agent?.state === 'acting'} size={7} />
+            Agent {agent ? tone.label.toLowerCase() : ''}
+          </Link>
+          <Link to="/portfolio" className="shrink-0 whitespace-nowrap text-right leading-tight" title="Your account">
             {account ? (
-              <Ticker value={account.equity} format={(n) => money(n)} className="text-[13px] font-semibold text-slate-50" />
+              <>
+                <Ticker value={account.equity} format={(n) => money(n)} flash={false} className="block text-sm font-semibold text-white" />
+                <span className={clsx('num block text-xs', pnlColor(account.pnl_today))}>
+                  {money(account.pnl_today, { sign: true })} today
+                </span>
+              </>
             ) : (
-              <div className="skeleton mt-1 h-3.5 w-20" />
+              <div className="skeleton h-8 w-20" />
             )}
-          </div>
-          <div className="text-right">
-            <div className="label !text-[9.5px]">Today</div>
-            {account ? (
-              <Ticker
-                value={account.pnl_today}
-                format={(n) => money(n, { sign: true })}
-                flash={false}
-                className={clsx('text-[13px] font-semibold', pnlColor(account.pnl_today))}
-              />
-            ) : (
-              <div className="skeleton mt-1 h-3.5 w-14" />
-            )}
-          </div>
-        </div>
-
-        <div
-          className="flex items-center gap-2 rounded-lg border border-hair bg-white/[0.03] px-2.5 py-1.5"
-          title={agent?.focus || 'Agent status'}
-        >
-          <LiveDot color={tone.color} pulse={agent?.state === 'watching' || agent?.state === 'acting'} />
-          <span className="text-[11px] font-semibold text-slate-200">Agent</span>
-          <span className="text-[11px]" style={{ color: tone.color }}>
-            {agent ? tone.label : '—'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5" title={connected ? 'Live connection' : 'Reconnecting…'}>
-          <LiveDot color={connected ? '#3ddc97' : '#f5b74e'} pulse={!connected} size={6} />
-          <span className="hidden text-[11px] text-dim lg:inline">{connected ? 'Connected' : 'Reconnecting'}</span>
+          </Link>
         </div>
       </div>
     </header>
@@ -177,32 +123,30 @@ function TopBar() {
 }
 
 const toastIcon = {
-  info: <Info size={15} className="text-peri" />,
-  success: <CheckCircle2 size={15} className="text-mint" />,
-  warn: <AlertTriangle size={15} className="text-gold" />,
-  error: <XCircle size={15} className="text-coral" />,
+  info: <Info size={16} className="text-slate-200" />,
+  success: <CheckCircle2 size={16} className="text-mint" />,
+  warn: <AlertTriangle size={16} className="text-gold" />,
+  error: <XCircle size={16} className="text-coral" />,
 }
-const toastBar = { info: '#8b9cff', success: '#3ddc97', warn: '#f5b74e', error: '#ff6b6b' }
 
 function ToastItem({ t }: { t: Toast }) {
   const dismiss = useStore((s) => s.dismissToast)
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, x: 40, scale: 0.96 }}
-      animate={{ opacity: 1, x: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 40, scale: 0.96 }}
-      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-      className="pointer-events-auto relative flex w-[340px] items-start gap-2.5 overflow-hidden rounded-xl border border-hair2 bg-ink-800/95 p-3 pl-4 shadow-lift backdrop-blur"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.18 }}
+      className="pointer-events-auto flex w-[340px] items-start gap-3 rounded-2xl border border-hair bg-ink-800 p-3.5 shadow-lift"
     >
-      <span className="absolute inset-y-0 left-0 w-[3px]" style={{ background: toastBar[t.level] }} />
       <div className="mt-0.5">{toastIcon[t.level]}</div>
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-semibold text-slate-100">{t.title}</div>
-        {t.body && <div className="mt-0.5 text-[11.5px] leading-snug text-mute">{t.body}</div>}
+        <div className="text-[13px] font-semibold text-white">{t.title}</div>
+        {t.body && <div className="mt-0.5 text-[13px] leading-snug text-mute">{t.body}</div>}
       </div>
-      <button onClick={() => dismiss(t.id)} className="text-dim hover:text-slate-200" aria-label="Dismiss">
-        <X size={13} />
+      <button onClick={() => dismiss(t.id)} className="text-dim hover:text-white" aria-label="Dismiss">
+        <X size={14} />
       </button>
     </motion.div>
   )
@@ -211,9 +155,9 @@ function ToastItem({ t }: { t: Toast }) {
 function Toasts() {
   const toasts = useStore((s) => s.toasts)
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-2">
+    <div className="pointer-events-none fixed bottom-5 right-5 z-[60] flex flex-col items-end gap-2">
       <AnimatePresence initial={false}>
-        {toasts.map((t) => (
+        {toasts.slice(-3).map((t) => (
           <ToastItem key={t.id} t={t} />
         ))}
       </AnimatePresence>
@@ -221,44 +165,28 @@ function Toasts() {
   )
 }
 
-function ConnectingBanner() {
+/** Shown until the first data arrives, and again if the connection drops for good. */
+function ConnectionNotice() {
   const app = useStore((s) => s.app)
   const backendUp = useStore((s) => s.backendUp)
-  const show = !app && backendUp !== null
+  const connected = useStore((s) => s.connected)
+  if (app && connected) return null
+  if (app && !connected) {
+    return (
+      <div className="border-b border-hair bg-gold/[0.08] py-2 text-center text-[13px] text-gold">
+        Reconnecting… prices on screen may be a few seconds old.
+      </div>
+    )
+  }
   return (
-    <AnimatePresence>
-      {(show || (!app && backendUp === null)) && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-ink-950/55 backdrop-blur-[2px]"
-        >
-          <motion.div
-            initial={{ y: 12, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="pointer-events-auto flex max-w-sm flex-col items-center rounded-2xl border border-hair2 bg-ink-900 px-8 py-7 text-center shadow-lift"
-          >
-            <div className="relative mb-4 flex h-12 w-12 items-center justify-center">
-              <span className="absolute inset-0 animate-ping2 rounded-full bg-peri/30" />
-              <span className="flex h-12 w-12 items-center justify-center rounded-full border border-peri/30 bg-peri/10 text-peri">
-                <Spinner size={18} />
-              </span>
-            </div>
-            <div className="text-sm font-semibold text-slate-100">Connecting to the Courtside backend</div>
-            <div className="mt-1.5 text-xs leading-relaxed text-mute">
-              {backendUp === false
-                ? 'No answer yet from localhost:8000. Start the backend and this page will pick it up on its own.'
-                : 'Loading games, positions and the agent’s state…'}
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div className="flex items-center justify-center gap-2.5 py-24 text-sm text-mute">
+      <Spinner size={16} />
+      {backendUp === false ? 'Waiting for the Courtside server to answer…' : 'Loading your desk…'}
+    </div>
   )
 }
 
-/** `g` then d/p/b/s jumps between pages. */
+/** `g` then m/p/a/s jumps between pages. */
 function useNavKeys() {
   const navigate = useNavigate()
   const armed = useRef(0)
@@ -285,21 +213,22 @@ function useNavKeys() {
 
 export default function Layout() {
   useNavKeys()
+  const app = useStore((s) => s.app)
+  const { pathname } = useLocation()
+  useEffect(() => {
+    window.scrollTo({ top: 0 }) // newer browsers return a promise here, so do not hand it back to React
+  }, [pathname])
   return (
-    <div className="flex h-full overflow-hidden">
-      <Rail />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
-        <main className="relative min-h-0 flex-1 overflow-hidden">
-          <Outlet />
-          <ConnectingBanner />
-        </main>
-      </div>
+    <div className="min-h-full">
+      <TopNav />
+      <ConnectionNotice />
+      <main>{app ? <Outlet /> : null}</main>
       <Toasts />
     </div>
   )
 }
 
+/** Standard page frame: centred column, a title, and one line saying what the page is for. */
 export function Page({
   title,
   subtitle,
@@ -312,17 +241,15 @@ export function Page({
   children: React.ReactNode
 }) {
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-[1320px] px-6 pb-16 pt-6">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-50">{title}</h1>
-            {subtitle && <p className="mt-1 text-xs text-mute">{subtitle}</p>}
-          </div>
-          {right}
+    <div className="page">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="h-page">{title}</h1>
+          {subtitle && <p className="hint mt-1">{subtitle}</p>}
         </div>
-        {children}
+        {right}
       </div>
+      {children}
     </div>
   )
 }

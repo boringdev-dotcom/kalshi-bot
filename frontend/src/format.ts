@@ -109,9 +109,9 @@ export function teamColor(hex: string | undefined | null) {
 }
 
 export const riskTone: Record<RiskLevel, { text: string; bg: string; dot: string; label: string }> = {
-  low: { text: 'text-mint', bg: 'bg-mint/10', dot: '#3ddc97', label: 'Low risk' },
-  medium: { text: 'text-gold', bg: 'bg-gold/10', dot: '#f5b74e', label: 'Caution' },
-  high: { text: 'text-coral', bg: 'bg-coral/10', dot: '#ff6b6b', label: 'High risk' },
+  low: { text: 'text-mint', bg: 'bg-mint/10', dot: '#19c37d', label: 'Calm' },
+  medium: { text: 'text-gold', bg: 'bg-gold/10', dot: '#e6a93c', label: 'Heads up' },
+  high: { text: 'text-coral', bg: 'bg-coral/10', dot: '#f2594b', label: 'Risky' },
 }
 
 export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))

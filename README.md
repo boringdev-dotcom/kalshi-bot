@@ -50,18 +50,21 @@ Set these on the **API** service:
 
 The Odds API bills one credit per market per request. The feed asks for the full board hourly while idle, totals only every three minutes while games are live, and every 20 seconds once a game reaches the end of Q3. Expect a few hundred credits on a full NBA night; the remaining balance shows under Settings.
 
-## The four pages
+## The screens
 
-- **Desk** — live games, the selected game's scorebug, projection chart and Kalshi totals ladder (price, model probability, edge), a one-click order ticket, and the agent's decision feed and chat.
-- **Portfolio** — account, open positions with live win probability and risk flags, closed trades with what holding would have paid.
-- **Brain** — the playbook sliders, guidance and memory, and what the learner has concluded, plus a training gym.
-- **Settings** — paper/live, simulated/live data, risk limits, connection health.
+The interface follows `docs/DESIGN.md`: one job per screen, plain words, and a visible line.
+
+- **Markets** — tonight's games as cards: score, clock, the line, and where the game is heading.
+- **Game** — the scoreboard, a sentence saying where things stand, a number line showing the score now, the betting line, the projection and your pick, then a list of prices. Tap a price and the order panel says what you pay, what you get and what you lose. Tabs switch between the full game and each quarter.
+- **Portfolio** — account value and chart, open positions, and history with what holding would have paid.
+- **Agent** — what it is doing in sentences, a chat, its rules (the sliders), its memory, and what it has learned.
+- **Settings** — paper or live, practice or real games, safety limits, connections.
 
 ## Quarter markets
 
-Every game also carries Kalshi's eight quarter markets: a total and a spread for each of Q1-Q4 (Q4 excludes overtime). Pick a quarter above the ladder on the Desk to trade them by hand with the same order ticket, paper or live. They settle when the quarter ends.
+Every game also carries Kalshi's eight quarter markets: a total and a spread for each of Q1-Q4 (Q4 excludes overtime). Pick a quarter on the game page to trade them by hand with the same order panel, paper or live. They settle when the quarter ends.
 
-The agent does not trade these. It keeps a **shadow book** (`agent/observer.py`): shortly after each quarter starts, and again with about six minutes left, it records what every quarter market cost and what the model thought it was worth, then marks which side won. Brain → Learning shows the result by quarter, market type and price band (how often each won, what the model expected, return per dollar after fees) next to your own quarter record. Your quarter trades also go into its memory. That is the evidence to read before ever letting it trade them; there is no switch for that yet.
+The agent does not trade these. It keeps a **shadow book** (`agent/observer.py`): shortly after each quarter starts, and again with about six minutes left, it records what every quarter market cost and what the model thought it was worth, then marks which side won. Agent → Learning shows the result by quarter, market type and price band (how often each won, what the model expected, return per dollar after fees) next to your own quarter record. Your quarter trades also go into its memory. That is the evidence to read before ever letting it trade them; there is no switch for that yet.
 
 ## How the agent works
 
