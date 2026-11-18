@@ -1,4 +1,4 @@
-import type { Game, RiskLevel } from './types'
+import type { Game, LadderRung, MarketKind, RiskLevel, Segment, Side } from './types'
 
 export const cents = (n: number | null | undefined) => (n == null ? '—' : `${Math.round(n)}¢`)
 
@@ -133,4 +133,45 @@ export function fmtUnit(value: number, unit: string, step = 1) {
     default:
       return unit ? `${v} ${unit}` : v
   }
+}
+
+/* ───────────── market naming (with fallbacks for a backend that is a version behind) ───────────── */
+
+export const SEGMENTS: Segment[] = ['game', 'q1', 'q2', 'q3', 'q4']
+
+export const segmentLabel = (s: Segment | undefined | null) =>
+  !s || s === 'game' ? 'Game' : s.toUpperCase()
+
+/** What a position or trade is, e.g. "Under 251.5", "Q2 Over 58.5", "Q1 HOU -3.5". */
+export function tradeLabel(t: { label?: string | null; side: Side; strike: number }) {
+  return t.label || `${t.side === 'under' ? 'Under' : 'Over'} ${t.strike}`
+}
+
+export const yesLabel = (r: LadderRung) => r.yes_label || `Over ${r.strike}`
+export const noLabel = (r: LadderRung) => r.no_label || `Under ${r.strike}`
+export const sideLabel = (r: LadderRung, side: Side) => (side === 'under' ? noLabel(r) : yesLabel(r))
+
+/** Plain-English statement of what has to happen for this side to pay. */
+export function winsIf(r: LadderRung, side: Side) {
+  const seg = r.segment && r.segment !== 'game' ? r.segment.toUpperCase() : null
+  const kind: MarketKind = r.kind ?? 'total'
+  let text: string
+  if (kind === 'spread') {
+    const team = r.team || 'the backed team'
+    // Strikes sit on the half point, so "more than 3.5" is "4 or more".
+    const half = Math.abs(r.strike % 1) > 0.01
+    const by = half ? `${Math.ceil(r.strike)} or more` : `more than ${r.strike}`
+    const where = seg ?? 'the game'
+    text = side === 'over' ? `Wins if ${team} win ${where} by ${by}` : `Wins if ${team} do not win ${where} by ${by}`
+  } else {
+    const word = side === 'under' ? 'under' : 'over'
+    text = seg ? `Wins if ${seg} total points finish ${word} ${r.strike}` : `Wins if the final total finishes ${word} ${r.strike}`
+  }
+  return r.segment === 'q4' ? `${text} (overtime does not count)` : text
+}
+
+export function mmss(seconds: number | null | undefined) {
+  if (seconds == null || Number.isNaN(seconds)) return '—'
+  const s = Math.max(0, Math.round(seconds))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }

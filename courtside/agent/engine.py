@@ -27,6 +27,7 @@ from ..kalshi.client import KalshiClient, KalshiError
 from ..model.totals import refresh_game
 from .learner import Learner
 from .memory import MemoryStore, situation_tags
+from .observer import QuarterObserver
 from .playbook import Q4_UNDER, Playbook
 from .policy import (
     EXIT_PROFILES,
@@ -65,6 +66,7 @@ class Engine:
         self.playbook = Playbook(db)
         self.learner = Learner(db, env="sim" if self.settings["data_source"] == "sim" else "real")
         self.memory = MemoryStore(db)
+        self.observer = QuarterObserver(db)
         self.brain = None  # set by main once the Brain exists (it needs the engine)
         self.kalshi = KalshiClient(cfg.kalshi_api_key_id, cfg.private_key, cfg.trading_host)
         self.games: list[Game] = []
@@ -142,6 +144,7 @@ class Engine:
             refresh_game(game)
             self._record_timeline(game)
 
+        self.observer.observe(self.games)  # quarter markets: watched, never traded by the agent
         await self._settle_finished()
         if self.settings["agent_enabled"]:
             await self._manage_exits()
@@ -197,13 +200,25 @@ class Engine:
     def _mark(self, row: dict[str, Any]) -> tuple[int, Optional[Game], Optional[Rung]]:
         game = self.by_id.get(row["game_id"])
         rung = game.rung(row["ticker"]) if game else None
-        if game and game.state == "final":
-            won = (game.total < row["strike"]) == (row["side"] == "under")
-            return (100 if won else 0), game, rung
+        value = game.settle_value(row["segment"], row["kind"], row["team"]) if game else None
+        if value is not None:
+            return (100 if self._won(row, value) else 0), game, rung
         bid = rung.bid(row["side"]) if rung else None
         if bid is not None:
             self._marks[row["id"]] = bid
         return self._marks.get(row["id"], row["entry_price"]), game, rung
+
+    @staticmethod
+    def _won(row: dict[str, Any], value: float) -> bool:
+        """Did this position's side win, given the number its market settled on?
+
+        Above the strike the YES side ("over") wins, below it the NO side ("under").
+        """
+        return (value < row["strike"]) == (row["side"] == "under")
+
+    @staticmethod
+    def _label(row: dict[str, Any]) -> str:
+        return row.get("label") or f"{'Under' if row['side'] == 'under' else 'Over'} {row['strike']:g}"
 
     def positions_api(self) -> list[dict[str, Any]]:
         out = []
@@ -216,6 +231,10 @@ class Engine:
                     "game_id": row["game_id"],
                     "game_label": row["game_label"],
                     "ticker": row["ticker"],
+                    "segment": row["segment"],
+                    "kind": row["kind"],
+                    "team": row["team"],
+                    "label": self._label(row),
                     "strike": row["strike"],
                     "side": row["side"],
                     "contracts": row["contracts"],
@@ -245,6 +264,10 @@ class Engine:
             "game_id": row["game_id"],
             "game_label": row["game_label"],
             "ticker": row["ticker"],
+            "segment": row["segment"],
+            "kind": row["kind"],
+            "team": row["team"],
+            "label": Engine._label(row),
             "strike": row["strike"],
             "side": row["side"],
             "contracts": row["contracts"],
@@ -322,7 +345,7 @@ class Engine:
         p = self.playbook.params(Q4_UNDER)
         in_window = [
             g for g in self.games
-            if g.state == "live" and g.period == 4 and p["min_minutes_left"] <= g.minutes_left <= p["max_minutes_left"]
+            if g.in_fourth and p["min_minutes_left"] <= g.minutes_left <= p["max_minutes_left"]
         ]
         live = [g for g in self.games if g.state == "live"]
         if not self.settings["agent_enabled"]:
@@ -501,6 +524,8 @@ class Engine:
             raise TradeError("Order size is zero.")
         if game.state != "live" and game.state != "pre":
             raise TradeError("That game is over.")
+        if game.settle_value(rung.segment, rung.kind, rung.team) is not None:
+            raise TradeError("That market has already settled.")
         mode = self.settings["trading_mode"]
         if mode == "live" and game.simulated:
             raise TradeError("Cannot send live orders on simulated games.")
@@ -518,6 +543,10 @@ class Engine:
                 "ticker": rung.ticker,
                 "strike": rung.strike,
                 "side": side,
+                "segment": rung.segment,
+                "kind": rung.kind,
+                "team": rung.team,
+                "label": rung.position_label(side),
                 "contracts": filled,
                 "entry_price": price,
                 "cost": round(filled * price / 100.0 + fees, 2),
@@ -539,7 +568,7 @@ class Engine:
         self.hub.emit("positions", self.positions_api())
         self.hub.toast(
             "success",
-            f"Bought {game.label} {side} {rung.strike:g}",
+            f"Bought {game.label} {rung.position_label(side)}",
             f"{filled} contracts at {price}c · ${position['cost']:,.2f} to win ${position['max_profit']:,.2f}"
             + (" · LIVE" if mode == "live" else ""),
         )
@@ -570,6 +599,7 @@ class Engine:
         *,
         exit_fees: float = 0.0,
         game: Optional[Game] = None,
+        value: Optional[float] = None,
     ) -> dict[str, Any]:
         """Book a closed position and feed the result to the learner and memory."""
         proceeds = row["contracts"] * exit_price / 100.0 - exit_fees
@@ -583,7 +613,7 @@ class Engine:
             "fees": round(row["fees"] + exit_fees, 2),
         }
         if reason in ("settled_win", "settled_loss") and game is not None:
-            fields["final_total"] = game.total
+            fields["final_total"] = value if value is not None else game.total
             fields["counterfactual_pnl"] = pnl
         self.db.update("positions", row["id"], fields)
         row = {**row, **fields}
@@ -610,7 +640,7 @@ class Engine:
         self._snapshot_equity()
         verb = {"settled_win": "Won", "settled_loss": "Lost", "risk_exit": "Risk exit", "stop_loss": "Stopped out",
                 "take_profit": "Took profit", "manual": "Closed"}[reason]
-        self.hub.toast("success" if pnl > 0 else "warn", f"{verb}: {row['game_label']} {row['side']} {row['strike']:g}", f"{pnl:+,.2f} at {exit_price}c")
+        self.hub.toast("success" if pnl > 0 else "warn", f"{verb}: {row['game_label']} {self._label(row)}", f"{pnl:+,.2f} at {exit_price}c")
         return trade
 
     # ----------------------------------------------------------------- memory
@@ -619,23 +649,25 @@ class Engine:
         away, _, home = row["game_label"].partition(" @ ")
         pace_gap = (ctx.get("pace") or 0) - (ctx.get("pregame_total") or ctx.get("pace") or 0)
         if not row["arm_key"]:
-            return ["nba", home.lower(), away.lower()]
+            tags = ["nba", home.lower(), away.lower(), "manual", row["kind"]]
+            return tags + (["quarter", row["segment"]] if row["segment"] != "game" else [])
         return situation_tags(arm=row["arm_key"], home=home, away=away, p_ot=ctx.get("p_ot") or 0.0, pace_gap=pace_gap)
 
     def _describe(self, row: dict[str, Any]) -> str:
         ctx = row["context"] or {}
-        where = (
-            f"entered Q4 {ctx['clock']} left, total {ctx['total']}, {ctx['margin']}-pt game, "
-            f"line {ctx['line']:g}, {ctx['buffer']:g} pts of cushion"
-            if ctx.get("clock")
-            else "manual entry"
-        )
-        return f"{row['game_label']} {row['side']} {row['strike']:g} at {row['entry_price']}c x{row['contracts']} ({where})"
+        if ctx.get("buffer") is not None:
+            where = (
+                f"entered Q4 {ctx['clock']} left, total {ctx['total']}, {ctx['margin']}-pt game, "
+                f"line {ctx['line']:g}, {ctx['buffer']:g} pts of cushion"
+            )
+        else:
+            where = f"your trade, {ctx['when']}" if ctx.get("when") else "your trade"
+        return f"{row['game_label']} {self._label(row)} at {row['entry_price']}c x{row['contracts']} ({where})"
 
     def _remember_trade(self, row: dict[str, Any]) -> None:
         outcome = {
-            "settled_win": "held to the final and won",
-            "settled_loss": "held to the final and lost",
+            "settled_win": "held until it settled and won",
+            "settled_loss": "held until it settled and lost",
             "risk_exit": f"sold at {row['exit_price']}c when risk rose",
             "stop_loss": f"stopped out at {row['exit_price']}c",
             "take_profit": f"took profit at {row['exit_price']}c",
@@ -687,29 +719,32 @@ class Engine:
 
     # ------------------------------------------------------------- settlement
     async def _settle_finished(self) -> None:
-        finals = {g.id: g for g in self.games if g.state == "final"}
-        if not finals:
-            return
+        """Settle anything whose market has finished: games at the final, quarters when they end."""
         for row in self.open_rows():
-            game = finals.get(row["game_id"])
-            if game is None:
+            game = self.by_id.get(row["game_id"])
+            value = game.settle_value(row["segment"], row["kind"], row["team"]) if game else None
+            if value is None:
                 continue
-            won = (game.total < row["strike"]) == (row["side"] == "under")
-            self._finish(row, 100 if won else 0, "settled_win" if won else "settled_loss", game=game)
-        marks = ",".join("?" * len(finals))
-        ungraded = self.db.query(
-            f"SELECT * FROM positions WHERE status='closed' AND training=0 AND counterfactual_pnl IS NULL AND game_id IN ({marks})",
-            list(finals),
-        )
-        for row in ungraded:
-            self._grade_exit(row, finals[row["game_id"]].total)
+            won = self._won(row, value)
+            self._finish(row, 100 if won else 0, "settled_win" if won else "settled_loss", game=game, value=value)
+        if self.by_id:
+            marks = ",".join("?" * len(self.by_id))
+            ungraded = self.db.query(
+                f"SELECT * FROM positions WHERE status='closed' AND training=0 AND counterfactual_pnl IS NULL AND game_id IN ({marks})",
+                list(self.by_id),
+            )
+            for row in ungraded:
+                value = self.by_id[row["game_id"]].settle_value(row["segment"], row["kind"], row["team"])
+                if value is not None:
+                    self._grade_exit(row, value)
+        finals = [g.id for g in self.games if g.state == "final"]
         for gid in finals:
             self._cooldown.discard(gid)
             self._last_skip.pop(gid, None)
 
-    def _grade_exit(self, row: dict[str, Any], final_total: int) -> None:
-        """Once the game is final, compare an early exit with what holding would have paid."""
-        would_win = (final_total < row["strike"]) == (row["side"] == "under")
+    def _grade_exit(self, row: dict[str, Any], final_total: float) -> None:
+        """Once the market has settled, compare an early exit with what holding would have paid."""
+        would_win = self._won(row, final_total)
         held = round(row["contracts"] * (1.0 if would_win else 0.0) - (row["cost"]), 2)
         verdict = "saved" if row["pnl"] > held else "shaken_out"
         self.db.update("positions", row["id"], {"counterfactual_pnl": held, "exit_verdict": verdict, "final_total": final_total})
@@ -818,22 +853,24 @@ class Engine:
         )
 
     # ---------------------------------------------------------------- entries
-    def _limit_block(self, stake: float) -> Optional[str]:
+    def _limit_block(self, stake: float) -> Optional[tuple[str, str]]:
+        """(which limit, message) if a risk limit forbids another entry, else None."""
         acct = self.account()
         s = self.settings
         if acct["open_positions"] >= s["max_open_positions"]:
-            return f"Already at the limit of {s['max_open_positions']} open positions."
+            return "positions", f"Already at the limit of {s['max_open_positions']} open positions."
         if acct["pnl_today"] <= -abs(s["max_daily_loss"]):
-            return f"Down ${-acct['pnl_today']:,.2f} today, past the ${s['max_daily_loss']:,.0f} daily loss limit. Done for the day."
+            return "daily_loss", f"Down ${-acct['pnl_today']:,.2f} today, past the ${s['max_daily_loss']:,.0f} daily loss limit. Done for the day."
         if acct["exposure"] + stake > s["max_total_exposure"] + 1e-6:
-            return f"${acct['exposure']:,.0f} already at risk; another ${stake:,.0f} would pass the ${s['max_total_exposure']:,.0f} exposure cap."
+            return "exposure", f"${acct['exposure']:,.0f} already at risk; another ${stake:,.0f} would pass the ${s['max_total_exposure']:,.0f} exposure cap."
         return None
 
     async def _scan_entries(self) -> None:
         if not self.playbook.enabled(Q4_UNDER):
             return
         p = self.playbook.params(Q4_UNDER)
-        held = {r["game_id"] for r in self.open_rows()}
+        # A quarter bet of yours does not stop the agent making its own full-game play.
+        held = {r["game_id"] for r in self.open_rows() if r["segment"] == "game"}
         for game in self.games:
             if game.id in held or game.id in self._reviewing or game.id in self._cooldown:
                 continue
@@ -885,10 +922,11 @@ class Engine:
             stake = min(stake, self.account()["cash"])
         block = self._limit_block(stake)
         if block:
-            if self._limit_noted != block:
-                self._limit_noted = block
-                self.hub.toast("warn", "Risk limit reached", block)
-            self._skip(game, Skip("limit", f"Pass on {game.label}: risk limit", block))
+            which, message = block
+            if self._limit_noted != which:  # alert once per limit, not every time the dollar figure moves
+                self._limit_noted = which
+                self.hub.toast("warn", "Risk limit reached", message)
+            self._skip(game, Skip("limit", f"Pass on {game.label}: risk limit", message))
             return None
         self._limit_noted = ""
         contracts, cost, _ = size_order(stake, cand.price)
@@ -965,7 +1003,7 @@ class Engine:
         self.decide(
             "enter",
             f"Bought {game.label} under {cand.rung.strike:g} at {pos['entry_price']}c",
-            f"The {cand.reference_source} is {cand.reference:g} and the total is {game.total} with {game.clock} left in "
+            f"The {cand.reference_source} is {cand.reference:g} and the total is {game.total} with {game.q4_clock} left in "
             f"a {game.margin}-pt game. Under {cand.rung.strike:g} gives {cand.buffer:g} points of cushion: "
             f"${pos['cost']:,.2f} to win ${pos['max_profit']:,.2f}. Model says {cand.p_model:.1%} against a "
             f"{pos['entry_price']}% break-even ({cand.edge * 100:+.1f}% edge). {record} "
@@ -988,20 +1026,45 @@ class Engine:
         for game in self.games:
             rung = game.rung(ticker)
             if rung:
-                pos = await self.open_position(game, rung, side, int(contracts), int(price), opened_by="user")
+                pos = await self.open_position(
+                    game, rung, side, int(contracts), int(price), opened_by="user", context=self._manual_context(game, rung, side)
+                )
                 self.decide(
-                    "note", f"You bought {game.label} {side} {rung.strike:g} at {pos['entry_price']}c",
-                    "Manual order. The agent will not auto-exit positions you open yourself.",
+                    "note", f"You bought {game.label} {pos['label']} at {pos['entry_price']}c",
+                    "Your order. The agent does not trade quarter markets; it is recording this one and how it ends."
+                    if rung.segment != "game" else "Manual order. The agent will not auto-exit positions you open yourself.",
                     game=game, ticker=ticker, source="rules", confidence=pos["p_win"],
                     data={"contracts": pos["contracts"], "cost": f"${pos['cost']:,.2f}"},
                 )
                 return pos
         raise TradeError(f"No market with ticker {ticker}.")
 
+    @staticmethod
+    def _manual_context(game: Game, rung: Rung, side: str) -> dict[str, Any]:
+        """What the game looked like when the user placed a trade, for the agent's memory."""
+        ctx: dict[str, Any] = {
+            "manual": True, "segment": rung.segment, "kind": rung.kind, "team": rung.team,
+            "total": game.total, "margin": game.margin, "period": game.period,
+            "model_p": round(position_p_win(side, rung), 4),
+        }
+        if game.state == "pre":
+            ctx["when"] = "before tip-off"
+        elif rung.segment == "game":
+            ctx["when"] = f"Q{game.period} {game.clock}, total {game.total}" if game.period <= 4 else f"OT, total {game.total}"
+        else:
+            q = int(rung.segment[1])
+            home_pts, away_pts = game.quarter_points(q)
+            ctx["quarter_points"] = home_pts + away_pts
+            ctx["when"] = (
+                f"{game.clock} left in Q{q} with {home_pts + away_pts} scored in the quarter"
+                if game.quarter_status(q) == "live" else f"before Q{q} started"
+            )
+        return ctx
+
     def learning_state(self) -> dict[str, Any]:
         rows = self.db.query(
             "SELECT p_win_entry, strike, side, final_total, pnl, cost, exit_verdict, simulated, training "
-            "FROM positions WHERE status='closed'"
+            "FROM positions WHERE status='closed' AND segment='game'"
         )
         real = [r for r in rows if not r["training"]]
         buckets = [(0.0, 0.85, "<85%"), (0.85, 0.90, "85-90%"), (0.90, 0.93, "90-93%"), (0.93, 0.96, "93-96%"), (0.96, 1.01, "96%+")]
@@ -1019,6 +1082,7 @@ class Engine:
         losses = [r["pnl"] for r in real if r["pnl"] <= 0]
         curve = self.db.query("SELECT ts, equity, book FROM equity WHERE book=? ORDER BY id DESC LIMIT 500", [self.book])
         return {
+            "quarters": self.observer.summary(simulated=self.settings["data_source"] == "sim"),
             "arms": self.learner.arms(),
             "exit_arms": self.learner.exit_arms(),
             "calibration": calibration,

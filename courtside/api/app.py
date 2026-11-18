@@ -22,6 +22,7 @@ from ..agent.playbook import STRATEGIES
 from ..agent.trainer import train
 from ..config import Config, get_config
 from ..db import DB
+from ..domain import SEGMENTS, rung_dict
 from ..events import Hub
 
 log = logging.getLogger(__name__)
@@ -170,6 +171,14 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
         decisions = db.query("SELECT * FROM decisions WHERE game_id=? ORDER BY id DESC LIMIT 50", [game_id])
         return {
             "game": game.to_dict(),
+            "quarter_markets": [
+                {
+                    "segment": seg,
+                    "totals": [rung_dict(r) for r in game.quarter_markets.get(seg, {}).get("total", [])],
+                    "spreads": [rung_dict(r) for r in game.quarter_markets.get(seg, {}).get("spread", [])],
+                }
+                for seg in SEGMENTS
+            ],
             "timeline": engine.timelines.get(game_id, []),
             "decisions": decisions,
             "positions": [p for p in engine.positions_api() if p["game_id"] == game_id],

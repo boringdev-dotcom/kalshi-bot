@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from ..domain import OT_SECONDS, QUARTER_SECONDS, FanDuelOdds, Game, Rung, Team, fmt_clock, now_iso
+from ..model.quarters import QUARTER_SHARE, p_no, project_quarter
 from ..model.totals import LINE_EXTRAS, _phi, distribution
 
 TEAMS = [
@@ -59,9 +60,10 @@ class SimGame:
 
     _counter = 0
 
-    def __init__(self, rng: random.Random, tip_in: float = 0.0):
+    def __init__(self, rng: random.Random, tip_in: float = 0.0, quarters: bool = True):
         SimGame._counter += 1
         self.rng = rng
+        self.with_quarters = quarters  # the training gym skips quarter markets for speed
         away, home = rng.sample(TEAMS, 2)
         line = round(rng.gauss(229, 7)) + 0.5
         self.game = Game(
@@ -85,8 +87,8 @@ class SimGame:
         self._ball_home = rng.random() < 0.5
         self._poss_left = self._draw_possession()
         self._mm_bias = 0.0
-        self._rung_noise: dict[float, float] = {}
-        self._rung_spread: dict[float, int] = {}
+        self._rung_noise: dict[Any, float] = {}
+        self._rung_spread: dict[Any, int] = {}
 
     # -- game clock ------------------------------------------------------------
     @property
@@ -125,12 +127,12 @@ class SimGame:
         if self._fouling():
             leading_has_ball = (g.home.score > g.away.score) == self._ball_home
             if leading_has_ball:  # sent to the line
-                team.score += self.rng.choices([0, 1, 2], [0.05, 0.3, 0.65])[0]
+                team.add_points(self.rng.choices([0, 1, 2], [0.05, 0.3, 0.65])[0], g.period)
             elif self.rng.random() < 0.42:  # trailing team hunting quick threes
-                team.score += self.rng.choices([2, 3], [0.4, 0.6])[0]
+                team.add_points(self.rng.choices([2, 3], [0.4, 0.6])[0], g.period)
         elif self.rng.random() < min(0.75, max(0.25, ppp / MEAN_GIVEN_SCORE)):
             pts, weights = zip(*POINTS_GIVEN_SCORE)
-            team.score += self.rng.choices(pts, weights)[0]
+            team.add_points(self.rng.choices(pts, weights)[0], g.period)
         self._ball_home = not self._ball_home
         self.hot = 1.0 + 0.97 * (self.hot - 1.0) + self.rng.gauss(0, 0.006)
 
@@ -161,7 +163,7 @@ class SimGame:
         if g.period >= 4 and 1 <= g.margin <= 3 and self.rng.random() < TYING_SHOT[g.margin] * (1.0 if g.period == 4 else 0.4):
             # The trailing team gets the tying bucket at the horn.
             trailing = g.home if g.home.score < g.away.score else g.away
-            trailing.score += g.margin
+            trailing.add_points(g.margin, g.period)
         if g.period >= 4 and g.home.score != g.away.score:
             g.state, g.clock_seconds = "final", 0.0
             return
@@ -182,6 +184,8 @@ class SimGame:
     def quote(self) -> None:
         """Refresh the synthetic ladder and sportsbook line from the current state."""
         g = self.game
+        if self.with_quarters:
+            self._quote_quarters()
         if g.state == "final":
             for r in g.ladder:
                 over = g.total > r.strike
@@ -219,6 +223,48 @@ class SimGame:
             r.no_ask = 100 - bid if bid >= 1 else None
             r.volume += self.rng.random() * 3
         self._quote_book(dist.mean)
+
+    def _quote_quarters(self) -> None:
+        """Synthetic quarter totals and spreads, priced off the quarter model plus noise."""
+        g = self.game
+        if not g.quarter_markets:
+            for q in (1, 2, 3, 4):
+                centre = math.floor(QUARTER_SHARE[q] * (g.pregame_total or 229)) + 0.5
+                totals = [
+                    Rung(ticker=f"{g.event_ticker}-Q{q}T{math.ceil(centre + 2 * i)}", strike=centre + 2 * i, segment=f"q{q}")
+                    for i in range(-6, 7)
+                ]
+                spreads = []
+                for team, other, lines in (
+                    (g.away, g.home, (1.5, 3.5, 5.5, 7.5, 9.5, 11.5)),
+                    (g.home, g.away, (1.5, 3.5, 5.5, 7.5, 9.5, 11.5, 13.5)),
+                ):
+                    spreads += [
+                        Rung(ticker=f"{g.event_ticker}-Q{q}S{team.abbr}{math.ceil(line)}", strike=line, segment=f"q{q}",
+                             kind="spread", team=team.abbr, other_team=other.abbr)
+                        for line in lines
+                    ]
+                g.quarter_markets[f"q{q}"] = {"total": totals, "spread": spreads}
+        for q in (1, 2, 3, 4):
+            proj = project_quarter(g, q)
+            for rungs in g.quarter_markets[f"q{q}"].values():
+                for r in rungs:
+                    if proj is None:
+                        value = g.settle_value(r.segment, r.kind, r.team)
+                        r.yes_bid = r.yes_ask = r.no_bid = r.no_ask = None
+                        r.result = "yes" if value is not None and value > r.strike else "no"
+                        continue
+                    noise = 0.9 * self._rung_noise.get(r.ticker, 0.0) + self.rng.gauss(0, 0.004)
+                    self._rung_noise[r.ticker] = noise
+                    p_yes = 1 - p_no(r, g, q, proj)
+                    mid = 100 * min(0.995, max(0.005, p_yes + noise + self._mm_bias))
+                    spread = self._rung_spread.setdefault(r.ticker, self.rng.choice([2, 2, 3, 4]))
+                    bid = min(max(int(math.floor(mid - spread / 2 + 0.5)), 0), 99 - spread)
+                    r.yes_bid = bid if bid >= 1 else None
+                    r.yes_ask = bid + spread
+                    r.no_bid = 100 - (bid + spread)
+                    r.no_ask = 100 - bid if bid >= 1 else None
+                    r.volume += self.rng.random()
 
     def _ensure_ladder(self, mean: float) -> None:
         g = self.game

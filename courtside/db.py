@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS positions (
   ticker TEXT NOT NULL,
   strike REAL NOT NULL,
   side TEXT NOT NULL,
+  segment TEXT NOT NULL DEFAULT 'game',
+  kind TEXT NOT NULL DEFAULT 'total',
+  team TEXT,
+  label TEXT,
   contracts INTEGER NOT NULL,
   entry_price INTEGER NOT NULL,
   cost REAL NOT NULL,
@@ -106,6 +110,27 @@ CREATE TABLE IF NOT EXISTS chat (
   tools TEXT NOT NULL DEFAULT '[]'
 );
 
+-- The shadow book: quarter markets the agent watched but did not trade.
+CREATE TABLE IF NOT EXISTS observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  game_id TEXT NOT NULL,
+  game_label TEXT NOT NULL,
+  simulated INTEGER NOT NULL DEFAULT 0,
+  segment TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  ticker TEXT NOT NULL,
+  team TEXT,
+  strike REAL NOT NULL,
+  checkpoint TEXT NOT NULL,
+  yes_ask INTEGER NOT NULL,
+  no_ask INTEGER NOT NULL,
+  p_yes REAL NOT NULL,
+  outcome_yes INTEGER,
+  created_at TEXT NOT NULL,
+  UNIQUE (ticker, checkpoint)
+);
+CREATE INDEX IF NOT EXISTS idx_observations_game ON observations(game_id, segment);
+
 CREATE TABLE IF NOT EXISTS equity (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL,
@@ -113,6 +138,14 @@ CREATE TABLE IF NOT EXISTS equity (
   equity REAL NOT NULL
 );
 """
+
+# Columns added after a database may already exist: (table, column, definition).
+MIGRATIONS = [
+    ("positions", "segment", "TEXT NOT NULL DEFAULT 'game'"),
+    ("positions", "kind", "TEXT NOT NULL DEFAULT 'total'"),
+    ("positions", "team", "TEXT"),
+    ("positions", "label", "TEXT"),
+]
 
 JSON_COLUMNS = {"context", "memory_ids", "data", "tags", "tools"}
 BOOL_COLUMNS = {"simulated", "training", "pinned"}
@@ -129,6 +162,10 @@ class DB:
             if path != ":memory:":
                 self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.executescript(SCHEMA)
+            for table, column, definition in MIGRATIONS:
+                have = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+                if column not in have:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     # -- generic -----------------------------------------------------------
     def execute(self, sql: str, params: Iterable[Any] = ()) -> int:

@@ -6,7 +6,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { api, ApiError } from '../api'
 import { Page } from '../components/Layout'
 import { Badge, Button, Card, Dialog, Empty, Meter, RiskDot, SectionTitle, Segmented, SimTag, Skeleton, Ticker, type Tone } from '../components/ui'
-import { cents, money, pct, pnlColor, relTime, shortDate, signedPct } from '../format'
+import { cents, money, pct, pnlColor, relTime, segmentLabel, shortDate, signedPct, tradeLabel } from '../format'
 import { useStore } from '../store'
 import type { ExitReason, LearningState, Position, Trade } from '../types'
 
@@ -108,7 +108,7 @@ function PositionsTable({ positions, onClose }: { positions: Position[]; onClose
                         )}
                         style={{ background: p.side === 'under' ? 'rgba(61,220,151,0.12)' : 'rgba(255,107,107,0.12)' }}
                       >
-                        {p.side} {p.strike}
+                        {tradeLabel(p)}
                       </span>
                       <span className="text-xs font-semibold text-slate-100">{p.game_label}</span>
                       {p.simulated && <SimTag />}
@@ -213,7 +213,7 @@ function TradesTable({ trades }: { trades: Trade[] }) {
                       )}
                       style={{ background: t.side === 'under' ? 'rgba(61,220,151,0.12)' : 'rgba(255,107,107,0.12)' }}
                     >
-                      {t.side} {t.strike}
+                      {tradeLabel(t)}
                     </span>
                     <span className="text-xs font-semibold text-slate-100">{t.game_label}</span>
                     {t.simulated && <SimTag />}
@@ -250,7 +250,12 @@ function TradesTable({ trades }: { trades: Trade[] }) {
                     <span className="text-[11px] text-dim">—</span>
                   )}
                 </td>
-                <td className={clsx(td, 'num text-right text-xs text-slate-300')}>{t.final_total ?? '—'}</td>
+                <td
+                  className={clsx(td, 'num text-right text-xs text-slate-300')}
+                  title={t.kind === 'spread' ? `${t.team ?? 'Backed team'} margin in ${segmentLabel(t.segment)}` : undefined}
+                >
+                  {t.final_total == null ? '—' : t.kind === 'spread' && t.final_total > 0 ? `+${t.final_total}` : t.final_total}
+                </td>
                 <td className={clsx(td, 'num text-right text-[11px] text-dim')}>{shortDate(t.closed_at)}</td>
               </tr>
             )
@@ -374,7 +379,7 @@ export default function Portfolio() {
       addTrade(trade, closing.id)
       toast({
         level: trade.pnl >= 0 ? 'success' : 'warn',
-        title: `Closed ${trade.side} ${trade.strike} · ${money(trade.pnl, { sign: true })}`,
+        title: `Closed ${tradeLabel(trade)} · ${money(trade.pnl, { sign: true })}`,
         body: `${trade.contracts} contracts sold at ${cents(trade.exit_price)} — ${trade.game_label}`,
       })
       setClosing(null)
@@ -460,7 +465,7 @@ export default function Portfolio() {
         open={!!closing}
         onClose={() => !busy && setClosing(null)}
         title="Close this position?"
-        subtitle={closingLive ? `${closingLive.game_label} · ${closingLive.side} ${closingLive.strike}` : undefined}
+        subtitle={closingLive ? `${closingLive.game_label} · ${tradeLabel(closingLive)}` : undefined}
         accent="#f5b74e"
         width={420}
       >

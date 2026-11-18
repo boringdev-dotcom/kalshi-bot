@@ -88,6 +88,63 @@ function Team({ team, align, leading, started }: { team: TeamSide; align: 'left'
   )
 }
 
+/** Quarter-by-quarter points for both teams, current period highlighted. */
+function Linescore({ game }: { game: Game }) {
+  const away = game.away.quarters ?? []
+  const home = game.home.quarters ?? []
+  const periods = Math.max(4, away.length, home.length)
+  if (game.state === 'pre' || (away.length === 0 && home.length === 0)) return null
+  const cols = Array.from({ length: periods }, (_, i) => i)
+  const current = game.state === 'live' ? game.period - 1 : -1
+  const head = (i: number) => (i < 4 ? `Q${i + 1}` : i === 4 ? 'OT' : `${i - 3}OT`)
+  const row = (team: TeamSide, pts: number[]) => (
+    <tr>
+      <td className="pr-3 text-left text-[10.5px] font-bold tracking-wide" style={{ color: teamColor(team.color) }}>
+        {team.abbr}
+      </td>
+      {cols.map((i) => (
+        <td
+          key={i}
+          className={clsx(
+            'num w-9 px-1 text-center text-[11.5px]',
+            i === current ? 'font-bold text-slate-50' : pts[i] == null ? 'text-ink-600' : 'text-slate-300',
+          )}
+        >
+          {pts[i] == null ? '–' : pts[i]}
+        </td>
+      ))}
+      <td className="num w-10 pl-2 text-right text-[11.5px] font-bold text-slate-100">{team.score}</td>
+    </tr>
+  )
+  return (
+    <div className="mt-4 flex justify-center">
+      <table className="border-separate border-spacing-y-0.5">
+        <thead>
+          <tr>
+            <th />
+            {cols.map((i) => (
+              <th
+                key={i}
+                className={clsx(
+                  'w-9 px-1 text-center text-[9px] font-semibold uppercase tracking-wider',
+                  i === current ? 'text-peri' : 'text-dim',
+                )}
+              >
+                {head(i)}
+              </th>
+            ))}
+            <th className="w-10 pl-2 text-right text-[9px] font-semibold uppercase tracking-wider text-dim">T</th>
+          </tr>
+        </thead>
+        <tbody>
+          {row(game.away, away)}
+          {row(game.home, home)}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function Cell({ label, children, sub }: { label: string; children: React.ReactNode; sub?: React.ReactNode }) {
   return (
     <div className="min-w-0 px-4 py-3">
@@ -127,6 +184,7 @@ export default function Scorebug({ game }: { game: Game }) {
           <ClockRing game={game} />
           <Team team={game.home} align="right" leading={game.home.score >= game.away.score} started={started} />
         </div>
+        <Linescore game={game} />
       </div>
 
       <div className="grid grid-cols-2 divide-x divide-hair border-t border-hair md:grid-cols-5 [&>*]:border-hair">

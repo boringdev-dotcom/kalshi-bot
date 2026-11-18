@@ -101,7 +101,7 @@ def find_entries(game: Game, p: dict[str, float]) -> list[Candidate] | Skip | No
     Returns None when the game is simply not in the window (nothing worth
     logging), a Skip when it is in the window but fails a rule, or candidates.
     """
-    if game.state != "live" or game.period != 4:
+    if not game.in_fourth:
         return None
     mins = game.minutes_left
     if mins > p["max_minutes_left"] or mins < p["min_minutes_left"]:
@@ -110,11 +110,11 @@ def find_entries(game: Game, p: dict[str, float]) -> list[Candidate] | Skip | No
     if ref is None or not game.ladder:
         return Skip("no_data", f"{game.label}: no line or markets yet", "Waiting for a reference line and a Kalshi ladder.")
 
-    base = {"line": ref, "clock": f"Q4 {game.clock}", "margin": game.margin, "total": game.total}
+    base = {"line": ref, "clock": "End of Q3" if game.at_q3_end else f"Q4 {game.clock}", "margin": game.margin, "total": game.total}
     if mins < 5 and game.margin <= p["skip_close_margin"]:
         return Skip(
             "close_game",
-            f"Pass on {game.label}: {game.margin}-pt game with {game.clock} left",
+            f"Pass on {game.label}: {game.margin}-pt game with {game.q4_clock} left",
             f"Inside 5:00 a game within {p['skip_close_margin']:g} points tends to end in fouls, quick threes "
             f"and sometimes overtime, which is exactly what breaks an under. Staying out.",
             {**base, "ot_chance": f"{(game.projection.p_ot if game.projection else 0):.0%}"},
@@ -146,7 +146,7 @@ def find_entries(game: Game, p: dict[str, float]) -> list[Candidate] | Skip | No
                 arm=arm_key(buffer, mins, game.margin),
                 context={
                     "period": game.period,
-                    "clock": game.clock,
+                    "clock": game.q4_clock,
                     "minutes_left": round(mins, 2),
                     "total": game.total,
                     "margin": game.margin,
@@ -205,7 +205,7 @@ def exit_signal(
     floor = min(97.0, p["min_p_win"] + prof["p_shift"]) / 100.0
     stop = p["stop_loss"] * prof["stop_mult"]
     label = f"{game.label} {side} {strike:g}"
-    data = {"bid": f"{bid}c", "entry": f"{entry_price}c", "win_chance": f"{p_win:.0%}", "clock": f"Q{game.period} {game.clock}" if game.period <= 4 else "OT", "margin": game.margin}
+    data = {"bid": f"{bid}c", "entry": f"{entry_price}c", "win_chance": f"{p_win:.0%}", "clock": "End of Q3" if game.at_q3_end else f"Q{game.period} {game.clock}" if game.period <= 4 else "OT", "margin": game.margin}
 
     if p["take_profit"] < 100 and bid >= p["take_profit"] and bid > entry_price:
         return ExitSignal(
@@ -220,7 +220,7 @@ def exit_signal(
             "risk_exit",
             f"Getting out of {label}: win chance down to {p_win:.0%}",
             f"The model's chance of this finishing {side} {strike:g} fell to {p_win:.0%}, under the {floor:.0%} floor "
-            f"({profile} exit). Total is {game.total} with {game.clock} left in a {game.margin}-pt game. "
+            f"({profile} exit). Total is {game.total} with {game.q4_clock} left in a {game.margin}-pt game. "
             f"Selling at {bid}c against a {entry_price}c entry for a small loss instead of risking the whole stake.",
             bid,
             data,
@@ -240,7 +240,7 @@ def exit_signal(
             return ExitSignal(
                 "risk_exit",
                 f"Getting out of {label}: overtime risk {proj.p_ot:.0%}",
-                f"A {game.margin}-pt game with {game.clock} left has about a {proj.p_ot:.0%} chance of overtime, and an "
+                f"A {game.margin}-pt game with {game.q4_clock} left has about a {proj.p_ot:.0%} chance of overtime, and an "
                 f"extra period (~{OT_MEAN:.0f} pts) would push the total past {strike:g}. Selling at {bid}c.",
                 bid,
                 {**data, "ot_chance": f"{proj.p_ot:.0%}"},

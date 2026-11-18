@@ -7,6 +7,7 @@ import { Badge, Button, Card, Empty, Meter, SectionTitle, Segmented, Skeleton, S
 import { money, pct, pnlColor, signedPct } from '../../format'
 import { useStore } from '../../store'
 import type { Arm, ExitArm, LearningState, TrainResult } from '../../types'
+import QuarterBook from './QuarterBook'
 
 /* ───────────────────────── Totals ───────────────────────── */
 
@@ -527,6 +528,7 @@ export default function LearningTab() {
         <ExitProfiles arms={state.exit_arms} />
         <Calibration rows={state.calibration} />
       </div>
+      <QuarterBook data={state.quarters} />
     </div>
   )
 }

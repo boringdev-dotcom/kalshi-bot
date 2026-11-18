@@ -20,7 +20,7 @@ npm run dev                 # UI on http://localhost:5173
 After `npm run build`, the API serves the built UI itself at `http://localhost:8000`.
 
 ```bash
-uv run pytest               # 18 tests: model, rules, learner, memory, engine, feeds, API, sign-in
+uv run pytest               # 23 tests: model, rules, learner, memory, engine, feeds, quarter markets, API, sign-in
 ```
 
 ## Configuration
@@ -57,9 +57,15 @@ The Odds API bills one credit per market per request. The feed asks for the full
 - **Brain** — the playbook sliders, guidance and memory, and what the learner has concluded, plus a training gym.
 - **Settings** — paper/live, simulated/live data, risk limits, connection health.
 
+## Quarter markets
+
+Every game also carries Kalshi's eight quarter markets: a total and a spread for each of Q1-Q4 (Q4 excludes overtime). Pick a quarter above the ladder on the Desk to trade them by hand with the same order ticket, paper or live. They settle when the quarter ends.
+
+The agent does not trade these. It keeps a **shadow book** (`agent/observer.py`): shortly after each quarter starts, and again with about six minutes left, it records what every quarter market cost and what the model thought it was worth, then marks which side won. Brain → Learning shows the result by quarter, market type and price band (how often each won, what the model expected, return per dollar after fees) next to your own quarter record. Your quarter trades also go into its memory. That is the evidence to read before ever letting it trade them; there is no switch for that yet.
+
 ## How the agent works
 
-**The play.** In the fourth quarter, buy the under on a strike well above the live betting line (line 240, buy under 250 or 252) at roughly 90-96c: risk about $300 to make about $20. Sell for a small loss if the game starts threatening the number.
+**The play.** In the fourth quarter, buy the under on a strike well above the live betting line (line 240, buy under 250 or 252) at roughly 90-96c: risk about $300 to make about $20. It starts looking the moment Q3 ends. Sell for a small loss if the game starts threatening the number.
 
 **The model** (`courtside/model/totals.py`). Projects the final total from score, clock, margin, the pregame total and the live FanDuel line, as a mixture of three outcomes: the game stays calm, it turns into a close late foul game, or it goes to overtime. Every Kalshi strike gets a fair probability from that; an open position gets a live win probability.
 

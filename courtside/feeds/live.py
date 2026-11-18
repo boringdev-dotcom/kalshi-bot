@@ -6,7 +6,9 @@ that is down leaves the last good data in place and reports itself unhealthy.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -16,7 +18,7 @@ import httpx
 
 from ..config import Config
 from ..domain import FanDuelOdds, Game, Rung, Team, now_iso
-from ..kalshi.client import KalshiClient, cents
+from ..kalshi.client import KalshiClient, cents, quarter_series
 from ..model.totals import implied_total
 
 log = logging.getLogger(__name__)
@@ -75,6 +77,7 @@ class LiveFeed:
         self._http = httpx.AsyncClient(timeout=10.0)
         self._next = {"scores": 0.0, "kalshi": 0.0, "fanduel": 0.0}
         self._espn_lines: dict[str, FanDuelOdds] = {}
+        self._next_quarter: dict[tuple[int, str], float] = {}
         self._odds_markets = "totals,spreads,h2h"
 
     async def aclose(self) -> None:
@@ -94,6 +97,7 @@ class LiveFeed:
         if now >= self._next["kalshi"]:
             self._next["kalshi"] = now + (3 if any_live else 30)
             await self._guard("kalshi", self._refresh_ladders)
+        await self._refresh_quarter_markets(now, any_live)
         if self.cfg.has_odds and now >= self._next["fanduel"]:
             # The Odds API bills one credit per market per request, so be frugal:
             # the full board hourly while idle, totals only while games are live,
@@ -141,6 +145,9 @@ class LiveFeed:
                 )
             game.home.score = int(sides["home"].get("score") or 0)
             game.away.score = int(sides["away"].get("score") or 0)
+            period_now = int((ev.get("status") or {}).get("period") or 0)
+            for team, side in ((game.home, sides["home"]), (game.away, sides["away"])):
+                team.quarters = self._quarters(side, team.score, period_now)
             status = ev.get("status") or {}
             state = (status.get("type") or {}).get("state", "pre")
             game.state = {"pre": "pre", "in": "live", "post": "final"}.get(state, "pre")
@@ -168,6 +175,25 @@ class LiveFeed:
                 del self.games[gid]
         live = sum(1 for g in self.games.values() if g.state == "live")
         return f"{len(self.games)} games today, {live} live"
+
+    @staticmethod
+    def _quarters(side: dict[str, Any], score: int, period: int) -> list[int]:
+        """Points by period from ESPN's linescore.
+
+        Finished periods come from the linescore. The period in progress is
+        taken as score minus the finished periods, because the score is the
+        number ESPN updates first.
+        """
+        line = []
+        for entry in side.get("linescores") or []:
+            try:
+                line.append(int(float(entry.get("value") or 0)))
+            except (TypeError, ValueError):
+                line.append(0)
+        if period >= 1 and len(line) >= period - 1:
+            done = line[: period - 1]
+            return done + [max(score - sum(done), 0)]
+        return line
 
     @staticmethod
     def _team(side: dict[str, Any]) -> Team:
@@ -212,6 +238,76 @@ class LiveFeed:
                     # No sportsbook line for this game: take the market's own.
                     game.pregame_total = implied_total(game.ladder)
         return f"{matched}/{len(self.games)} games matched to Kalshi total markets"
+
+    # -- Kalshi quarter totals and spreads -------------------------------------
+    async def _refresh_quarter_markets(self, now: float, any_live: bool) -> None:
+        """Eight more series (four quarters x total/spread), each on its own clock.
+
+        The quarter being played, and the next one when a quarter is nearly
+        over, refresh fast enough to trade off; the rest tick over slowly.
+        """
+        if not self.games:
+            return
+        hot: set[int] = set()
+        for g in self.games.values():
+            if g.state == "live" and 1 <= g.period <= 4:
+                hot.add(g.period)
+                if g.clock_seconds <= 150 and g.period < 4:
+                    hot.add(g.period + 1)
+        due = []
+        for q in (1, 2, 3, 4):
+            for kind in ("total", "spread"):
+                if now >= self._next_quarter.get((q, kind), 0.0):
+                    self._next_quarter[(q, kind)] = now + (4 if (q in hot and any_live) else 45 if any_live else 120)
+                    due.append((q, kind))
+        if not due:
+            return
+        results = await asyncio.gather(*(self.kalshi.events(quarter_series(q, k)) for q, k in due), return_exceptions=True)
+        for (q, kind), events in zip(due, results):
+            if isinstance(events, Exception):
+                log.warning("Kalshi Q%s %s fetch failed: %s", q, kind, events)
+                continue
+            for game in self.games.values():
+                event = self._match_event(game, events)
+                if event is None:
+                    continue
+                rungs = [r for r in (self._quarter_rung(game, q, kind, m) for m in event.get("markets") or []) if r]
+                if rungs:
+                    rungs.sort(key=lambda r: (r.team != game.away.abbr, r.strike))
+                    game.quarter_markets.setdefault(f"q{q}", {})[kind] = rungs
+
+    def _quarter_rung(self, game: Game, q: int, kind: str, m: dict[str, Any]) -> Optional[Rung]:
+        strike = m.get("floor_strike")
+        if strike is None:
+            return None
+        rung = Rung(
+            ticker=m["ticker"],
+            strike=float(strike),
+            yes_bid=cents(m.get("yes_bid_dollars")),
+            yes_ask=cents(m.get("yes_ask_dollars")),
+            no_bid=cents(m.get("no_bid_dollars")),
+            no_ask=cents(m.get("no_ask_dollars")),
+            volume=float(m.get("volume_fp") or 0),
+            result=m.get("result") or "",
+            segment=f"q{q}",
+            kind=kind,
+        )
+        if kind == "spread":
+            # The ticker ends in the backed team's code and the line, e.g. "-IND11".
+            code = re.match(r"([A-Z]+)\d+$", m["ticker"].rsplit("-", 1)[-1])
+            team = code.group(1) if code else ""
+            if team not in (game.home.abbr, game.away.abbr):
+                away_city, home_city = self.locations.get(game.id, ("", ""))
+                text = (m.get("yes_sub_title") or m.get("title") or "").lower()
+                if home_city and home_city.lower() in text:
+                    team = game.home.abbr
+                elif away_city and away_city.lower() in text:
+                    team = game.away.abbr
+                else:
+                    return None  # cannot tell which side this backs: do not guess
+            rung.team = team
+            rung.other_team = game.away.abbr if team == game.home.abbr else game.home.abbr
+        return rung
 
     def _match_event(self, game: Game, events: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
         date = _ticker_date(game.start_time)

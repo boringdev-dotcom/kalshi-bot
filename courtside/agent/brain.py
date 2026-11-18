@@ -38,6 +38,7 @@ How the desk works
 - A playbook holds the tunable parameters for that play. An automated loop applies them every second or two: it enters, monitors, exits and settles without you.
 - A learner tracks results by situation (cushion, time left, how close the game is) and by exit style, and shifts behaviour toward what has actually made money.
 - Memory holds the owner's standing guidance, lessons from past trades, and a record of each trade.
+- Quarter markets (total and spread for each of Q1-Q4; Q4 excludes overtime) are the owner's to trade by hand. The automated loop places no orders there. It keeps a shadow book instead: early in each quarter and again with about six minutes left it records what every quarter market cost and what the model thought, then scores them when the quarter ends. get_learning returns that book and the owner's own quarter record. If they ask whether to let the agent trade quarters, answer from those numbers and say plainly when there are too few to judge. In market data "over" always means the YES side and "under" the NO side; for a spread, YES is the named team winning the quarter by more than the line. Use the labels the tools give you.
 
 Your tools read and change that real system. Use them: never state a position, price, result or setting from memory of this conversation when a tool can tell you the current truth. The desk snapshot at the top of each message is fresh as of that message.
 
@@ -103,6 +104,10 @@ _PARAM_KEYS = ", ".join(s.key for s in STRATEGIES[Q4_UNDER]["specs"])
 
 TOOLS = [
     _tool("get_games", "Current games: score, clock, projection, FanDuel line, risk flags, and the Kalshi under prices nearest the action."),
+    _tool("get_quarter_markets", "Tradable quarter totals and spreads for one game: every line with both sides' labels, prices and the model's probability.",
+          {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"},
+           "quarter": {"type": "integer", "enum": [1, 2, 3, 4]}},
+          ["game", "quarter"]),
     _tool("get_positions", "Open positions with live mark, P&L, current win probability and risk flags."),
     _tool("get_trades", "Closed trades, newest first, with exit reason and (for early exits on finished games) whether selling beat holding.",
           {"limit": {"type": "integer", "description": "How many, default 20"}}),
@@ -123,8 +128,8 @@ TOOLS = [
     _tool("get_learning", "What the learner has concluded: results by situation, exit-style performance, calibration, overall record."),
     _tool("set_agent", "Start or pause the automated trading loop.", {"enabled": {"type": "boolean"}}, ["enabled"]),
     _tool("close_position", "Sell an open position at the current bid.", {"position_id": {"type": "integer"}}, ["position_id"]),
-    _tool("place_order", "Buy the under or over on a Kalshi total at the current ask. Capped by the max stake per trade.",
-          {"ticker": {"type": "string"}, "side": {"type": "string", "enum": ["under", "over"]}, "stake": {"type": "number", "description": "Dollars to put down"}},
+    _tool("place_order", "Buy one side of any Kalshi market on the desk (game total, quarter total or quarter spread) at the current ask, on the owner's instruction. Capped by the max stake per trade.",
+          {"ticker": {"type": "string"}, "side": {"type": "string", "enum": ["under", "over"], "description": "'over' buys the YES side, 'under' the NO side"}, "stake": {"type": "number", "description": "Dollars to put down"}},
           ["ticker", "side", "stake"]),
 ]
 
@@ -393,8 +398,23 @@ class Brain:
                 "risk": {"level": g.risk.level, "flags": g.risk.flags},
                 "unders": [{"ticker": r.ticker, "strike": r.strike, "ask": r.no_ask, "bid": r.no_bid,
                             "model_p": round(r.p_under, 3), "edge": r.edge_under} for r in near],
+                "quarters": [{k: v[k] for k in ("label", "status", "home_points", "away_points", "seconds_remaining", "projection")}
+                             for v in g.quarter_view],
             })
         return f"looked at {len(out)} games", out
+
+    async def _t_get_quarter_markets(self, game: str, quarter: int) -> tuple[str, Any]:
+        found = next((g for g in self.engine.games if game.lower() in g.label.lower()), None)
+        if found is None:
+            raise ValueError(f"No game matching '{game}'")
+        markets = found.quarter_markets.get(f"q{quarter}", {})
+        view = found.quarter_view[quarter - 1] if len(found.quarter_view) >= quarter else {}
+
+        def rows(kind: str) -> list[dict[str, Any]]:
+            return [{"ticker": r.ticker, "yes": r.label("over"), "yes_ask": r.yes_ask, "no": r.label("under"), "no_ask": r.no_ask,
+                     "model_p_yes": round(1 - r.p_under, 3)} for r in markets.get(kind, [])]
+
+        return f"looked at Q{quarter} markets for {found.label}", {"game": found.label, "quarter": view, "totals": rows("total"), "spreads": rows("spread")}
 
     async def _t_get_positions(self) -> tuple[str, Any]:
         rows = self.engine.positions_api()
@@ -439,6 +459,7 @@ class Brain:
     async def _t_get_learning(self) -> tuple[str, Any]:
         state = self.engine.learning_state()
         state["arms"] = [a for a in state["arms"] if a["n"] or a["sim_n"]]
+        state["quarters"]["cells"] = [c for c in state["quarters"]["cells"] if c["n"] >= 10]
         state.pop("equity_curve")
         return "read what the learner has concluded", state
 
