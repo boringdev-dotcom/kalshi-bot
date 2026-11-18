@@ -31,7 +31,7 @@ def train(db: DB, playbook: Playbook, learner: Learner, memory: MemoryStore, epi
     trades: list[dict[str, Any]] = []
 
     for _ in range(episodes):
-        sim = SimGame(rng)
+        sim = SimGame(rng, quarters=False)
         game = sim.game
         sim.fast_forward(4, 720.0)
         position: Optional[dict[str, Any]] = None

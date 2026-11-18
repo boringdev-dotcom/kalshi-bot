@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from courtside.agent.engine import Engine, TradeError
 from courtside.agent.learner import Learner
 from courtside.agent.memory import MemoryStore
+from courtside.agent.observer import QuarterObserver
 from courtside.agent.playbook import Q4_UNDER, Playbook
 from courtside.agent.policy import arm_key, exit_signal, find_entries, kalshi_fee, size_order, Skip
 from courtside.agent.trainer import train
@@ -20,8 +21,10 @@ from courtside.db import DB
 from courtside.domain import FanDuelOdds, Game, Rung, Team
 from courtside.events import Hub
 from courtside.kalshi.client import cents, side_and_price
+from courtside.model.quarters import project_quarter
 from courtside.feeds.live import LiveFeed
-from courtside.kalshi.client import KalshiClient
+from courtside.feeds.sim import SimGame
+from courtside.kalshi.client import KalshiClient, quarter_series
 from courtside.model.totals import distribution, implied_total, refresh_game
 
 
@@ -253,6 +256,10 @@ def test_api_shapes_and_a_manual_paper_order(tmp_path, monkeypatch):
         rung = next(r for r in live["ladder"] if r["no_ask"] and 50 <= r["no_ask"] <= 97)
         detail = client.get(f"/api/games/{live['id']}").json()
         assert detail["timeline"] and {"t", "total", "projected", "lo", "hi", "line"} <= set(detail["timeline"][0])
+        assert [m["segment"] for m in detail["quarter_markets"]] == ["q1", "q2", "q3", "q4"]
+        assert len(detail["quarter_markets"][0]["totals"]) == 13 and len(detail["quarter_markets"][0]["spreads"]) == 13
+        assert {"yes_label", "no_label", "segment", "kind", "team"} <= set(detail["quarter_markets"][3]["spreads"][0])
+        assert len(live["quarters"]) == 4 and "quarter_markets" not in live and len(live["home"]["quarters"]) >= 1
 
         bad = client.post("/api/orders", json={"ticker": rung["ticker"], "side": "under", "contracts": 10, "price": 1})
         assert bad.status_code == 400 and "limit" in bad.json()["detail"]
@@ -274,6 +281,7 @@ def test_api_shapes_and_a_manual_paper_order(tmp_path, monkeypatch):
         assert client.patch(f"/api/memory/{mem['id']}", json={"pinned": False}).json()["pinned"] is False
         learning = client.get("/api/learning").json()
         assert len(learning["arms"]) == 60 and len(learning["exit_arms"]) == 3
+        assert {"observations", "settled", "games", "cells", "your_trades"} <= set(learning["quarters"])
         result = client.post("/api/sim/train", json={"episodes": 40}).json()
         assert result["episodes"] == 40
         assert client.put("/api/settings", json={"trading_mode": "live"}).status_code == 400
@@ -298,8 +306,10 @@ ESPN = {"events": [{
     "status": {"period": 4, "clock": 312.0, "displayClock": "5:12", "type": {"state": "in"}},
     "competitions": [{
         "competitors": [
-            {"homeAway": "home", "score": "101", "team": {"abbreviation": "CLE", "displayName": "Cleveland Cavaliers", "location": "Cleveland", "color": "860038"}},
-            {"homeAway": "away", "score": "96", "team": {"abbreviation": "GS", "displayName": "Golden State Warriors", "location": "Golden State", "color": "ffc72c"}},
+            {"homeAway": "home", "score": "101", "linescores": [{"value": 30.0}, {"value": 24.0}, {"value": 29.0}, {"value": 17.0}],
+             "team": {"abbreviation": "CLE", "displayName": "Cleveland Cavaliers", "location": "Cleveland", "color": "860038"}},
+            {"homeAway": "away", "score": "96", "linescores": [{"value": 27.0}, {"value": 31.0}, {"value": 22.0}],
+             "team": {"abbreviation": "GS", "displayName": "Golden State Warriors", "location": "Golden State", "color": "ffc72c"}},
         ],
         "odds": [{"overUnder": 231.5, "spread": -4.5}],
     }],
@@ -325,8 +335,20 @@ def test_live_feed_joins_espn_kalshi_and_fanduel():
             return None
 
     class FakeKalshi(KalshiClient):
-        async def nba_total_events(self):
-            return KALSHI
+        async def events(self, series_ticker):
+            if series_ticker == "KXNBATOTAL":
+                return KALSHI
+            quote = {"yes_bid_dollars": "0.4000", "yes_ask_dollars": "0.4300", "no_bid_dollars": "0.5700", "no_ask_dollars": "0.6000", "volume_fp": "1.00"}
+            event = f"{series_ticker}-26NOV18GSWCLE"
+            if series_ticker.endswith("TOTAL"):
+                markets = [{"ticker": f"{event}-{s}", "floor_strike": s - 0.5, "yes_sub_title": f"Over {s - 0.5} points", **quote} for s in (52, 54, 56)]
+            else:
+                markets = [
+                    {"ticker": f"{event}-CLE4", "floor_strike": 3.5, "yes_sub_title": "Cleveland wins by over 3.5 points", **quote},
+                    {"ticker": f"{event}-GSW2", "floor_strike": 1.5, "yes_sub_title": "Golden State wins by over 1.5 points", **quote},
+                    {"ticker": f"{event}-XYZ9", "floor_strike": 8.5, "yes_sub_title": "Somebody wins by over 8.5 points", **quote},
+                ]
+            return [{"event_ticker": event, "title": "Golden State vs Cleveland", "markets": markets}]
 
     async def run():
         cfg = Config(_env_file=None, odds_api_key="k", kalshi_api_key_id="", kalshi_private_key_pem="", anthropic_api_key="")
@@ -347,6 +369,24 @@ def test_live_feed_joins_espn_kalshi_and_fanduel():
     assert (fd.source, fd.live, fd.total_line, fd.over_price, fd.under_price, fd.spread, fd.home_ml, fd.away_ml) == ("fanduel", True, 232.5, -112, -108, -5.5, -420, 320)
     assert game.pregame_total == 231.5
     assert implied_total(game.ladder) == 231.5  # the strike quoted 49-51
+
+    # Quarter by quarter: finished periods from the linescore, the live one from the score.
+    assert game.home.quarters == [30, 24, 29, 18] and game.away.quarters == [27, 31, 22, 16]
+    assert sum(game.home.quarters) == 101 and sum(game.away.quarters) == 96
+    assert quarter_series(3, "spread") == "KXNBA3QSPREAD"
+    assert set(game.quarter_markets) == {"q1", "q2", "q3", "q4"}
+    q1 = game.quarter_markets["q1"]
+    assert [r.strike for r in q1["total"]] == [51.5, 53.5, 55.5] and all(r.segment == "q1" and r.kind == "total" for r in q1["total"])
+    spreads = {r.team: r for r in q1["spread"]}
+    assert set(spreads) == {"CLE", "GSW"}  # the rung naming neither team is dropped, not guessed at
+    assert (spreads["CLE"].label("over"), spreads["CLE"].label("under")) == ("CLE -3.5", "GSW +3.5")
+    assert spreads["GSW"].position_label("under") == "Q1 CLE +1.5"
+    refresh_game(game)
+    assert [v["status"] for v in game.quarter_view] == ["final", "final", "final", "live"]
+    assert game.settle_value("q1", "total", None) == 57 and game.settle_value("q1", "spread", "CLE") == 3
+    assert game.settle_value("q2", "spread", "GSW") == 7 and game.settle_value("q4", "total", None) is None
+    # Q1 finished 57 with CLE +3: every Q1 market is now a certainty one way or the other.
+    assert [r.p_under for r in q1["total"]] == [0.0, 0.0, 0.0] and spreads["CLE"].p_under == 1.0
 
 
 # -------------------------------------------------------------------- auth
@@ -399,3 +439,121 @@ def test_repeated_wrong_passwords_are_throttled(tmp_path, monkeypatch):
         codes = [client.post("/api/auth/login", json={"password": f"guess{i}"}).status_code for i in range(10)]
         assert codes[:8] == [401] * 8 and codes[8:] == [429, 429]
         assert client.post("/api/auth/login", json={"password": "hunter2-not-real"}).status_code == 429
+
+
+# ---------------------------------------------------------- quarter markets
+def test_quarter_model_tracks_the_clock_and_the_score():
+    game = q4_game(total=0, clock=720.0, margin=0)
+    game.state, game.period = "pre", 0
+    game.home.score = game.away.score = 0
+    before = [project_quarter(game, q) for q in (1, 2, 3, 4)]
+    assert all(52 < p["total_mean"] < 62 and 9 < p["total_sd"] < 10.5 for p in before)
+    assert before[0]["total_mean"] > before[3]["total_mean"] - 3  # first quarters run at least as hot as fourths
+
+    game.state, game.period, game.clock_seconds, game.clock = "live", 2, 180.0, "3:00"
+    game.home.quarters, game.away.quarters = [30, 22], [26, 20]
+    game.home.score, game.away.score = 52, 46
+    live = project_quarter(game, 2)
+    assert project_quarter(game, 1) is None  # finished
+    assert 42 + 10 < live["total_mean"] < 42 + 20 and live["total_sd"] < 6  # 42 scored, three minutes of scoring to come
+    assert 1.5 < live["margin_mean"] < 3.5  # home leads the quarter 22-20 and is the better side
+    assert game.quarter_points(2) == (22, 20) and game.quarter_seconds_left(3) == 720
+
+
+def test_a_quarter_trade_by_hand_settles_when_the_quarter_ends():
+    async def run():
+        engine = make_engine()
+        await engine.update_settings({"agent_enabled": False})
+        sim = SimGame(random.Random(11))
+        sim.fast_forward(2, 500.0)
+        sim.quote()
+        engine.games, engine.by_id = [sim.game], {sim.game.id: sim.game}
+        refresh_game(sim.game)
+        game = sim.game
+
+        total = next(r for r in game.quarter_markets["q2"]["total"] if r.no_ask and r.yes_ask and 25 <= r.no_ask <= 75)
+        spread = next(r for r in game.quarter_markets["q2"]["spread"] if r.no_ask and r.yes_ask and 25 <= r.yes_ask <= 75)
+        under = await engine.manual_order(total.ticker, "under", 20, total.no_ask)
+        cover = await engine.manual_order(spread.ticker, "over", 20, spread.yes_ask)
+        assert (under["segment"], under["kind"], under["label"]) == ("q2", "total", f"Q2 Under {total.strike:g}")
+        assert (cover["kind"], cover["team"], cover["label"]) == ("spread", spread.team, f"Q2 {spread.team} -{spread.strike:g}")
+
+        settled_q1 = game.quarter_markets["q1"]["total"][0]
+        with pytest.raises(TradeError, match="already settled"):
+            await engine.open_position(game, settled_q1, "under", 5, 50, opened_by="user")
+
+        sim.fast_forward(3, 700.0)  # Q2 is over
+        sim.quote()
+        refresh_game(game)
+        await engine._settle_finished()
+        return engine, game, total, spread
+
+    engine, game, total, spread = asyncio.run(run())
+    assert engine.open_rows() == []
+    rows = {r["kind"]: r for r in engine.db.query("SELECT * FROM positions WHERE status='closed'")}
+    home, away = game.quarter_points(2)
+    assert rows["total"]["final_total"] == home + away
+    assert (rows["total"]["exit_reason"] == "settled_win") == (home + away < total.strike)
+    margin = home - away if spread.team == game.home.abbr else away - home
+    assert rows["spread"]["final_total"] == margin
+    assert (rows["spread"]["exit_reason"] == "settled_win") == (margin > spread.strike)
+    assert rows["total"]["pnl"] == pytest.approx((20 if rows["total"]["exit_reason"] == "settled_win" else 0) - rows["total"]["cost"], abs=0.01)
+    # The agent keeps a record of your quarter trades, and they never feed its own Q4 learner.
+    episodes = engine.memory.list(kind="episode")
+    assert len(episodes) == 2 and all({"quarter", "q2", "manual"} <= set(e["tags"]) for e in episodes)
+    assert "your trade" in episodes[0]["text"] and "left in Q2" in episodes[0]["text"]
+    assert sum(a["n"] + a["sim_n"] for a in engine.learner.arms()) == 0
+    mine = engine.learning_state()["quarters"]["your_trades"]
+    assert {(t["segment"], t["kind"], t["n"]) for t in mine} == {("q2", "total", 1), ("q2", "spread", 1)}
+
+
+def test_shadow_book_records_quarter_prices_and_scores_them():
+    db = DB(":memory:")
+    observer = QuarterObserver(db)
+    rng = random.Random(21)
+    for _ in range(12):
+        sim = SimGame(rng)
+        game = sim.game
+        sim.tip_in = 0.0
+        while game.state != "final":
+            sim.advance(20.0)
+            sim.quote()
+            refresh_game(game)
+            observer.observe([game])
+    book = observer.summary(simulated=True)
+    assert book["games"] == 12 and book["observations"] > 1000 and book["settled"] == book["observations"]
+    assert observer.summary(simulated=False)["observations"] == 0  # the sandbox never leaks into the real book
+    assert {c["segment"] for c in book["cells"]} == {"q1", "q2", "q3", "q4"}
+    assert {c["kind"] for c in book["cells"]} == {"total", "spread"} and {c["checkpoint"] for c in book["cells"]} == {"open", "mid"}
+    # Dearer contracts win more often, and by mid-quarter the prices are worth trusting.
+    favs = [c for c in book["cells"] if c["bucket"] == "80-97" and c["n"] >= 30]
+    dogs = [c for c in book["cells"] if c["bucket"] == "3-20" and c["n"] >= 30]
+    assert favs and dogs
+    assert min(c["win_rate"] for c in favs) > max(c["win_rate"] for c in dogs)
+    assert all(abs(c["win_rate"] - c["price"] / 100) < 0.2 for c in favs + dogs)
+    # Nothing is recorded twice for the same market and moment.
+    assert db.one("SELECT COUNT(*) n FROM (SELECT ticker, checkpoint FROM observations GROUP BY 1, 2 HAVING COUNT(*) > 1)")["n"] == 0
+
+
+def test_an_existing_database_gains_the_quarter_columns(tmp_path):
+    import sqlite3
+
+    path = str(tmp_path / "old.db")
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE positions (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL DEFAULT 'open', game_id TEXT NOT NULL, "
+        "game_label TEXT NOT NULL, ticker TEXT NOT NULL, strike REAL NOT NULL, side TEXT NOT NULL, contracts INTEGER NOT NULL, "
+        "entry_price INTEGER NOT NULL, cost REAL NOT NULL, fees REAL NOT NULL DEFAULT 0, opened_at TEXT NOT NULL, opened_by TEXT NOT NULL, "
+        "mode TEXT NOT NULL, simulated INTEGER NOT NULL DEFAULT 0, training INTEGER NOT NULL DEFAULT 0, strategy_id TEXT, exit_profile TEXT, "
+        "arm_key TEXT, p_win_entry REAL NOT NULL DEFAULT 0, context TEXT NOT NULL DEFAULT '{}', memory_ids TEXT NOT NULL DEFAULT '[]', "
+        "exit_price INTEGER, closed_at TEXT, pnl REAL, exit_reason TEXT, counterfactual_pnl REAL, exit_verdict TEXT, final_total INTEGER)"
+    )
+    old.execute(
+        "INSERT INTO positions(game_id, game_label, ticker, strike, side, contracts, entry_price, cost, opened_at, opened_by, mode) "
+        "VALUES('g', 'MEM @ CLE', 'T251', 250.5, 'under', 319, 94, 299.9, '2026-11-18T00:00:00+00:00', 'agent', 'paper')"
+    )
+    old.commit()
+    old.close()
+    row = DB(path).one("SELECT * FROM positions")
+    assert (row["segment"], row["kind"], row["team"], row["label"]) == ("game", "total", None, None)
+    assert Engine._label(row) == "Under 250.5" and Engine.trade_api({**row, "exit_price": 100, "pnl": 19.1, "closed_at": "x", "exit_reason": "settled_win", "counterfactual_pnl": 19.1, "exit_verdict": None, "final_total": 240})["label"] == "Under 250.5"

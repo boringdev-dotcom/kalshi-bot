@@ -12,12 +12,12 @@ All shapes are defined in [`frontend/src/types.ts`](../frontend/src/types.ts).
 | POST | `/api/agent/start` | | `AppState` |
 | POST | `/api/agent/pause` | | `AppState` |
 | GET | `/api/games` | | `Game[]` (live first, then pre, then final) |
-| GET | `/api/games/{id}` | | `GameDetail` |
+| GET | `/api/games/{id}` | | `GameDetail` (includes quarter totals and spreads) |
 | GET | `/api/positions` | | `Position[]` |
 | POST | `/api/positions/{id}/close` | | `Trade` |
 | GET | `/api/trades?limit=100` | | `Trade[]` (newest first) |
 | GET | `/api/decisions?limit=100&game_id=` | | `Decision[]` (newest first) |
-| POST | `/api/orders` | `OrderRequest` | `Position` |
+| POST | `/api/orders` | `OrderRequest` (any ticker: game total, quarter total or quarter spread) | `Position` |
 | GET | `/api/playbook` | | `Strategy[]` |
 | PUT | `/api/playbook/{id}` | `{ enabled?: boolean, params?: Record<string, number> }` | `Strategy` |
 | GET | `/api/memory?kind=&q=` | | `Memory[]` (pinned first, then newest) |

@@ -4,14 +4,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import AgentPanel from '../components/AgentPanel'
 import GameList from '../components/GameList'
-import Ladder, { type TicketTarget } from '../components/Ladder'
+import Ladder, { DEFAULT_VIEW, type MarketView, type TicketTarget } from '../components/Ladder'
 import OrderTicket from '../components/OrderTicket'
 import Scorebug from '../components/Scorebug'
 import TotalChart from '../components/TotalChart'
 import { Card, Empty, Skeleton } from '../components/ui'
-import { cents, money, pct, pnlColor } from '../format'
+import { cents, money, pct, pnlColor, tradeLabel } from '../format'
 import { useStore } from '../store'
-import type { GameDetail, Position } from '../types'
+import type { GameDetail, LadderRung, Position } from '../types'
 
 function useGameDetail(id: string | null) {
   const [detail, setDetail] = useState<GameDetail | null>(null)
@@ -47,9 +47,7 @@ function HeldStrip({ positions }: { positions: Position[] }) {
       <span className="label !text-peri">Your positions here</span>
       {positions.map((p) => (
         <div key={p.id} className="flex items-center gap-2 text-[11.5px]">
-          <span className="font-semibold text-slate-100">
-            {p.side === 'under' ? 'Under' : 'Over'} <span className="num">{p.strike}</span>
-          </span>
+          <span className="num font-semibold text-slate-100">{tradeLabel(p)}</span>
           <span className="num text-mute">
             {p.contracts} @ {cents(p.entry_price)} → {cents(p.mark_price)}
           </span>
@@ -68,6 +66,8 @@ export default function Desk() {
   const selectGame = useStore((s) => s.selectGame)
   const positions = useStore((s) => s.positions)
   const [ticket, setTicket] = useState<TicketTarget | null>(null)
+  // Which market each game's ladder is showing. A game you have not touched opens on its full-game total.
+  const [views, setViews] = useState<Record<string, MarketView>>({})
 
   // Default to the first live game, else the first on the board.
   useEffect(() => {
@@ -85,6 +85,15 @@ export default function Desk() {
   )
 
   useEffect(() => setTicket(null), [selectedId])
+
+  const liveDetail = detail && game && detail.game.id === game.id ? detail : null
+  const quarterMarkets = liveDetail ? (liveDetail.quarter_markets ?? []) : null
+  const view = (game && views[game.id]) || DEFAULT_VIEW
+  // Every rung of this game, so an open ticket keeps following its market's live price.
+  const allRungs = useMemo<LadderRung[]>(
+    () => [...(game?.ladder ?? []), ...(quarterMarkets ?? []).flatMap((m) => [...(m.totals ?? []), ...(m.spreads ?? [])])],
+    [game?.ladder, quarterMarkets],
+  )
 
   return (
     <div className="grid h-full grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[236px_minmax(0,1fr)_320px] lg:overflow-hidden xl:grid-cols-[280px_minmax(0,1fr)_380px]">
@@ -109,11 +118,18 @@ export default function Desk() {
               <HeldStrip positions={gamePositions} />
               <TotalChart
                 game={game}
-                timeline={detail && detail.game.id === game.id ? detail.timeline : null}
+                timeline={liveDetail ? liveDetail.timeline : null}
                 positions={gamePositions}
                 loading={loading}
               />
-              <Ladder game={game} positions={gamePositions} onPick={setTicket} />
+              <Ladder
+                game={game}
+                quarterMarkets={quarterMarkets}
+                positions={gamePositions}
+                view={view}
+                onViewChange={(v) => setViews((all) => ({ ...all, [game.id]: v }))}
+                onPick={setTicket}
+              />
             </motion.div>
           ) : !loaded ? (
             <motion.div key="skeleton" className="space-y-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -139,7 +155,7 @@ export default function Desk() {
         <AgentPanel gameId={game?.id ?? null} />
       </aside>
 
-      {game && <OrderTicket game={game} target={ticket} onClose={() => setTicket(null)} />}
+      {game && <OrderTicket game={game} rungs={allRungs} target={ticket} onClose={() => setTicket(null)} />}
     </div>
   )
 }

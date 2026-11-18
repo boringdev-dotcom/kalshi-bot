@@ -25,6 +25,11 @@ PUBLIC_HOST = "https://api.elections.kalshi.com"
 NBA_TOTAL_SERIES = "KXNBATOTAL"
 
 
+def quarter_series(q: int, kind: str) -> str:
+    """Kalshi series for a quarter market, e.g. KXNBA1QTOTAL, KXNBA3QSPREAD."""
+    return f"KXNBA{q}Q{'TOTAL' if kind == 'total' else 'SPREAD'}"
+
+
 class KalshiError(RuntimeError):
     pass
 
@@ -121,6 +126,10 @@ class KalshiClient:
 
     # -- public market data (always from production: real prices) ------------
     async def nba_total_events(self) -> list[dict[str, Any]]:
+        return await self.events(NBA_TOTAL_SERIES)
+
+    async def events(self, series_ticker: str) -> list[dict[str, Any]]:
+        """Open events for a series, with their markets and live quotes."""
         events: list[dict[str, Any]] = []
         cursor: Optional[str] = None
         for _ in range(5):
@@ -128,7 +137,7 @@ class KalshiClient:
                 "GET",
                 "/events",
                 params={
-                    "series_ticker": NBA_TOTAL_SERIES,
+                    "series_ticker": series_ticker,
                     "status": "open",
                     "with_nested_markets": "true",
                     "limit": 100,

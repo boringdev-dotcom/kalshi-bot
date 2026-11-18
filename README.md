@@ -20,7 +20,7 @@ npm run dev                 # UI on http://localhost:5173
 After `npm run build`, the API serves the built UI itself at `http://localhost:8000`.
 
 ```bash
-uv run pytest               # 18 tests: model, rules, learner, memory, engine, feeds, API, sign-in
+uv run pytest               # 23 tests: model, rules, learner, memory, engine, feeds, quarter markets, API, sign-in
 ```
 
 ## Configuration
@@ -56,6 +56,12 @@ The Odds API bills one credit per market per request. The feed asks for the full
 - **Portfolio** — account, open positions with live win probability and risk flags, closed trades with what holding would have paid.
 - **Brain** — the playbook sliders, guidance and memory, and what the learner has concluded, plus a training gym.
 - **Settings** — paper/live, simulated/live data, risk limits, connection health.
+
+## Quarter markets
+
+Every game also carries Kalshi's eight quarter markets: a total and a spread for each of Q1-Q4 (Q4 excludes overtime). Pick a quarter above the ladder on the Desk to trade them by hand with the same order ticket, paper or live. They settle when the quarter ends.
+
+The agent does not trade these. It keeps a **shadow book** (`agent/observer.py`): shortly after each quarter starts, and again with about six minutes left, it records what every quarter market cost and what the model thought it was worth, then marks which side won. Brain → Learning shows the result by quarter, market type and price band (how often each won, what the model expected, return per dollar after fees) next to your own quarter record. Your quarter trades also go into its memory. That is the evidence to read before ever letting it trade them; there is no switch for that yet.
 
 ## How the agent works
 

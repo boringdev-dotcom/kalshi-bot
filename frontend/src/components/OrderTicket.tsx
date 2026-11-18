@@ -2,9 +2,9 @@ import clsx from 'clsx'
 import { ArrowDownRight, ArrowUpRight, Minus, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../api'
-import { cents, clamp, money, pct, signedPct } from '../format'
+import { cents, clamp, money, noLabel, pct, segmentLabel, sideLabel, signedPct, winsIf, yesLabel } from '../format'
 import { useStore } from '../store'
-import type { Game, Side } from '../types'
+import type { Game, LadderRung, Side } from '../types'
 import type { TicketTarget } from './Ladder'
 import { Badge, Button, Dialog, Meter, Segmented, Slider } from './ui'
 
@@ -19,10 +19,13 @@ function Line({ label, children, strong }: { label: string; children: React.Reac
 
 export default function OrderTicket({
   game,
+  rungs,
   target,
   onClose,
 }: {
   game: Game
+  /** Every live rung of this game (full-game ladder plus quarter markets). */
+  rungs?: LadderRung[]
   target: TicketTarget | null
   onClose: () => void
 }) {
@@ -46,8 +49,9 @@ export default function OrderTicket({
   const shown = target ?? lastTarget.current
   const rung = useMemo(() => {
     if (!shown) return null
-    return game.ladder.find((r) => r.ticker === shown.rung.ticker) ?? shown.rung
-  }, [game.ladder, shown])
+    const pool = rungs && rungs.length ? rungs : (game.ladder ?? [])
+    return pool.find((r) => r.ticker === shown.rung.ticker) ?? shown.rung
+  }, [rungs, game.ladder, shown])
 
   const maxStake = Math.max(10, settings?.max_stake_per_trade ?? 500)
 
@@ -79,6 +83,9 @@ export default function OrderTicket({
   const overCash = cash != null && cost > cash + 0.001
   const live = settings?.trading_mode === 'live'
   const accent = side === 'under' ? '#3ddc97' : '#ff6b6b'
+  const quarter = rung.segment && rung.segment !== 'game'
+  const segPrefix = quarter ? `${segmentLabel(rung.segment)} ` : ''
+  const marketName = `${quarter ? `${segmentLabel(rung.segment)} ` : ''}${rung.kind === 'spread' ? 'spread' : 'total points'}`
 
   const submit = async () => {
     if (contracts <= 0) return
@@ -89,7 +96,7 @@ export default function OrderTicket({
       upsertPosition(pos)
       toast({
         level: 'success',
-        title: `${live ? 'Order sent' : 'Paper order filled'} · ${side === 'under' ? 'Under' : 'Over'} ${rung.strike}`,
+        title: `${live ? 'Order sent' : 'Paper order filled'} · ${pos.label || `${segPrefix}${sideLabel(rung, side)}`}`,
         body: `${contracts} contracts at ${cents(px)} for ${money(cost)} — ${game.label}`,
       })
       onClose()
@@ -109,18 +116,21 @@ export default function OrderTicket({
       title={
         <span className="flex items-center gap-2">
           {side === 'under' ? <ArrowDownRight size={17} className="text-mint" /> : <ArrowUpRight size={17} className="text-coral" />}
-          {side === 'under' ? 'Under' : 'Over'} <span className="num">{rung.strike.toFixed(1)}</span>
+          <span className="num">
+            {segPrefix}
+            {sideLabel(rung, side)}
+          </span>
         </span>
       }
       subtitle={
         <span className="flex items-center gap-2">
-          {game.label} · total points
+          {game.label} · {marketName}
           {game.simulated && <Badge tone="gold">Sim</Badge>}
           <Badge tone={live ? 'coral' : 'peri'}>{live ? 'Live money' : 'Paper'}</Badge>
         </span>
       }
     >
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <Segmented<Side>
           id="ticket-side"
           size="md"
@@ -131,8 +141,8 @@ export default function OrderTicket({
             if (a != null) setPrice(a)
           }}
           options={[
-            { value: 'under', label: `Under ${cents(rung.no_ask)}`, tone: '#3ddc97' },
-            { value: 'over', label: `Over ${cents(rung.yes_ask)}`, tone: '#ff6b6b' },
+            { value: 'under', label: `${noLabel(rung)} · ${cents(rung.no_ask)}`, tone: '#3ddc97' },
+            { value: 'over', label: `${yesLabel(rung)} · ${cents(rung.yes_ask)}`, tone: '#ff6b6b' },
           ]}
         />
         <Segmented
@@ -145,6 +155,10 @@ export default function OrderTicket({
           ]}
         />
       </div>
+
+      <p className="mb-3 rounded-lg border border-hair bg-white/[0.025] px-3 py-2 text-[11.5px] leading-relaxed text-slate-300">
+        {winsIf(rung, side)}.
+      </p>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="surface-raised p-3">

@@ -67,7 +67,13 @@ export interface TeamSide {
   score: number
   /** Hex color without '#'. */
   color: string
+  /** Points by period so far: [Q1, Q2, Q3, Q4, OT...]. The current period is a running count. */
+  quarters: number[]
 }
+
+/** Which part of the game a market covers. */
+export type Segment = 'game' | 'q1' | 'q2' | 'q3' | 'q4'
+export type MarketKind = 'total' | 'spread'
 
 export interface Projection {
   /** Expected final total. */
@@ -96,17 +102,32 @@ export interface FanDuelOdds {
   updated_at: string
 }
 
+/**
+ * One Kalshi market. Every market is a YES/NO contract:
+ *   total  — YES = over the strike,  NO = under.
+ *   spread — YES = `team` wins the segment by more than the strike, NO = they do not
+ *            (the same thing as the other side "plus the points").
+ * Field names keep the totals vocabulary: "over" always means YES and "under" always means NO.
+ * Use `yes_label` / `no_label` for display rather than building text from those names.
+ */
 export interface LadderRung {
   ticker: string
-  /** Total-points strike, e.g. 250.5. YES = over, NO = under. */
+  segment: Segment
+  kind: MarketKind
+  /** Spread markets only: the team the YES side backs (abbreviation). */
+  team: string | null
+  /** Short display names for each side, e.g. "Over 58.5" / "Under 58.5", or "HOU -3.5" / "IND +3.5". */
+  yes_label: string
+  no_label: string
+  /** The line, e.g. 250.5 points, or 3.5 for a spread. */
   strike: number
   yes_bid: number | null
   yes_ask: number | null
   no_bid: number | null
   no_ask: number | null
-  /** Model probability the game finishes under this strike. */
+  /** Model probability the NO side wins (for a total: finishes under the strike). */
   p_under: number
-  /** Model probability minus the cost of buying under (no_ask). Positive = cheap. */
+  /** Model probability minus the cost of buying NO (no_ask). Positive = cheap. */
   edge_under: number | null
   edge_over: number | null
   volume: number
@@ -116,6 +137,26 @@ export interface GameRisk {
   level: RiskLevel
   /** Short human flags, e.g. "2-pt game, 1:40 left — foul/OT risk". */
   flags: string[]
+}
+
+/** One quarter's running state. Cheap enough to ride along on every game update. */
+export interface QuarterSummary {
+  segment: Segment // 'q1'..'q4'
+  label: string // "Q1"
+  status: 'upcoming' | 'live' | 'final'
+  home_points: number
+  away_points: number
+  /** Seconds left in this quarter (720 before it starts, 0 once over). */
+  seconds_remaining: number
+  /** Model view of where the quarter finishes. null once it is final. */
+  projection: { total_mean: number; total_sd: number; margin_mean: number; margin_sd: number } | null
+}
+
+/** A quarter's tradable markets. Only sent with GameDetail (too heavy for every tick). */
+export interface QuarterMarkets {
+  segment: Segment
+  totals: LadderRung[]
+  spreads: LadderRung[]
 }
 
 export interface Game {
@@ -135,7 +176,10 @@ export interface Game {
   pregame_total: number | null
   projection: Projection | null
   fanduel: FanDuelOdds | null
+  /** Full-game total ladder. */
   ladder: LadderRung[]
+  /** Always four entries, Q1-Q4. */
+  quarters: QuarterSummary[]
   risk: GameRisk
   simulated: boolean
 }
@@ -153,11 +197,14 @@ export interface TimelinePoint {
 
 export interface GameDetail {
   game: Game
+  /** Quarter totals and spreads, Q1-Q4. Lists are empty when Kalshi has no market. */
+  quarter_markets: QuarterMarkets[]
   timeline: TimelinePoint[]
   decisions: Decision[]
   positions: Position[]
 }
 
+/** 'over' = the YES side of the market, 'under' = the NO side. See LadderRung. */
 export type Side = 'under' | 'over'
 
 export interface Position {
@@ -165,6 +212,11 @@ export interface Position {
   game_id: string
   game_label: string
   ticker: string
+  segment: Segment
+  kind: MarketKind
+  team: string | null
+  /** What was bought, ready to show: "Under 251.5", "Q2 Over 58.5", "Q1 HOU -3.5". */
+  label: string
   strike: number
   side: Side
   contracts: number
@@ -200,6 +252,11 @@ export interface Trade {
   game_id: string
   game_label: string
   ticker: string
+  segment: Segment
+  kind: MarketKind
+  team: string | null
+  /** Same wording as Position.label. */
+  label: string
   strike: number
   side: Side
   contracts: number
@@ -218,6 +275,7 @@ export interface Trade {
   counterfactual_pnl: number | null
   /** For early exits once the game is final: did selling beat holding? */
   exit_verdict: 'saved' | 'shaken_out' | null
+  /** The number the market settled on: the total, or for a spread the backed team's margin. */
   final_total: number | null
 }
 
@@ -311,7 +369,44 @@ export interface ExitArm {
   share: number
 }
 
+/**
+ * One line of the agent's shadow book for quarter markets: what happened to everyone who
+ * could have bought this kind of contract at this kind of price. The agent records prices
+ * shortly after a quarter starts ('open') and again with about six minutes left ('mid'),
+ * then scores them when the quarter ends. It places no orders of its own here.
+ */
+export interface QuarterCell {
+  segment: Segment
+  kind: MarketKind
+  checkpoint: 'open' | 'mid'
+  /** 'over' = YES side, 'under' = NO side. */
+  side: Side
+  /** Price band of the side bought, e.g. "80-97". Ordered cheap to expensive. */
+  bucket: string
+  n: number
+  /** Average ask paid, cents. */
+  price: number
+  /** How often that side won. */
+  win_rate: number
+  /** What the model thought the win rate was. */
+  model: number
+  /** Average profit per dollar risked, after fees. */
+  ret: number
+}
+
+export interface QuarterLearning {
+  /** Markets recorded so far, and how many of those have settled. */
+  observations: number
+  settled: number
+  games: number
+  cells: QuarterCell[]
+  /** The user's own quarter trades, by quarter and market type. */
+  your_trades: { segment: Segment; kind: MarketKind; n: number; wins: number; pnl: number }[]
+}
+
 export interface LearningState {
+  /** Quarter totals and spreads: watched and scored, not traded by the agent. */
+  quarters: QuarterLearning
   arms: Arm[]
   exit_arms: ExitArm[]
   calibration: { bucket: string; predicted: number; actual: number; n: number }[]

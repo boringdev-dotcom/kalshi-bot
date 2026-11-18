@@ -80,7 +80,11 @@ export default function TotalChart({
 
   const strikes = useMemo(() => {
     const seen = new Map<number, Position>()
-    for (const p of positions) if (!seen.has(p.strike)) seen.set(p.strike, p)
+    // Quarter totals and spreads live on a different scale; only full-game totals belong on this chart.
+    for (const p of positions) {
+      if ((p.segment ?? 'game') !== 'game' || (p.kind ?? 'total') !== 'total') continue
+      if (!seen.has(p.strike)) seen.set(p.strike, p)
+    }
     return [...seen.values()]
   }, [positions])
 
