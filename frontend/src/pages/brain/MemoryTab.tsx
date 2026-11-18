@@ -1,25 +1,39 @@
-import { AnimatePresence, motion } from 'framer-motion'
 import clsx from 'clsx'
-import { Bot, GraduationCap, Library, Pin, PinOff, Search, Send, Sparkles, Trash2, User } from 'lucide-react'
+import { Library, Pin, PinOff, Search, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../../api'
-import { Badge, Button, Card, Empty, Meter, Skeleton, SimTag, type Tone } from '../../components/ui'
+import { Button, Card, Empty, Skeleton, SimTag } from '../../components/ui'
 import { pct, relTime } from '../../format'
 import { useStore } from '../../store'
 import type { Memory, MemoryKind } from '../../types'
 
-const kindMeta: Record<MemoryKind, { label: string; tone: Tone; color: string; blurb: string }> = {
-  guidance: { label: 'Guidance', tone: 'peri', color: '#8b9cff', blurb: 'Rules you gave it' },
-  lesson: { label: 'Lesson', tone: 'mint', color: '#3ddc97', blurb: 'What it worked out from results' },
-  episode: { label: 'Episode', tone: 'slate', color: '#8d96a8', blurb: 'Individual trades it remembers' },
+const KINDS: MemoryKind[] = ['guidance', 'lesson', 'episode']
+
+const kindMeta: Record<MemoryKind, { title: string; blurb: string }> = {
+  guidance: { title: 'Your guidance', blurb: 'Things you told it. It checks these before every trade.' },
+  lesson: { title: 'What it learned', blurb: 'Conclusions it drew from how trades turned out.' },
+  episode: { title: 'Trade history', blurb: 'A short record of each trade and how it ended.' },
 }
 
 const EXAMPLES = [
-  'In the 4th quarter I buy the under 10–12 points above the live line.',
-  'If it is a one-possession game with under two minutes left, get out — fouls and overtime kill unders.',
+  'In the 4th quarter I buy the under 10 to 12 points above the line.',
+  'In a one-possession game with under two minutes left, get out. Fouls and overtime kill unders.',
   'Never risk more than $300 to make $20.',
   'Skip games where both teams are in the bonus early in the 4th.',
 ]
+
+/** How well results have backed a memory up, in words. The numbers go in the tooltip. */
+function standing(m: Memory): { word: string; className: string; title: string } {
+  const total = m.support + m.against
+  const title =
+    total > 0
+      ? `${m.support} ${m.support === 1 ? 'trade' : 'trades'} agreed, ${m.against} disagreed · confidence ${pct(m.confidence)} · weight ${pct(m.importance)}`
+      : `No trade has tested this yet · weight ${pct(m.importance)}`
+  if (total === 0) return { word: 'untested', className: 'text-dim', title }
+  if (m.confidence >= 0.66) return { word: 'well supported', className: 'text-mint', title }
+  if (m.confidence >= 0.4) return { word: 'mixed', className: 'text-gold', title }
+  return { word: 'not holding up', className: 'text-coral', title }
+}
 
 function Teach({ onAdded }: { onAdded: (m: Memory) => void }) {
   const toast = useStore((s) => s.toast)
@@ -38,11 +52,11 @@ function Teach({ onAdded }: { onAdded: (m: Memory) => void }) {
       const claude = useStore.getState().app?.health.anthropic
       toast(
         claude
-          ? { level: 'success', title: 'Got it', body: 'Saved. Claude is working out what to change; watch the decision feed.' }
+          ? { level: 'success', title: 'Got it', body: 'Saved. Claude is working out what to change; watch the Activity tab.' }
           : {
               level: 'warn',
               title: 'Saved, but not acted on yet',
-              body: 'It is pinned in memory. Turning plain language into rule changes needs Claude: add ANTHROPIC_API_KEY, or set the playbook sliders yourself.',
+              body: 'It is pinned in memory. Turning plain words into rule changes needs Claude: add ANTHROPIC_API_KEY, or set the sliders on the Rules tab yourself.',
             },
       )
     } catch (e) {
@@ -53,173 +67,135 @@ function Teach({ onAdded }: { onAdded: (m: Memory) => void }) {
   }
 
   return (
-    <Card className="relative overflow-hidden border-peri/25 p-5">
-      <div
-        className="pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full blur-3xl"
-        style={{ background: 'radial-gradient(circle, rgba(139,156,255,0.20), transparent 70%)' }}
+    <Card className="p-6">
+      <h3 className="h-section">Teach the agent</h3>
+      <p className="hint mt-1 max-w-2xl">
+        Say it the way you would tell another trader. It is kept at the top of the agent’s memory and checked before every
+        trade.
+      </p>
+      <textarea
+        ref={ref}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void submit()
+        }}
+        rows={3}
+        placeholder="For example: when the lead is under 4 with less than 3 minutes left, sell even at a small loss."
+        aria-label="Guidance for the agent"
+        className="field mt-4 resize-none !rounded-2xl !px-4 !py-3.5 !text-[15px] leading-relaxed"
       />
-      <div className="relative">
-        <div className="flex items-center gap-2">
-          <GraduationCap size={17} className="text-peri" />
-          <h3 className="text-[15px] font-semibold text-slate-50">Teach the agent</h3>
-        </div>
-        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-mute">
-          Say it the way you would tell another trader. It is stored as guidance, pinned to the top of the agent’s memory, and
-          consulted before every entry and exit.
-        </p>
-        <div className="mt-3 rounded-xl border border-hair2 bg-ink-950/70 transition-colors focus-within:border-peri/60">
-          <textarea
-            ref={ref}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void submit()
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs text-dim">⌘ or Ctrl + Enter also saves</span>
+        <Button variant="primary" size="md" onClick={submit} loading={busy} disabled={!text.trim()}>
+          Teach
+        </Button>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            type="button"
+            title={ex}
+            onClick={() => {
+              setText(ex)
+              ref.current?.focus()
             }}
-            rows={3}
-            placeholder="e.g. When the lead is under 4 with less than 3 minutes left, sell even at a small loss."
-            className="block w-full resize-none bg-transparent px-3.5 py-3 text-[13px] leading-relaxed text-slate-100 placeholder:text-dim focus:outline-none"
-          />
-          <div className="flex items-center justify-between border-t border-hair px-3 py-2">
-            <span className="text-[10.5px] text-dim">⌘/Ctrl + Enter to save</span>
-            <Button variant="peri" size="sm" onClick={submit} loading={busy} disabled={!text.trim()}>
-              <Send size={12} /> Teach
-            </Button>
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {EXAMPLES.map((ex) => (
-            <button
-              key={ex}
-              onClick={() => {
-                setText(ex)
-                ref.current?.focus()
-              }}
-              className="rounded-full border border-hair bg-white/[0.02] px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-peri/40 hover:text-slate-100"
-            >
-              {ex.length > 58 ? `${ex.slice(0, 56)}…` : ex}
-            </button>
-          ))}
-        </div>
+            className="rounded-full bg-ink-800 px-3 py-1.5 text-[13px] text-mute transition-colors hover:bg-ink-700 hover:text-white"
+          >
+            {ex.length > 60 ? `${ex.slice(0, 58)}…` : ex}
+          </button>
+        ))}
       </div>
     </Card>
   )
 }
 
-function MemoryCard({
-  m,
-  onPin,
-  onDelete,
-}: {
-  m: Memory
-  onPin: (m: Memory) => void
-  onDelete: (m: Memory) => void
-}) {
-  const meta = kindMeta[m.kind] ?? kindMeta.episode
+function MemoryRow({ m, onPin, onDelete }: { m: Memory; onPin: (m: Memory) => void; onDelete: (m: Memory) => void }) {
+  const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState(false)
   useEffect(() => {
     if (!confirm) return
     const t = window.setTimeout(() => setConfirm(false), 2600)
     return () => window.clearTimeout(t)
   }, [confirm])
-  const total = m.support + m.against
+  const s = standing(m)
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-      whileHover={{ y: -2 }}
-      className={clsx(
-        'group relative overflow-hidden rounded-xl border bg-ink-900/90 p-4',
-        m.pinned ? 'border-peri/30' : 'border-hair hover:border-white/[0.12]',
-      )}
-    >
-      <span className="absolute inset-y-0 left-0 w-[3px]" style={{ background: meta.color, opacity: m.pinned ? 1 : 0.55 }} />
-      <div className="flex items-center gap-1.5">
-        <Badge tone={meta.tone}>{meta.label}</Badge>
-        {m.pinned && (
-          <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-peri">
-            <Pin size={10} /> Pinned
-          </span>
-        )}
-        {m.simulated && <SimTag />}
-        <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          <button
-            onClick={() => onPin(m)}
-            title={m.pinned ? 'Unpin' : 'Pin — always consult this'}
-            className="rounded-md p-1 text-dim hover:bg-white/[0.07] hover:text-peri"
-          >
-            {m.pinned ? <PinOff size={13} /> : <Pin size={13} />}
-          </button>
-          <button
-            onClick={() => (confirm ? onDelete(m) : setConfirm(true))}
-            title="Forget this"
-            className={clsx(
-              'flex items-center gap-1 rounded-md p-1 text-[10.5px] font-semibold',
-              confirm ? 'bg-coral/15 px-1.5 text-coral' : 'text-dim hover:bg-white/[0.07] hover:text-coral',
-            )}
-          >
-            <Trash2 size={13} />
-            {confirm && 'Forget?'}
-          </button>
-        </span>
-      </div>
-
-      <p className="mt-2.5 text-[13px] leading-relaxed text-slate-100">{m.text}</p>
-
-      {m.tags.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-1">
-          {m.tags.map((t) => (
-            <span key={t} className="rounded bg-white/[0.05] px-1.5 py-[1px] text-[10px] text-mute">
-              #{t}
+    <li className="group flex items-start gap-3 border-b border-hair py-3.5 last:border-b-0">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setOpen((o) => !o)
+          }
+        }}
+        aria-expanded={open}
+        className="min-w-0 flex-1 cursor-pointer rounded-lg text-left"
+      >
+        <p className={clsx('text-sm leading-relaxed text-slate-100', !open && 'line-clamp-3')}>{m.text}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-dim">
+          {m.pinned && (
+            <span className="flex items-center gap-1 text-slate-300">
+              <Pin size={11} /> Pinned
             </span>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-3 grid grid-cols-2 gap-3 border-t border-hair pt-3">
-        <div title="How well outcomes have supported this memory">
-          <div className="flex items-center justify-between text-[10px]">
-            <span className="uppercase tracking-wider text-dim">Confidence</span>
-            <span className="num text-slate-300">{pct(m.confidence)}</span>
-          </div>
-          <Meter
-            value={m.confidence}
-            tone={m.confidence >= 0.66 ? '#3ddc97' : m.confidence >= 0.4 ? '#f5b74e' : '#ff6b6b'}
-            className="mt-1"
-          />
-        </div>
-        <div title="How much weight the agent gives this memory">
-          <div className="flex items-center justify-between text-[10px]">
-            <span className="uppercase tracking-wider text-dim">Weight</span>
-            <span className="num text-slate-300">{pct(m.importance)}</span>
-          </div>
-          <Meter value={m.importance} tone="#8b9cff" className="mt-1" />
-        </div>
-      </div>
-
-      <div className="mt-2.5 flex items-center gap-3 text-[10.5px] text-dim">
-        <span className="flex items-center gap-1" title={m.source === 'user' ? 'You told it this' : 'The agent worked this out'}>
-          {m.source === 'user' ? <User size={11} /> : <Bot size={11} />}
-          {m.source === 'user' ? 'You' : 'Agent'}
-        </span>
-        {total > 0 ? (
-          <span className="num" title="Trades that confirmed vs contradicted this">
-            <span className="text-mint">+{m.support}</span> / <span className="text-coral">−{m.against}</span>
+          )}
+          <span>{m.source === 'user' ? 'From you' : 'From the agent'}</span>
+          <span>·</span>
+          <span className={s.className} title={s.title}>
+            {s.word}
           </span>
-        ) : (
-          <span>untested</span>
+          <span>·</span>
+          <span title={m.last_used_at ? `Last used ${relTime(m.last_used_at)}` : 'Not used yet'}>
+            used {m.uses} {m.uses === 1 ? 'time' : 'times'}
+          </span>
+          <span>·</span>
+          <span>{relTime(m.created_at)}</span>
+          {m.simulated && <SimTag />}
+        </div>
+        {open && m.tags.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {m.tags.map((t) => (
+              <span key={t} className="rounded-full bg-white/[0.05] px-2 py-[1px] text-[11px] text-mute">
+                {t}
+              </span>
+            ))}
+          </div>
         )}
-        <span className="num" title={m.last_used_at ? `Last used ${relTime(m.last_used_at)}` : 'Not used yet'}>
-          used {m.uses}×
-        </span>
-        <span className="ml-auto">{relTime(m.created_at)}</span>
       </div>
-    </motion.div>
+      <span className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={() => onPin(m)}
+          title={m.pinned ? 'Unpin' : 'Pin: always keep this in mind'}
+          aria-label={m.pinned ? 'Unpin' : 'Pin'}
+          className="rounded-lg p-1.5 text-dim hover:bg-white/[0.07] hover:text-white"
+        >
+          {m.pinned ? <PinOff size={15} /> : <Pin size={15} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => (confirm ? onDelete(m) : setConfirm(true))}
+          title="Forget this"
+          aria-label="Forget this"
+          className={clsx(
+            'flex items-center gap-1 rounded-lg p-1.5 text-xs font-medium',
+            confirm ? 'bg-coral/[0.14] px-2 text-coral' : 'text-dim hover:bg-white/[0.07] hover:text-coral',
+          )}
+        >
+          <Trash2 size={15} />
+          {confirm && 'Forget?'}
+        </button>
+      </span>
+    </li>
   )
 }
+
+/** How many rows of a kind show before "Show all". Trade history gets long quickly. */
+const PREVIEW = 8
 
 type Filter = 'all' | MemoryKind
 
@@ -232,6 +208,7 @@ export default function MemoryTab() {
   const [q, setQ] = useState('')
   const [query, setQuery] = useState('')
   const [hideSim, setHideSim] = useState(false)
+  const [expanded, setExpanded] = useState<Partial<Record<MemoryKind, boolean>>>({})
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(q.trim()), 250)
@@ -265,23 +242,18 @@ export default function MemoryTab() {
     })
   }, [memoryEvents, query])
 
-  const counts = useMemo(() => {
-    const c: Record<Filter, number> = { all: 0, guidance: 0, lesson: 0, episode: 0 }
-    for (const m of items ?? []) {
-      c.all += 1
-      if (m.kind in c) c[m.kind] += 1
-    }
-    return c
-  }, [items])
+  const visible = useMemo(() => (items ?? []).filter((m) => !hideSim || !m.simulated), [items, hideSim])
 
-  const shown = useMemo(() => {
-    const list = (items ?? [])
-      .filter((m) => filter === 'all' || m.kind === filter)
-      .filter((m) => !hideSim || !m.simulated)
-    return [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned))
-  }, [items, filter, hideSim])
+  const byKind = useMemo(() => {
+    const out: Record<MemoryKind, Memory[]> = { guidance: [], lesson: [], episode: [] }
+    for (const m of visible) (out[m.kind] ?? out.episode).push(m)
+    for (const k of KINDS) out[k] = [...out[k]].sort((a, b) => Number(b.pinned) - Number(a.pinned))
+    return out
+  }, [visible])
 
   const hasSim = (items ?? []).some((m) => m.simulated)
+  const shownKinds = KINDS.filter((k) => (filter === 'all' ? byKind[k].length > 0 : k === filter))
+  const nothing = shownKinds.every((k) => byKind[k].length === 0)
 
   const onPin = async (m: Memory) => {
     const next = { ...m, pinned: !m.pinned }
@@ -306,81 +278,94 @@ export default function MemoryTab() {
     }
   }
 
-  const filters: { value: Filter; label: string; color: string }[] = [
-    { value: 'all', label: 'Everything', color: '#e6e9f2' },
-    { value: 'guidance', label: 'Guidance', color: kindMeta.guidance.color },
-    { value: 'lesson', label: 'Lessons', color: kindMeta.lesson.color },
-    { value: 'episode', label: 'Episodes', color: kindMeta.episode.color },
+  const pills: { value: Filter; label: string; count: number }[] = [
+    { value: 'all', label: 'All', count: visible.length },
+    ...KINDS.map((k) => ({ value: k as Filter, label: kindMeta[k].title, count: byKind[k].length })),
   ]
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <Teach onAdded={(m) => setItems((cur) => [m, ...(cur ?? []).filter((x) => x.id !== m.id)])} />
 
       <div className="flex flex-wrap items-center gap-2">
-        {filters.map((f) => {
-          const active = filter === f.value
-          return (
-            <button
-              key={f.value}
-              onClick={() => setFilter(f.value)}
-              className={clsx(
-                'relative flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                active ? 'border-white/20 bg-white/[0.07] text-slate-50' : 'border-hair text-mute hover:text-slate-200',
-              )}
-              title={f.value === 'all' ? undefined : kindMeta[f.value as MemoryKind].blurb}
-            >
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: f.color }} />
-              {f.label}
-              <span className="num text-[10.5px] text-dim">{counts[f.value]}</span>
-            </button>
-          )
-        })}
-        {hasSim && (
+        {pills.map((f) => (
           <button
-            onClick={() => setHideSim((v) => !v)}
+            key={f.value}
+            type="button"
+            onClick={() => setFilter(f.value)}
             className={clsx(
-              'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-              hideSim ? 'border-gold/40 bg-gold/10 text-gold' : 'border-hair text-mute hover:text-slate-200',
+              'rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+              filter === f.value ? 'bg-white text-ink-950' : 'bg-ink-800 text-mute hover:text-white',
             )}
           >
-            Hide simulated
+            {f.label}
+            <span className={clsx('num ml-1.5', filter === f.value ? 'text-ink-600' : 'text-dim')}>{f.count}</span>
+          </button>
+        ))}
+        {hasSim && (
+          <button
+            type="button"
+            onClick={() => setHideSim((v) => !v)}
+            className={clsx(
+              'rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+              hideSim ? 'bg-gold/[0.14] text-gold' : 'bg-ink-800 text-mute hover:text-white',
+            )}
+          >
+            {hideSim ? 'Practice hidden' : 'Hide practice'}
           </button>
         )}
         <div className="relative ml-auto w-full sm:w-64">
-          <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dim" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search memory…" className="field !pl-8 !py-1.5 !text-xs" />
+          <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-dim" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search memory" aria-label="Search memory" className="field !rounded-full !py-2 !pl-9" />
         </div>
       </div>
 
       {items === null ? (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[170px] w-full !rounded-xl" />
+            <Skeleton key={i} className="h-[60px] w-full !rounded-xl" />
           ))}
         </div>
-      ) : shown.length === 0 ? (
+      ) : nothing ? (
         <Card className="py-10">
           <Empty
-            icon={query ? <Search size={18} /> : filter === 'lesson' ? <Sparkles size={18} /> : <Library size={18} />}
-            title={query ? `Nothing matches “${query}”` : filter === 'lesson' ? 'No lessons yet' : 'Memory is empty'}
+            icon={query ? <Search size={18} /> : <Library size={18} />}
+            title={query ? `Nothing matches “${query}”` : filter === 'lesson' ? 'No lessons yet' : 'Nothing remembered yet'}
             body={
               query
                 ? 'Try a different word, or clear the search.'
                 : filter === 'lesson'
-                  ? 'After trades close, the agent reviews what happened and writes down what it would do differently.'
-                  : 'Teach it something above, or let it trade — guidance, lessons and remembered trades collect here.'
+                  ? 'After trades finish, the agent looks back at what happened and writes down what it would do differently.'
+                  : 'Teach it something above, or let it trade. Your guidance, its lessons and a record of each trade collect here.'
             }
           />
         </Card>
       ) : (
-        <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <AnimatePresence initial={false}>
-            {shown.map((m) => (
-              <MemoryCard key={m.id} m={m} onPin={onPin} onDelete={onDelete} />
-            ))}
-          </AnimatePresence>
-        </div>
+        shownKinds.map((k) => {
+          const list = byKind[k]
+          const all = expanded[k] || list.length <= PREVIEW
+          const rows = all ? list : list.slice(0, PREVIEW)
+          return (
+            <section key={k}>
+              <h3 className="h-section">{kindMeta[k].title}</h3>
+              <p className="hint mt-0.5">{kindMeta[k].blurb}</p>
+              <ul className="mt-2">
+                {rows.map((m) => (
+                  <MemoryRow key={m.id} m={m} onPin={onPin} onDelete={onDelete} />
+                ))}
+              </ul>
+              {!all && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((e) => ({ ...e, [k]: true }))}
+                  className="mt-2 text-[13px] font-medium text-mute hover:text-white"
+                >
+                  Show all {list.length}
+                </button>
+              )}
+            </section>
+          )
+        })
       )}
     </div>
   )

@@ -36,9 +36,9 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: { paylo
     <div className="rounded-xl border border-hair2 bg-ink-800/95 px-3 py-2 shadow-lift backdrop-blur">
       <div className="num mb-1.5 text-[10.5px] font-semibold text-mute">{elapsedLabel(p.t)}</div>
       <div className="space-y-1 text-[11px]">
-        <Row2 color="#e6e9f2" label="Total" value={fixed(p.total, 0)} />
-        <Row2 color="#8b9cff" label="Projected" value={`${fixed(p.projected, 1)}  (${fixed(p.lo, 0)}–${fixed(p.hi, 0)})`} />
-        {p.line != null && <Row2 color="#f5b74e" label="Book line" value={fixed(p.line, 1)} />}
+        <Row2 color="#8a8c94" label="Total" value={fixed(p.total, 0)} />
+        <Row2 color="#f4f4f5" label="Heading for" value={`${fixed(p.projected, 1)}  (${fixed(p.lo, 0)}–${fixed(p.hi, 0)})`} />
+        {p.line != null && <Row2 color="#e6a93c" label="The line" value={fixed(p.line, 1)} />}
       </div>
     </div>
   )
@@ -124,15 +124,15 @@ export default function TotalChart({
   }, [xMax])
 
   return (
-    <Card className="p-4">
+    <Card className="p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
-          <h3 className="label">Total points</h3>
-          <div className="hidden items-center gap-3 text-[10.5px] text-mute sm:flex">
-            {view === 'game' && <Legend color="#e6e9f2" label="Actual" />}
-            <Legend color="#8b9cff" label="Projected final" dashed={view === 'game'} />
-            <Legend color="#f5b74e" label="Book line" />
-            {strikes.length > 0 && <Legend color="#3ddc97" label="Your strikes" dashed />}
+          <h3 className="text-sm font-medium text-white">How the total has moved</h3>
+          <div className="hidden items-center gap-3 text-xs text-mute sm:flex">
+            {view === 'game' && <Legend color="#8a8c94" label="Actual" />}
+            <Legend color="#f4f4f5" label="Heading for" dashed={view === 'game'} />
+            <Legend color="#e6a93c" label="The line" />
+            {strikes.length > 0 && <Legend color="#19c37d" label="Your strikes" dashed />}
           </div>
         </div>
         <Segmented<View>
@@ -140,8 +140,8 @@ export default function TotalChart({
           value={view}
           onChange={setView}
           options={[
-            { value: 'finish', label: 'Where it lands' },
-            { value: 'game', label: 'Full game' },
+            { value: 'finish', label: 'Where it is heading' },
+            { value: 'game', label: 'Points scored' },
           ]}
         />
       </div>
@@ -160,12 +160,12 @@ export default function TotalChart({
             <ComposedChart data={rows} margin={{ top: 6, right: 44, bottom: 0, left: -14 }}>
               <defs>
                 <linearGradient id="bandFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#8b9cff" stopOpacity={0.22} />
-                  <stop offset="100%" stopColor="#8b9cff" stopOpacity={0.06} />
+                  <stop offset="0%" stopColor="#f4f4f5" stopOpacity={0.22} />
+                  <stop offset="100%" stopColor="#f4f4f5" stopOpacity={0.06} />
                 </linearGradient>
                 <linearGradient id="totalFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#e6e9f2" stopOpacity={0.12} />
-                  <stop offset="100%" stopColor="#e6e9f2" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#8a8c94" stopOpacity={0.12} />
+                  <stop offset="100%" stopColor="#8a8c94" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
@@ -199,44 +199,44 @@ export default function TotalChart({
               {view === 'game' && (
                 <Area
                   dataKey="total"
-                  stroke="#e6e9f2"
+                  stroke="#8a8c94"
                   strokeWidth={1.8}
                   fill="url(#totalFill)"
                   dot={false}
                   isAnimationActive={false}
-                  activeDot={{ r: 3, fill: '#e6e9f2', stroke: '#090b10' }}
+                  activeDot={{ r: 3, fill: '#8a8c94', stroke: '#0b0b0c' }}
                 />
               )}
               <Line
                 dataKey="line"
                 type="stepAfter"
-                stroke="#f5b74e"
+                stroke="#e6a93c"
                 strokeWidth={1.5}
                 dot={false}
                 isAnimationActive={false}
                 connectNulls
-                activeDot={{ r: 3, fill: '#f5b74e', stroke: '#090b10' }}
+                activeDot={{ r: 3, fill: '#e6a93c', stroke: '#0b0b0c' }}
               />
               <Line
                 dataKey="projected"
-                stroke="#8b9cff"
+                stroke="#f4f4f5"
                 strokeWidth={2}
                 strokeDasharray={view === 'game' ? '5 4' : undefined}
                 dot={false}
                 isAnimationActive={false}
-                activeDot={{ r: 3.5, fill: '#8b9cff', stroke: '#090b10' }}
+                activeDot={{ r: 3.5, fill: '#f4f4f5', stroke: '#0b0b0c' }}
               />
               {strikes.map((p) => (
                 <ReferenceLine
                   key={p.id}
                   y={p.strike}
-                  stroke={p.side === 'under' ? '#3ddc97' : '#ff6b6b'}
+                  stroke={p.side === 'under' ? '#19c37d' : '#f2594b'}
                   strokeDasharray="6 4"
                   strokeWidth={1.2}
                   label={{
                     value: `${p.side === 'under' ? 'U' : 'O'} ${p.strike}`,
                     position: 'right',
-                    fill: p.side === 'under' ? '#3ddc97' : '#ff6b6b',
+                    fill: p.side === 'under' ? '#19c37d' : '#f2594b',
                     fontSize: 10,
                     fontFamily: 'JetBrains Mono, monospace',
                   }}

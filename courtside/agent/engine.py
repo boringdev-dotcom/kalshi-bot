@@ -845,7 +845,7 @@ class Engine:
         self.decide(
             "hold",
             f"Holding {game.label} {row['side']} {row['strike']:g}, watching closely",
-            f"{'; '.join(game.risk.flags) or 'Risk is rising'}. Win chance is still {p_win:.0%} against a "
+            f"{_sentence('; '.join(game.risk.flags) or 'risk is rising')}. Win chance is still {p_win:.0%} against a "
             f"{p['min_p_win']:g}% floor and the bid is {rung.bid(row['side'])}c versus a {row['entry_price']}c entry, "
             f"so no exit yet.",
             game=game, ticker=row["ticker"], confidence=p_win, source="model",
@@ -1102,6 +1102,11 @@ class Engine:
     async def aclose(self) -> None:
         await self.feed.aclose()
         await self.kalshi.aclose()
+
+
+def _sentence(text: str) -> str:
+    """Start with a capital without lowering anything else (team codes stay upper case)."""
+    return text[:1].upper() + text[1:]
 
 
 def _clip(text: str, limit: int) -> str:
