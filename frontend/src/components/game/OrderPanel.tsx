@@ -51,6 +51,7 @@ export default function OrderPanel({
   pick,
   onPick,
   closedSegments,
+  bare = false,
 }: {
   game: Game
   /** Every market of this game, so the panel follows the live price of whatever is picked. */
@@ -59,6 +60,8 @@ export default function OrderPanel({
   onPick: (p: Pick | null) => void
   /** Segments that can no longer be traded (finished quarters, or everything once the game is final). */
   closedSegments: Set<string>
+  /** Drop the card frame: used inside the phone order sheet, which supplies its own. */
+  bare?: boolean
 }) {
   const settings = useStore((s) => s.app?.settings)
   const cash = useStore((s) => s.app?.account.cash ?? 0)
@@ -152,8 +155,8 @@ export default function OrderPanel({
   }
 
   return (
-    <div className="surface overflow-hidden">
-      <div className="flex items-start justify-between gap-3 px-6 pt-5">
+    <div className={bare ? '' : 'surface overflow-hidden'}>
+      <div className="flex items-start justify-between gap-3 px-5 pt-4 sm:px-6 sm:pt-5">
         <div className="min-w-0">
           <div className="text-xs text-mute">
             {game.label} · {where}
@@ -165,7 +168,7 @@ export default function OrderPanel({
         </button>
       </div>
 
-      <div className="px-6 pb-6">
+      <div className="px-5 pb-5 sm:px-6 sm:pb-6">
         {/* the two sides of this market */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           {(['under', 'over'] as Side[]).map((s) => {

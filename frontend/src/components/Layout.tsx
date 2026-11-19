@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import clsx from 'clsx'
-import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, Info, LayoutGrid, Settings2, Wallet, X, XCircle } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { money, pnlColor } from '../format'
@@ -9,11 +9,14 @@ import type { AgentStatus } from '../types'
 import { LiveDot, Spinner, Ticker } from './ui'
 
 const NAV = [
-  { to: '/', label: 'Markets', key: 'm' },
-  { to: '/portfolio', label: 'Portfolio', key: 'p' },
-  { to: '/agent', label: 'Agent', key: 'a' },
-  { to: '/settings', label: 'Settings', key: 's' },
+  { to: '/', label: 'Markets', key: 'm', icon: LayoutGrid },
+  { to: '/portfolio', label: 'Portfolio', key: 'p', icon: Wallet },
+  { to: '/agent', label: 'Agent', key: 'a', icon: Bot },
+  { to: '/settings', label: 'Settings', key: 's', icon: Settings2 },
 ]
+
+const isActive = (to: string, pathname: string) =>
+  to === '/' ? pathname === '/' || pathname.startsWith('/game') : pathname.startsWith(to)
 
 /** How the agent's state is shown wherever it appears. */
 export const agentTone: Record<AgentStatus['state'], { color: string; label: string }> = {
@@ -29,7 +32,7 @@ function Logo() {
       <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white">
         <span className="h-2.5 w-2.5 rounded-full bg-ink-950" />
       </span>
-      <span className="hidden text-[17px] font-semibold tracking-tight text-white sm:inline">Courtside</span>
+      <span className="text-[17px] font-semibold tracking-tight text-white">Courtside</span>
     </Link>
   )
 }
@@ -65,6 +68,31 @@ function ModeBadges() {
   )
 }
 
+/** Phone navigation: a tab bar along the bottom, where a thumb can reach it. */
+function TabBar() {
+  const { pathname } = useLocation()
+  return (
+    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-hair bg-ink-950/95 backdrop-blur md:hidden">
+      <div className="grid h-16 grid-cols-4">
+        {NAV.map((n) => {
+          const active = isActive(n.to, pathname)
+          const Icon = n.icon
+          return (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              className={clsx('flex flex-col items-center justify-center gap-1 text-[11px] font-medium', active ? 'text-white' : 'text-dim')}
+            >
+              <Icon size={21} strokeWidth={active ? 2.2 : 1.8} />
+              {n.label}
+            </NavLink>
+          )
+        })}
+      </div>
+    </nav>
+  )
+}
+
 function TopNav() {
   const app = useStore((s) => s.app)
   const account = app?.account
@@ -74,11 +102,11 @@ function TopNav() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-hair bg-ink-950/90 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-[1180px] items-center gap-3 px-5 sm:px-8 md:gap-6">
+      <div className="mx-auto flex h-14 max-w-[1180px] items-center gap-3 px-4 sm:px-8 md:h-16 md:gap-6">
         <Logo />
-        <nav className="flex items-center gap-1">
+        <nav className="hidden items-center gap-1 md:flex">
           {NAV.map((n) => {
-            const active = n.to === '/' ? pathname === '/' || pathname.startsWith('/game') : pathname.startsWith(n.to)
+            const active = isActive(n.to, pathname)
             return (
               <NavLink
                 key={n.to}
@@ -138,7 +166,7 @@ function ToastItem({ t }: { t: Toast }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 8 }}
       transition={{ duration: 0.18 }}
-      className="pointer-events-auto flex w-[340px] items-start gap-3 rounded-2xl border border-hair bg-ink-800 p-3.5 shadow-lift"
+      className="pointer-events-auto flex w-full items-start gap-3 rounded-2xl border border-hair bg-ink-800 p-3.5 shadow-lift md:w-[340px]"
     >
       <div className="mt-0.5">{toastIcon[t.level]}</div>
       <div className="min-w-0 flex-1">
@@ -155,7 +183,7 @@ function ToastItem({ t }: { t: Toast }) {
 function Toasts() {
   const toasts = useStore((s) => s.toasts)
   return (
-    <div className="pointer-events-none fixed bottom-5 right-5 z-[60] flex flex-col items-end gap-2">
+    <div className="pointer-events-none fixed inset-x-3 bottom-[calc(80px+env(safe-area-inset-bottom))] z-[60] flex flex-col items-stretch gap-2 md:inset-x-auto md:bottom-5 md:right-5 md:items-end">
       <AnimatePresence initial={false}>
         {toasts.slice(-3).map((t) => (
           <ToastItem key={t.id} t={t} />
@@ -222,7 +250,8 @@ export default function Layout() {
     <div className="min-h-full">
       <TopNav />
       <ConnectionNotice />
-      <main>{app ? <Outlet /> : null}</main>
+      <main className="pb-tabbar md:pb-0">{app ? <Outlet /> : null}</main>
+      <TabBar />
       <Toasts />
     </div>
   )

@@ -205,7 +205,7 @@ function StrategyCard({ strategy, onUpdate }: { strategy: Strategy; onUpdate: (s
   const st = strategy.stats
 
   return (
-    <Card className={clsx('p-6 transition-opacity', !enabled && 'opacity-70')}>
+    <Card className={clsx('p-4 transition-opacity sm:p-6', !enabled && 'opacity-70')}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h3 className="h-section">{strategy.name}</h3>
@@ -221,7 +221,7 @@ function StrategyCard({ strategy, onUpdate }: { strategy: Strategy; onUpdate: (s
         </div>
       </div>
 
-      <p className="mt-4 text-lg leading-relaxed text-white">{summary}</p>
+      <p className="mt-4 text-base leading-relaxed text-white sm:text-lg">{summary}</p>
       <div className="mt-1.5 flex h-4 items-center gap-1.5 text-xs text-dim">
         {status === 'saving' && (
           <>

@@ -50,3 +50,13 @@ Top navigation bar (no side rail): **Markets · Portfolio · Agent · Settings**
 | `/settings` | Settings | Mode, data, limits, connections. |
 
 `/brain` redirects to `/agent`.
+
+## Phones
+
+Every screen must work at 320px wide with no sideways scrolling (check with `document.documentElement.scrollWidth === innerWidth`).
+
+- Below `md` (768px) the top navigation becomes a bottom tab bar; pages reserve room for it with `pb-tabbar`. Use `safe-bottom` on anything pinned to the bottom edge.
+- Below `lg` (1024px) the game page's order panel is a bottom sheet that opens when a price is tapped; dialogs are bottom sheets below `sm`.
+- Price buttons stack (name over price) on phones so two fit beside a strike.
+- Rows of chips or tabs that can outgrow the screen scroll sideways inside a `no-scrollbar` container instead of widening the page. Grid and flex children that hold text get `min-w-0`.
+- Touch targets are at least 44px tall; inputs are 16px so iOS does not zoom; nothing depends on hover.

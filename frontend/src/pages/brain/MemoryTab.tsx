@@ -67,7 +67,7 @@ function Teach({ onAdded }: { onAdded: (m: Memory) => void }) {
   }
 
   return (
-    <Card className="p-6">
+    <Card className="p-4 sm:p-6">
       <h3 className="h-section">Teach the agent</h3>
       <p className="hint mt-1 max-w-2xl">
         Say it the way you would tell another trader. It is kept at the top of the agent’s memory and checked before every
@@ -86,12 +86,13 @@ function Teach({ onAdded }: { onAdded: (m: Memory) => void }) {
         className="field mt-4 resize-none !rounded-2xl !px-4 !py-3.5 !text-[15px] leading-relaxed"
       />
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <span className="text-xs text-dim">⌘ or Ctrl + Enter also saves</span>
-        <Button variant="primary" size="md" onClick={submit} loading={busy} disabled={!text.trim()}>
+        <span className="hidden text-xs text-dim sm:inline">⌘ or Ctrl + Enter also saves</span>
+        <Button variant="primary" size="md" onClick={submit} loading={busy} disabled={!text.trim()} className="w-full sm:w-auto">
           Teach
         </Button>
       </div>
-      <div className="mt-4 flex flex-wrap gap-1.5">
+      <div className="mb-1.5 mt-4 text-xs text-dim sm:hidden">Or start from an example</div>
+      <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:mt-4 sm:flex-wrap sm:overflow-visible sm:px-0">
         {EXAMPLES.map((ex) => (
           <button
             key={ex}
@@ -101,7 +102,7 @@ function Teach({ onAdded }: { onAdded: (m: Memory) => void }) {
               setText(ex)
               ref.current?.focus()
             }}
-            className="rounded-full bg-ink-800 px-3 py-1.5 text-[13px] text-mute transition-colors hover:bg-ink-700 hover:text-white"
+            className="shrink-0 whitespace-nowrap rounded-full bg-ink-800 px-3 py-2 text-[13px] text-mute transition-colors hover:bg-ink-700 hover:text-white sm:py-1.5"
           >
             {ex.length > 60 ? `${ex.slice(0, 58)}…` : ex}
           </button>

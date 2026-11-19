@@ -96,3 +96,17 @@ export function useGameDetail(id: string | null) {
   }, [id])
   return { detail: detail && detail.game.id === id ? detail : null, missing }
 }
+
+/** True while the window matches `query`, e.g. "(min-width: 1024px)". Follows resizes and rotation. */
+export function useMediaQuery(query: string) {
+  const get = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(query).matches : true)
+  const [matches, setMatches] = useState(get)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const on = () => setMatches(mq.matches)
+    on()
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [query])
+  return matches
+}

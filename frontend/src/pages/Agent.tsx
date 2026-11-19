@@ -6,7 +6,7 @@ import { api, ApiError } from '../api'
 import { ActivityFeed } from '../components/Activity'
 import AgentChat from '../components/AgentChat'
 import { agentTone } from '../components/Layout'
-import { Button, Card, Tabs } from '../components/ui'
+import { Button, Card, Segmented, Tabs } from '../components/ui'
 import { useStore } from '../store'
 import LearningTab from './brain/LearningTab'
 import MemoryTab from './brain/MemoryTab'
@@ -53,20 +53,20 @@ function Status() {
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="flex items-center justify-between gap-3 sm:gap-4">
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: tone.color }} />
-          <span className="text-xl font-semibold text-white">{sentence}</span>
+          <span className="text-[17px] font-semibold leading-tight text-white sm:text-xl">{sentence}</span>
         </div>
-        <p className="hint mt-1">
+        <p className="hint mt-1 line-clamp-2">
           {agent?.focus ||
             (enabled
               ? 'Looking for a game that fits your rules.'
               : 'Press Start and it will watch live games and trade by your rules.')}
         </p>
       </div>
-      <Button variant={enabled ? 'outline' : 'primary'} size="md" onClick={toggle} loading={busy} disabled={!app}>
+      <Button variant={enabled ? 'outline' : 'primary'} size="md" onClick={toggle} loading={busy} disabled={!app} className="shrink-0 !h-11 !px-5 sm:!h-12 sm:!px-6">
         {!busy && (enabled ? <Pause size={15} /> : <Play size={15} />)}
         {enabled ? 'Pause' : 'Start'}
       </Button>
@@ -75,6 +75,7 @@ function Status() {
 }
 
 export default function Agent() {
+  const [pane, setPane] = useState<'feed' | 'chat'>('feed')
   const [params, setParams] = useSearchParams()
   const tab = readTab(params.get('tab'))
 
@@ -101,11 +102,33 @@ export default function Agent() {
       />
 
       {/* Activity stays mounted so a chat answer in flight survives a look at another tab. */}
-      <div className={clsx('grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]', tab !== 'activity' && 'hidden')}>
-        <ActivityFeed />
-        <Card className="h-[560px] overflow-hidden lg:sticky lg:top-4 lg:h-[min(640px,calc(100vh-140px))]">
-          <AgentChat />
-        </Card>
+      <div className={clsx(tab !== 'activity' && 'hidden')}>
+        {/* Phones and tablets show one half at a time; wide screens show both side by side. */}
+        <div className="mb-4 lg:hidden">
+          <Segmented<'feed' | 'chat'>
+            id="activity-pane"
+            size="md"
+            value={pane}
+            onChange={setPane}
+            options={[
+              { value: 'feed', label: 'What it did' },
+              { value: 'chat', label: 'Ask the agent' },
+            ]}
+          />
+        </div>
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+          <div className={clsx(pane !== 'feed' && 'hidden lg:block')}>
+            <ActivityFeed />
+          </div>
+          <Card
+            className={clsx(
+              'h-[calc(100dvh-300px)] min-h-[420px] overflow-hidden lg:sticky lg:top-4 lg:block lg:h-[min(640px,calc(100vh-140px))]',
+              pane !== 'chat' && 'hidden',
+            )}
+          >
+            <AgentChat />
+          </Card>
+        </div>
       </div>
       {tab === 'rules' && <Rules />}
       {tab === 'memory' && <MemoryTab />}
