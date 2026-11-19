@@ -10,7 +10,7 @@ import asyncio
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -44,6 +44,17 @@ def _clock_seconds(display: str) -> float:
         return float(display)
     except ValueError:
         return 0.0
+
+
+# The board keeps showing last night's slate until this hour Eastern, so late West Coast
+# games finish (and settle) on it before tonight's games take their place.
+SLATE_ROLLOVER_HOUR = 6
+
+
+def slate_day(now: Optional[datetime] = None) -> str:
+    """The NBA day to show, as ESPN's YYYYMMDD. ESPN's own default rolls over late in the morning."""
+    et = (now or datetime.now(EASTERN)).astimezone(EASTERN)
+    return (et - timedelta(hours=SLATE_ROLLOVER_HOUR)).strftime("%Y%m%d")
 
 
 def _nickname(name: str) -> str:
@@ -80,6 +91,7 @@ class LiveFeed:
         self._espn_lines: dict[str, FanDuelOdds] = {}
         self._next_quarter: dict[tuple[int, str], float] = {}
         self._next_patterns: dict[str, float] = {}
+        self._slate: Optional[str] = None  # the day the board is showing
         self._odds_markets = "totals,spreads,h2h"
 
     async def aclose(self) -> None:
@@ -122,7 +134,11 @@ class LiveFeed:
 
     # -- ESPN ---------------------------------------------------------------
     async def _refresh_scores(self) -> str:
-        resp = await self._http.get(ESPN_SCOREBOARD)
+        day = slate_day()
+        if self._slate and day != self._slate and any(g.state == "live" for g in self.games.values()):
+            day = self._slate  # never switch days with a game still being played
+        self._slate = day
+        resp = await self._http.get(ESPN_SCOREBOARD, params={"dates": day})
         resp.raise_for_status()
         events = resp.json().get("events") or []
         seen: set[str] = set()

@@ -23,7 +23,7 @@ from courtside.domain import FanDuelOdds, Game, Rung, Team
 from courtside.events import Hub
 from courtside.kalshi.client import cents, side_and_price
 from courtside.model.quarters import implied_margin, project_quarter
-from courtside.feeds.live import LiveFeed
+from courtside.feeds.live import EASTERN, LiveFeed, slate_day
 from courtside.feeds.patterns import Snapshot, PlayerLine, build_context, parse_espn
 from courtside.feeds.sim import SimGame
 from courtside.kalshi.client import KalshiClient, quarter_series
@@ -749,3 +749,17 @@ def test_an_existing_database_gains_the_quarter_columns(tmp_path):
     row = DB(path).one("SELECT * FROM positions")
     assert (row["segment"], row["kind"], row["team"], row["label"]) == ("game", "total", None, None)
     assert Engine._label(row) == "Under 250.5" and Engine.trade_api({**row, "exit_price": 100, "pnl": 19.1, "closed_at": "x", "exit_reason": "settled_win", "counterfactual_pnl": 19.1, "exit_verdict": None, "final_total": 240})["label"] == "Under 250.5"
+
+
+def test_slate_day_rolls_over_at_six_eastern():
+    from datetime import datetime, timezone
+
+    def at(y, m, d, h, mi=0):
+        return datetime(y, m, d, h, mi, tzinfo=EASTERN)
+
+    assert slate_day(at(2026, 11, 19, 1, 30)) == "20261118"  # late West Coast game still on last night's board
+    assert slate_day(at(2026, 11, 19, 5, 59)) == "20261118"
+    assert slate_day(at(2026, 11, 19, 6, 0)) == "20261119"
+    assert slate_day(at(2026, 11, 19, 10, 12)) == "20261119"  # ESPN's default was still on the 18th here
+    assert slate_day(at(2026, 11, 19, 23, 50)) == "20261119"
+    assert slate_day(datetime(2026, 11, 20, 3, 0, tzinfo=timezone.utc)) == "20261119"  # 10 PM ET
