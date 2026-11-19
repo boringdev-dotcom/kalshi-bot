@@ -36,7 +36,7 @@ function GameCard({ game, mine }: { game: Game; mine: Position[] }) {
   const proj = game.projection?.mean
   const pnl = mine.reduce((sum, p) => sum + p.pnl, 0)
   return (
-    <Link to={`/game/${game.id}`} className="surface group block p-5 transition-colors hover:border-hair2 hover:bg-ink-800/60">
+    <Link to={`/game/${game.id}`} className="surface group block min-w-0 p-4 transition-colors hover:border-hair2 hover:bg-ink-800/60 sm:p-5">
       <div className="mb-4 flex items-center gap-2 text-[13px]">
         {game.state === 'live' && <LiveDot size={7} />}
         <span className={clsx('font-medium', game.state === 'live' ? 'text-mint' : 'text-mute')}>{gameStatus(game)}</span>
@@ -48,7 +48,7 @@ function GameCard({ game, mine }: { game: Game; mine: Position[] }) {
         <TeamRow team={game.away} show={started} lead={game.away.score >= game.home.score} />
         <TeamRow team={game.home} show={started} lead={game.home.score >= game.away.score} />
       </div>
-      <div className="mt-5 flex items-end gap-8 border-t border-hair pt-4">
+      <div className="mt-4 flex items-end gap-5 border-t border-hair pt-4 sm:mt-5 sm:gap-8">
         {started && <Fact label="Points so far" value={String(game.total)} />}
         <Fact label="The line" value={line != null ? String(line) : '—'} />
         {game.state !== 'final' && <Fact label={started ? 'Heading for' : 'Model expects'} value={proj != null ? proj.toFixed(0) : '—'} />}
@@ -125,21 +125,22 @@ function Intro() {
     }
   }
   return (
-    <div className="surface relative mb-8 px-6 py-5">
+    <div className="surface relative mb-6 px-5 py-5 sm:mb-8 sm:px-6">
       <button onClick={close} className="absolute right-3 top-3 rounded-full p-2 text-dim hover:bg-white/[0.06] hover:text-white" aria-label="Dismiss">
         <X size={15} />
       </button>
       <div className="h-section">How this works</div>
-      <div className="mt-3 grid gap-5 text-[13px] leading-relaxed text-slate-300 sm:grid-cols-3">
-        <div>
+      {/* Phones: three cards to swipe through. Wider screens: three columns. */}
+      <div className="no-scrollbar -mx-5 mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 text-[13px] leading-relaxed text-slate-300 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-5 sm:overflow-visible sm:px-0">
+        <div className="w-[80%] shrink-0 snap-start rounded-2xl bg-ink-800 p-4 sm:w-auto sm:bg-transparent sm:p-0">
           <div className="mb-1 font-medium text-white">1. Every game has a line</div>
           The line is the total points both teams are expected to score. You bet on the final total landing under or over a number.
         </div>
-        <div>
+        <div className="w-[80%] shrink-0 snap-start rounded-2xl bg-ink-800 p-4 sm:w-auto sm:bg-transparent sm:p-0">
           <div className="mb-1 font-medium text-white">2. The price is the chance</div>
           A contract pays $1 if you are right. If it costs 94¢, the market thinks it happens about 94 times in 100, and you make 6¢.
         </div>
-        <div>
+        <div className="w-[80%] shrink-0 snap-start rounded-2xl bg-ink-800 p-4 sm:w-auto sm:bg-transparent sm:p-0">
           <div className="mb-1 font-medium text-white">3. The agent can do it for you</div>
           It watches every game, buys the under late when the cushion is big, and sells if the game turns. You set its rules.
         </div>

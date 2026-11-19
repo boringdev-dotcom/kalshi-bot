@@ -31,14 +31,17 @@ function PriceButton({
       disabled={off}
       title={off ? 'No one is selling this right now' : `Buy ${label} at ${cents(price)}`}
       className={clsx(
-        'flex h-11 shrink-0 items-center justify-between gap-2 rounded-full text-[13px] font-medium transition-colors',
-        wide ? 'w-[142px] px-3.5' : 'w-[124px] px-4',
-        selected ? 'bg-white text-ink-950' : 'bg-ink-800 text-slate-200 hover:bg-ink-700',
+        // Phones: a stacked tile (name over price) so two fit beside the line.
+        // Wider screens: one pill with the name and price side by side.
+        'flex shrink-0 flex-col items-center justify-center rounded-2xl font-medium transition-colors',
+        'h-[52px] sm:h-11 sm:flex-row sm:justify-between sm:gap-2 sm:rounded-full',
+        wide ? 'w-[92px] px-1.5 sm:w-[142px] sm:px-3.5' : 'w-[78px] px-1.5 sm:w-[124px] sm:px-4',
+        selected ? 'bg-white text-ink-950' : 'bg-ink-800 text-slate-200 active:bg-ink-700 sm:hover:bg-ink-700',
         off && 'cursor-not-allowed opacity-35 hover:bg-ink-800',
       )}
     >
-      <span className="truncate">{label}</span>
-      <span className="num font-semibold">{price == null ? '–' : cents(price)}</span>
+      <span className={clsx('max-w-full truncate text-[11px] leading-tight sm:text-[13px]', !selected && 'text-mute sm:text-slate-200')}>{label}</span>
+      <span className="num text-[15px] font-semibold leading-tight sm:text-[13px]">{price == null ? '–' : cents(price)}</span>
     </button>
   )
 }
@@ -72,10 +75,13 @@ function Row({
   right: React.ReactNode
 }) {
   return (
-    <div className="row !gap-3 sm:!gap-5">
-      <div className="w-[136px] shrink-0">
+    <div className="row !gap-3 !py-3 sm:!gap-5 sm:!py-3.5">
+      <div className="min-w-0 flex-1 sm:w-[136px] sm:flex-none sm:shrink-0">
         <div className="num text-[17px] font-semibold leading-tight text-white">{title}</div>
-        <div className="mt-0.5 text-xs text-dim">{sub}</div>
+        <div className="mt-0.5 text-xs text-dim">
+          {sub}
+          {owned && <span className="text-mint xl:hidden"> · yours</span>}
+        </div>
       </div>
       <div className="hidden min-w-0 flex-1 xl:block">
         <div className="mb-1.5 flex items-center gap-2 text-[13px] text-mute">
@@ -85,7 +91,7 @@ function Row({
         </div>
         <ChanceBar value={chance} />
       </div>
-      <div className="ml-auto flex shrink-0 gap-2">
+      <div className="ml-auto flex shrink-0 gap-1.5 sm:gap-2">
         {left}
         {right}
       </div>

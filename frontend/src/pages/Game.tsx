@@ -1,5 +1,6 @@
 import clsx from 'clsx'
 import { ArrowLeft, TriangleAlert } from 'lucide-react'
+import { AnimatePresence, motion, useDragControls } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
@@ -11,7 +12,7 @@ import Scoreboard from '../components/game/Scoreboard'
 import TotalChart from '../components/TotalChart'
 import { Button, Dialog, Empty, LiveDot, Segmented, Skeleton } from '../components/ui'
 import { cents, mmss, money, pct, periodLabel, pnlColor, tradeLabel } from '../format'
-import { bidOf, fee, gameLine, impliedLine, quarterNumber, useGameDetail, type Pick } from '../lib'
+import { bidOf, fee, gameLine, impliedLine, quarterNumber, useGameDetail, useMediaQuery, type Pick } from '../lib'
 import { useStore } from '../store'
 import type { Game, LadderRung, Position, QuarterSummary, Segment } from '../types'
 
@@ -22,7 +23,7 @@ function GameSwitcher({ games, current }: { games: Game[]; current: string }) {
   const others = games.filter((g) => g.state !== 'final' || g.id === current)
   if (others.length < 2) return null
   return (
-    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+    <div className="no-scrollbar -mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 pb-1">
       {others.map((g) => (
         <Link
           key={g.id}
@@ -72,6 +73,53 @@ function story(game: Game, segment: Segment, kind: 'total' | 'spread', line: num
   return `${name} so far: ${game.away.abbr} ${q.away_points}, ${game.home.abbr} ${q.home_points}, with ${mmss(q.seconds_remaining)} left.${lead}`
 }
 
+/** Phones: the order panel slides up from the bottom when a price is tapped. */
+function OrderSheet({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+  // Drag down from the handle to dismiss. Only the handle starts a drag, so the order form scrolls normally.
+  const drag = useDragControls()
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden' // keep the page behind from scrolling under a thumb
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div className="fixed inset-0 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+          <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Place an order"
+            className="safe-bottom absolute inset-x-0 bottom-0 max-h-[92vh] overflow-y-auto overscroll-contain rounded-t-3xl border-t border-hair bg-ink-900 shadow-lift"
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', stiffness: 380, damping: 38 }}
+            drag="y"
+            dragControls={drag}
+            dragListener={false}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0, bottom: 0.6 }}
+            onDragEnd={(_, info) => (info.offset.y > 120 || info.velocity.y > 600) && onClose()}
+          >
+            <div className="sticky top-0 z-10 flex cursor-grab touch-none justify-center bg-ink-900 pb-2 pt-3" onPointerDown={(e) => drag.start(e)}>
+              <span className="h-1.5 w-10 rounded-full bg-white/20" />
+            </div>
+            {children}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
 function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRung[] }) {
   const addTrade = useStore((s) => s.addTrade)
   const toast = useStore((s) => s.toast)
@@ -101,7 +149,7 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
   }
 
   return (
-    <div className="surface mt-4 px-6 py-5">
+    <div className="surface mt-5 px-4 py-4 sm:px-6 sm:py-5 lg:mt-4">
       <div className="h-section">Your positions in this game</div>
       <div className="mt-2">
         {positions.map((p) => (
@@ -130,17 +178,29 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
               You hold {selling.contracts} contracts bought at {cents(selling.entry_price)} for {money(selling.cost)}.
             </p>
             <div className="mt-4 space-y-2 text-sm">
-              <div className="flex justify-between">
+              <div className="flex items-start justify-between gap-4">
                 <span className="text-mute">Sell now{bid != null ? ` at ${cents(bid)}` : ''}</span>
-                <span className="num font-semibold text-white">{proceeds != null ? `${money(proceeds)}  (${money(proceeds - selling.cost, { sign: true })})` : 'No buyer right now'}</span>
+                <span className="num shrink-0 text-right font-semibold text-white">
+                  {proceeds != null ? (
+                    <>
+                      <span className="block whitespace-nowrap">{money(proceeds)}</span>
+                      <span className={clsx('block whitespace-nowrap text-xs', pnlColor(proceeds - selling.cost))}>{money(proceeds - selling.cost, { sign: true })}</span>
+                    </>
+                  ) : (
+                    'No buyer right now'
+                  )}
+                </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex items-start justify-between gap-4">
                 <span className="text-mute">Keep it and win</span>
-                <span className="num font-semibold text-mint">{money(selling.contracts)}  ({money(selling.max_profit, { sign: true })})</span>
+                <span className="num shrink-0 text-right font-semibold text-mint">
+                  <span className="block whitespace-nowrap">{money(selling.contracts)}</span>
+                  <span className="block whitespace-nowrap text-xs">{money(selling.max_profit, { sign: true })}</span>
+                </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex items-start justify-between gap-4">
                 <span className="text-mute">Keep it and lose</span>
-                <span className="num font-semibold text-coral">{money(0)}  ({money(-selling.cost, { sign: true })})</span>
+                <span className="num shrink-0 whitespace-nowrap text-right font-semibold text-coral">{money(-selling.cost, { sign: true })}</span>
               </div>
             </div>
             <div className="mt-6 flex gap-2">
@@ -171,6 +231,7 @@ export default function GamePage() {
   const [kind, setKind] = useState<'total' | 'spread'>('total')
   const [pick, setPick] = useState<Pick | null>(null)
   const [showChart, setShowChart] = useState(true)
+  const desktop = useMediaQuery('(min-width: 1024px)')
 
   useEffect(() => {
     setSegment('game')
@@ -231,9 +292,9 @@ export default function GamePage() {
 
   return (
     <div className="page">
-      <div className="mb-5 flex items-center gap-4">
-        <Link to="/" className="flex shrink-0 items-center gap-1.5 text-sm text-mute hover:text-white">
-          <ArrowLeft size={15} /> Markets
+      <div className="mb-5 flex items-center gap-3 sm:gap-4">
+        <Link to="/" className="flex shrink-0 items-center gap-1.5 text-sm text-mute hover:text-white" aria-label="Back to markets">
+          <ArrowLeft size={15} /> <span className="hidden sm:inline">Markets</span>
         </Link>
         <GameSwitcher games={games} current={game.id} />
       </div>
@@ -252,9 +313,13 @@ export default function GamePage() {
               <p className="mt-4 text-[13px] text-gold">Worth knowing: {game.risk.flags.join('. ')}.</p>
             ))}
 
+          {!desktop && <Holdings positions={positions} rungs={allRungs} />}
+
           {/* which market */}
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Segmented id="segment" size="md" options={segOptions} value={segment} onChange={(s) => { setSegment(s); if (s === 'game') setKind('total') }} />
+            <div className="no-scrollbar -mx-4 max-w-[calc(100%+2rem)] overflow-x-auto px-4 sm:mx-0 sm:max-w-full sm:px-0">
+              <Segmented id="segment" size="md" options={segOptions} value={segment} onChange={(s) => { setSegment(s); if (s === 'game') setKind('total') }} />
+            </div>
             {segment !== 'game' && (
               <Segmented id="kind" size="md" options={[{ value: 'total', label: 'Total points' }, { value: 'spread', label: 'Spread' }]} value={kind} onChange={setKind} />
             )}
@@ -280,6 +345,7 @@ export default function GamePage() {
             <div className="flex items-end justify-between gap-4 border-b border-hair pb-2">
               <div className="h-section">{showKind === 'total' ? 'Pick a number' : 'Pick a margin'}</div>
               <div className="hidden text-xs text-dim sm:block">Prices are per contract. Each contract pays $1 if you are right.</div>
+              <div className="text-xs text-dim sm:hidden">Tap a price to buy</div>
             </div>
             <MarketList
               game={game}
@@ -318,11 +384,19 @@ export default function GamePage() {
           </div>
         </div>
 
-        <aside className="lg:sticky lg:top-24 lg:self-start">
-          <OrderPanel game={game} rungs={allRungs} pick={pick} onPick={setPick} closedSegments={closedSegments} />
-          <Holdings positions={positions} rungs={allRungs} />
-        </aside>
+        {desktop && (
+          <aside className="lg:sticky lg:top-24 lg:self-start">
+            <OrderPanel game={game} rungs={allRungs} pick={pick} onPick={setPick} closedSegments={closedSegments} />
+            <Holdings positions={positions} rungs={allRungs} />
+          </aside>
+        )}
       </div>
+
+      {!desktop && (
+        <OrderSheet open={!!pick} onClose={() => setPick(null)}>
+          <OrderPanel bare game={game} rungs={allRungs} pick={pick} onPick={setPick} closedSegments={closedSegments} />
+        </OrderSheet>
+      )}
     </div>
   )
 }

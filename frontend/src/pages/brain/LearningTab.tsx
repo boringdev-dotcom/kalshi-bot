@@ -152,12 +152,14 @@ function Heatmap({ arms }: { arms: Arm[] }) {
           </p>
         </div>
         {margins.length > 1 && (
-          <Segmented
-            id="heat-margin"
-            value={margin}
-            onChange={setMargin}
-            options={[{ value: 'all', label: 'All games' }, ...margins.map((m) => ({ value: m, label: marginWord(m) }))]}
-          />
+          <div className="no-scrollbar -mx-4 max-w-[calc(100%+2rem)] overflow-x-auto px-4 sm:mx-0 sm:max-w-full sm:px-0">
+            <Segmented
+              id="heat-margin"
+              value={margin}
+              onChange={setMargin}
+              options={[{ value: 'all', label: 'All games' }, ...margins.map((m) => ({ value: m, label: marginWord(m) }))]}
+            />
+          </div>
         )}
       </div>
 
@@ -170,13 +172,17 @@ function Heatmap({ arms }: { arms: Arm[] }) {
           />
         </Card>
       ) : (
-        <Card className="mt-3 p-5">
+        <Card className="mt-3 p-3 sm:p-5">
           <div className="overflow-x-auto">
+            {/* Phones: a narrow label column and cells that share the width. Wider screens: roomier. */}
             <div
-              className="grid min-w-[520px] gap-1.5"
-              style={{ gridTemplateColumns: `120px repeat(${times.length}, minmax(88px, 1fr))` }}
+              className="grid gap-1 [grid-template-columns:48px_repeat(var(--cols),minmax(0,1fr))] sm:min-w-[520px] sm:gap-1.5 sm:[grid-template-columns:120px_repeat(var(--cols),minmax(88px,1fr))]"
+              style={{ '--cols': times.length } as React.CSSProperties}
             >
-              <div className="flex items-end pb-1 text-xs text-dim">Cushion ↓ · Minutes left →</div>
+              <div className="flex items-end pb-1 text-[11px] text-dim sm:text-xs">
+                <span className="sm:hidden">Pts \ min</span>
+                <span className="hidden sm:inline">Cushion ↓ · Minutes left →</span>
+              </div>
               {times.map((t) => (
                 <div key={t} className="num pb-1 text-center text-xs font-medium text-mute">
                   {t}
@@ -184,11 +190,14 @@ function Heatmap({ arms }: { arms: Arm[] }) {
               ))}
               {buffers.map((b) => (
                 <FragmentRow key={b}>
-                  <div className="num flex items-center text-[13px] font-medium text-slate-200">{b} pts</div>
+                  <div className="num flex items-center text-xs font-medium text-slate-200 sm:text-[13px]">
+                    {b}
+                    <span className="hidden sm:inline">&nbsp;pts</span>
+                  </div>
                   {times.map((t) => {
                     const key = `${b}|${t}`
                     const c = cells.get(key)
-                    if (!c) return <div key={key} className="h-[64px] rounded-xl bg-white/[0.02]" />
+                    if (!c) return <div key={key} className="h-[56px] rounded-xl bg-white/[0.02] sm:h-[64px]" />
                     const isActive = activeKey === key
                     return (
                       <button
@@ -200,13 +209,17 @@ function Heatmap({ arms }: { arms: Arm[] }) {
                         onBlur={() => setHover(null)}
                         onClick={() => setPicked((p) => (p === key ? null : key))}
                         className={clsx(
-                          'flex h-[64px] flex-col items-center justify-center rounded-xl transition-shadow',
+                          'flex h-[56px] flex-col items-center justify-center rounded-lg transition-shadow sm:h-[64px] sm:rounded-xl',
                           isActive && 'ring-2 ring-white/60',
                         )}
                         style={cellStyle(c)}
                       >
-                        <span className="num text-base font-semibold leading-none text-white">{pct(c.pWin, 0)}</span>
-                        <span className="num mt-1 text-[11px] text-white/60">needs {pct(c.breakeven, 0)}</span>
+                        <span className="num text-[15px] font-semibold leading-none text-white sm:text-base">{pct(c.pWin, 0)}</span>
+                        <span className="num mt-1 text-[10px] text-white/60 sm:text-[11px]">
+                          <span className="hidden sm:inline">needs </span>
+                          <span className="sm:hidden">/ </span>
+                          {pct(c.breakeven, 0)}
+                        </span>
                       </button>
                     )
                   })}
@@ -261,7 +274,7 @@ function Heatmap({ arms }: { arms: Arm[] }) {
                 </motion.div>
               ) : (
                 <motion.p key="hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hint flex min-h-[48px] items-center">
-                  Point at a box to see its record and what it has returned.
+                  Tap a box to see its record and what it has returned.
                 </motion.p>
               )}
             </AnimatePresence>
@@ -474,7 +487,7 @@ export default function LearningTab() {
     <div className="space-y-10">
       <Totals t={state.totals} />
       <Heatmap arms={state.arms} />
-      <div className="grid items-start gap-8 lg:grid-cols-2">
+      <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
         <ExitStyles arms={state.exit_arms} />
         <Calibration rows={state.calibration} />
       </div>

@@ -34,8 +34,11 @@ export default function LineBar({
   // Labels above the track: now and projected. Below: the line and your pick. When two on the
   // same row sit close, push them apart so they never print over each other.
   const anchor = (self: number | null, other: number | null): 'center' | 'left' | 'right' => {
-    if (self == null || other == null) return 'center'
-    if (Math.abs(x(self) - x(other)) > 17) return 'center'
+    if (self == null) return 'center'
+    // Near either end, hang the label inward so it never runs off a narrow screen.
+    if (x(self) < 10) return 'left'
+    if (x(self) > 90) return 'right'
+    if (other == null || Math.abs(x(self) - x(other)) > 17) return 'center'
     return self <= other ? 'right' : 'left'
   }
 

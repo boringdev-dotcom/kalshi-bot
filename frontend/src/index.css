@@ -15,6 +15,20 @@
     @apply bg-ink-950 font-sans text-sm text-slate-200 antialiased;
     font-feature-settings: 'cv11', 'ss01', 'tnum';
   }
+  /* Phones: 16px inputs stop iOS from zooming the page when a field is tapped. */
+  @media (max-width: 639px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
+  /* No grey flash on tap, and no accidental double-tap zoom on buttons. */
+  a,
+  button {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
   ::selection {
     background: rgba(25, 195, 125, 0.3);
   }
@@ -55,10 +69,24 @@
   }
   /* Page column: one comfortable reading width, centred. */
   .page {
-    @apply mx-auto w-full max-w-[1180px] px-5 pb-16 pt-6 sm:px-8;
+    @apply mx-auto w-full max-w-[1180px] px-4 pb-16 pt-5 sm:px-8 sm:pt-6;
+  }
+  /* Room for the phone tab bar (and the home indicator) at the bottom of every page. */
+  .pb-tabbar {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Horizontal scrollers without a visible bar (chip rows, game switcher). */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
   .h-page {
-    @apply text-[26px] font-semibold tracking-tight text-white;
+    @apply text-2xl font-semibold tracking-tight text-white sm:text-[26px];
   }
   .h-section {
     @apply text-base font-semibold text-white;
@@ -138,6 +166,21 @@ input[type='range'].range:hover::-webkit-slider-thumb,
 input[type='range'].range:active::-webkit-slider-thumb {
   transform: scale(1.2);
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--tone) 18%, transparent);
+}
+/* Fingers need a bigger target than a mouse pointer. */
+@media (pointer: coarse) {
+  input[type='range'].range {
+    height: 32px;
+  }
+  input[type='range'].range::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -10px;
+  }
+  input[type='range'].range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+  }
 }
 input[type='range'].range:disabled {
   opacity: 0.4;

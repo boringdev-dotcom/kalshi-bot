@@ -340,21 +340,21 @@ export default function Portfolio() {
             <div className="rounded-2xl bg-ink-800 px-4 py-1 text-sm">
               <div className="flex items-baseline justify-between gap-4 border-b border-hair py-3">
                 <span className="text-mute">If you sell now</span>
-                <span className="num text-right text-white">
-                  about {money(closingLive.value)} back{' '}
-                  <span className={clsx('font-semibold', pnlColor(closingLive.pnl))}>({money(closingLive.pnl, { sign: true })})</span>
+                <span className="num shrink-0 text-right text-white">
+                  <span className="block whitespace-nowrap">about {money(closingLive.value)} back</span>
+                  <span className={clsx('block whitespace-nowrap text-xs font-semibold', pnlColor(closingLive.pnl))}>{money(closingLive.pnl, { sign: true })}</span>
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-4 border-b border-hair py-3">
                 <span className="text-mute">If you hold and it wins</span>
-                <span className="num text-right text-white">
-                  {money(closingLive.contracts)} back{' '}
-                  <span className="font-semibold text-mint">({money(closingLive.max_profit, { sign: true })})</span>
+                <span className="num shrink-0 text-right text-white">
+                  <span className="block whitespace-nowrap">{money(closingLive.contracts)} back</span>
+                  <span className="block whitespace-nowrap text-xs font-semibold text-mint">{money(closingLive.max_profit, { sign: true })}</span>
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-4 py-3">
                 <span className="text-mute">If you hold and it loses</span>
-                <span className="num text-right font-semibold text-coral">{money(-closingLive.cost, { sign: true })}</span>
+                <span className="num shrink-0 whitespace-nowrap text-right font-semibold text-coral">{money(-closingLive.cost, { sign: true })}</span>
               </div>
             </div>
             <p className="hint mt-3">

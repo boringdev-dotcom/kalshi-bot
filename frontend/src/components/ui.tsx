@@ -298,7 +298,7 @@ export function Tabs<T extends string>({
   className?: string
 }) {
   return (
-    <div className={clsx('flex items-center gap-1 border-b border-hair', className)}>
+    <div className={clsx('no-scrollbar flex items-center gap-1 overflow-x-auto border-b border-hair', className)}>
       {tabs.map((t) => {
         const active = t.value === value
         return (
@@ -307,7 +307,7 @@ export function Tabs<T extends string>({
             type="button"
             onClick={() => onChange(t.value)}
             className={clsx(
-              'relative flex items-center gap-1.5 px-3.5 py-3 text-sm font-medium transition-colors',
+              'relative flex shrink-0 items-center gap-1.5 px-3 py-3 text-sm font-medium transition-colors sm:px-3.5',
               active ? 'text-white' : 'text-mute hover:text-white',
             )}
           >
@@ -318,7 +318,7 @@ export function Tabs<T extends string>({
             {active && (
               <motion.span
                 layoutId={`tab-${id}`}
-                className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-white"
+                className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-white"
                 transition={{ type: 'spring', stiffness: 500, damping: 38 }}
               />
             )}
@@ -478,7 +478,7 @@ export function Dialog({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -488,11 +488,11 @@ export function Dialog({
           <motion.div
             role="dialog"
             aria-modal="true"
-            className="relative w-full overflow-hidden rounded-3xl border border-hair bg-ink-900 shadow-lift"
+            className="safe-bottom relative max-h-[92vh] w-full overflow-y-auto rounded-t-3xl border border-hair bg-ink-900 shadow-lift sm:max-h-[88vh] sm:rounded-3xl"
             style={{ maxWidth: width }}
-            initial={{ opacity: 0, y: 16, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 30 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
           >
             {accent && <div className="absolute inset-x-0 top-0 h-[2px]" style={{ background: accent }} />}
