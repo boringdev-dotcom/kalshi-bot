@@ -19,11 +19,12 @@ from typing import Any, Optional
 
 from ..config import Config
 from ..db import DB
-from ..domain import Game, Rung, now_iso
+from ..domain import QUARTER_SECONDS, Game, Rung, now_iso
 from ..events import Hub
 from ..feeds.live import LiveFeed
 from ..feeds.sim import SimFeed
 from ..kalshi.client import KalshiClient, KalshiError
+from ..model.quarters import implied_margin, implied_quarter_total
 from ..model.totals import refresh_game
 from .learner import Learner
 from .memory import MemoryStore, situation_tags
@@ -72,6 +73,8 @@ class Engine:
         self.games: list[Game] = []
         self.by_id: dict[str, Game] = {}
         self.timelines: dict[str, list[dict[str, Any]]] = {}
+        # game id -> quarter ('q1'..'q4') -> points over that quarter's 12 minutes
+        self.quarter_timelines: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.feed: SimFeed | LiveFeed = self._make_feed()
         self.ticks = 0
         self.last_tick: Optional[str] = None
@@ -164,8 +167,11 @@ class Engine:
     def _record_timeline(self, game: Game) -> None:
         if game.state == "pre":
             return
-        if game.projection is None and game.state != "final":
+        if game.id not in self.by_id or (game.projection is None and game.state != "final"):
+            # A practice game being played forward before it joins the slate: nothing else
+            # refreshes its model, so do it here or the chart would draw a stale projection.
             refresh_game(game)
+        self._record_quarters(game)
         points = self.timelines.setdefault(game.id, [])
         t = round(game.elapsed)
         if points and (t - points[-1]["t"] < 20) and game.state != "final":
@@ -189,6 +195,42 @@ class Engine:
         if len(self.timelines) > 40:
             for gid in [g for g in self.timelines if g not in self.by_id and g != game.id][:10]:
                 self.timelines.pop(gid, None)
+                self.quarter_timelines.pop(gid, None)
+
+    def _record_quarters(self, game: Game) -> None:
+        """Per-quarter chart points: the quarter's total and margin, the model's view, and Kalshi's line."""
+        books = self.quarter_timelines.setdefault(game.id, {})
+        for view in game.quarter_view:
+            seg, status = view["segment"], view["status"]
+            if status == "upcoming":
+                continue
+            points = books.setdefault(seg, [])
+            if status == "final" and (not points or points[-1]["t"] == QUARTER_SECONDS):
+                continue  # finished before we started watching, or already closed out
+            t = QUARTER_SECONDS if status == "final" else round(QUARTER_SECONDS - view["seconds_remaining"])
+            if points and t - points[-1]["t"] < 10 and status != "final":
+                continue
+            total = view["home_points"] + view["away_points"]
+            margin = view["home_points"] - view["away_points"]
+            proj = view["projection"]
+            mean, sd = (proj["total_mean"], proj["total_sd"]) if proj else (float(total), 0.0)
+            m_mean, m_sd = (proj["margin_mean"], proj["margin_sd"]) if proj else (float(margin), 0.0)
+            markets = game.quarter_markets.get(seg, {})
+            points.append(
+                {
+                    "t": t,
+                    "total": total,
+                    "projected": round(mean, 1),
+                    "lo": round(max(total, mean - sd), 1),
+                    "hi": round(mean + sd, 1),
+                    "line": implied_quarter_total(markets.get("total", [])),
+                    "margin": margin,
+                    "m_projected": round(m_mean, 1),
+                    "m_lo": round(m_mean - m_sd, 1),
+                    "m_hi": round(m_mean + m_sd, 1),
+                    "m_line": implied_margin(markets.get("spread", []), game.home.abbr),
+                }
+            )
 
     # ---------------------------------------------------------------- reading
     def open_rows(self, agent_only: bool = False) -> list[dict[str, Any]]:
@@ -417,6 +459,7 @@ class Engine:
         if source_changed:
             await self.feed.aclose()
             self.timelines.clear()
+            self.quarter_timelines.clear()
             self._cooldown.clear()
             self._last_skip.clear()
             self.feed = self._make_feed()
@@ -426,6 +469,7 @@ class Engine:
     async def reset_sim(self) -> None:
         if isinstance(self.feed, SimFeed):
             self.timelines.clear()
+            self.quarter_timelines.clear()
             self.games, self.by_id = [], {}
             self.feed.reset()
             self._cooldown.clear()

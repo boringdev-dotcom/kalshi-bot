@@ -180,6 +180,7 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
                 for seg in SEGMENTS
             ],
             "timeline": engine.timelines.get(game_id, []),
+            "quarter_timelines": engine.quarter_timelines.get(game_id, {}),
             "decisions": decisions,
             "positions": [p for p in engine.positions_api() if p["game_id"] == game_id],
         }

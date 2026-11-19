@@ -396,14 +396,23 @@ export default function GamePage() {
             {closedSegments.has(segment) && <p className="mt-3 text-[13px] text-mute">This market has finished, so it can no longer be traded.</p>}
           </div>
 
-          {segment === 'game' && game.state !== 'pre' && (
+          {game.state !== 'pre' && (segment === 'game' || (q && q.status !== 'upcoming')) && (
             <div className="mt-10">
               <button onClick={() => setShowChart((v) => !v)} className="text-[13px] font-medium text-mute hover:text-white">
                 {showChart ? 'Hide chart' : 'Show chart'}
               </button>
               {showChart && (
                 <div className="mt-2">
-                  <TotalChart game={game} timeline={detail ? detail.timeline : null} positions={positions} loading={!detail} />
+                  <TotalChart
+                    key={`${segment}-${showKind}`}
+                    game={game}
+                    segment={segment}
+                    kind={showKind}
+                    timeline={detail ? detail.timeline : null}
+                    quarterTimeline={segment === 'game' ? null : (detail?.quarter_timelines?.[segment] ?? [])}
+                    positions={positions}
+                    loading={!detail}
+                  />
                 </div>
               )}
             </div>

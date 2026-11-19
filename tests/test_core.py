@@ -21,7 +21,7 @@ from courtside.db import DB
 from courtside.domain import FanDuelOdds, Game, Rung, Team
 from courtside.events import Hub
 from courtside.kalshi.client import cents, side_and_price
-from courtside.model.quarters import project_quarter
+from courtside.model.quarters import implied_margin, project_quarter
 from courtside.feeds.live import LiveFeed
 from courtside.feeds.sim import SimGame
 from courtside.kalshi.client import KalshiClient, quarter_series
@@ -229,6 +229,44 @@ def test_engine_trades_the_sim_and_the_books_balance():
         if row["exit_reason"] in ("settled_win", "settled_loss"):
             won = (row["final_total"] < row["strike"]) == (row["side"] == "under")
             assert (row["exit_reason"] == "settled_win") == won
+
+
+def test_quarter_charts_follow_each_quarter():
+    async def run() -> Engine:
+        engine = make_engine()
+        await engine.update_settings({"sim_speed": 30})
+        for _ in range(60):
+            engine._last_real -= 1.0
+            await engine.tick()
+        return engine
+
+    random.seed(3)
+    engine = asyncio.run(run())
+    for game in engine.games:
+        books = engine.quarter_timelines.get(game.id, {})
+        for view in game.quarter_view:
+            points = books.get(view["segment"], [])
+            if view["status"] == "upcoming":
+                assert not points
+                continue
+            ts = [p["t"] for p in points]
+            assert ts == sorted(ts) and all(0 <= t <= 720 for t in ts)
+            if view["status"] == "final" and points:
+                last = points[-1]
+                assert last["t"] == 720 and last["projected"] == last["total"] and last["m_projected"] == last["margin"]
+    assert any(p["m_line"] is not None for g in engine.quarter_timelines.values() for pts in g.values() for p in pts)
+
+
+def test_implied_margin_reads_both_teams_rungs():
+    def rung(team, strike, mid):
+        return Rung(ticker=f"{team}{strike}", strike=strike, team=team, yes_bid=mid - 1, yes_ask=mid + 1)
+
+    # Home (CLE) 55% to win by 3.5+, 45% by 5.5+; away (MEM) 30% to win by 1.5+.
+    rungs = [rung("CLE", 3.5, 55), rung("CLE", 5.5, 45), rung("MEM", 1.5, 30)]
+    assert implied_margin(rungs, "CLE") == 4.5
+    # Away favoured: MEM 60% to win by 1.5+, 40% by 3.5+, so the 50/50 margin is MEM by 2.5.
+    rungs = [rung("MEM", 1.5, 60), rung("MEM", 3.5, 40), rung("CLE", 1.5, 20)]
+    assert implied_margin(rungs, "CLE") == -2.5
 
 
 def test_live_mode_is_refused_without_keys_or_live_data():

@@ -195,11 +195,30 @@ export interface TimelinePoint {
   line: number | null
 }
 
+/** One moment in a quarter. `t` is seconds into the quarter (0-720); margins are home minus away. */
+export interface QuarterPoint {
+  t: number
+  total: number
+  projected: number
+  lo: number
+  hi: number
+  /** Kalshi's 50/50 quarter total. */
+  line: number | null
+  margin: number
+  m_projected: number
+  m_lo: number
+  m_hi: number
+  /** Kalshi's 50/50 quarter margin. */
+  m_line: number | null
+}
+
 export interface GameDetail {
   game: Game
   /** Quarter totals and spreads, Q1-Q4. Lists are empty when Kalshi has no market. */
   quarter_markets: QuarterMarkets[]
   timeline: TimelinePoint[]
+  /** Per-quarter history, keyed 'q1'..'q4'. A quarter appears once it has started. */
+  quarter_timelines?: Partial<Record<Segment, QuarterPoint[]>>
   decisions: Decision[]
   positions: Position[]
 }
