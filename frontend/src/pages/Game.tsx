@@ -9,10 +9,11 @@ import LineBar from '../components/game/LineBar'
 import MarketList from '../components/game/MarketList'
 import OrderPanel from '../components/game/OrderPanel'
 import Scoreboard from '../components/game/Scoreboard'
+import SpreadBar from '../components/game/SpreadBar'
 import TotalChart from '../components/TotalChart'
 import { Button, Dialog, Empty, LiveDot, Segmented, Skeleton } from '../components/ui'
 import { cents, mmss, money, pct, periodLabel, pnlColor, tradeLabel } from '../format'
-import { bidOf, fee, gameLine, impliedLine, quarterNumber, useGameDetail, useMediaQuery, type Pick } from '../lib'
+import { bidOf, fee, gameLine, impliedLine, impliedSpread, marginText, quarterNumber, spreadWinZone, useGameDetail, useMediaQuery, type Pick } from '../lib'
 import { useStore } from '../store'
 import type { Game, LadderRung, Position, QuarterSummary, Segment } from '../types'
 
@@ -60,7 +61,7 @@ function story(game: Game, segment: Segment, kind: 'total' | 'spread', line: num
   if (q.status === 'upcoming') {
     return kind === 'total'
       ? `${name} has not started. ${q.projection ? `The model expects about ${q.projection.total_mean.toFixed(0)} points in it.` : ''}${segment === 'q4' ? ' Overtime does not count.' : ''}`
-      : `${name} has not started. Pick a team to win this quarter by a margin${segment === 'q4' ? ' (overtime does not count)' : ''}.`
+      : `${name} has not started.${line == null ? '' : Math.abs(line) < 0.25 ? ' The market has it even.' : ` The market's line is ${marginText(line, game.home.abbr, game.away.abbr)}.`} Pick a team to win this quarter by a margin${segment === 'q4' ? ' (overtime does not count)' : ''}.`
   }
   if (q.status === 'final') {
     return kind === 'total' ? `${name} is over: ${pts} points were scored.` : `${name} is over: ${game.away.abbr} ${q.away_points}, ${game.home.abbr} ${q.home_points}.`
@@ -69,8 +70,9 @@ function story(game: Game, segment: Segment, kind: 'total' | 'spread', line: num
     return `${pts} points in ${name} so far, ${mmss(q.seconds_remaining)} left.${q.projection ? ` It is heading for about ${q.projection.total_mean.toFixed(0)}.` : ''}`
   }
   const m = q.projection?.margin_mean
-  const lead = m == null ? '' : Math.abs(m) < 0.75 ? ' It looks even from here.' : ` The model has ${m > 0 ? game.home.abbr : game.away.abbr} winning it by about ${Math.abs(m).toFixed(0)}.`
-  return `${name} so far: ${game.away.abbr} ${q.away_points}, ${game.home.abbr} ${q.home_points}, with ${mmss(q.seconds_remaining)} left.${lead}`
+  const market = line == null ? '' : Math.abs(line) < 0.25 ? ' The market has it even.' : ` The market's line is ${marginText(line, game.home.abbr, game.away.abbr)}.`
+  const lead = m == null ? '' : Math.abs(m) < 0.75 ? ' The model has it about even.' : ` The model has ${m > 0 ? game.home.abbr : game.away.abbr} winning it by about ${Math.abs(m).toFixed(0)}.`
+  return `${name} so far: ${game.away.abbr} ${q.away_points}, ${game.home.abbr} ${q.home_points}, with ${mmss(q.seconds_remaining)} left.${market}${lead}`
 }
 
 /** Phones: the order panel slides up from the bottom when a price is tapped. */
@@ -277,6 +279,18 @@ export default function GamePage() {
   const spread = segment === 'game' ? game.projection?.sd : q?.projection?.total_sd
   const risky = game.state === 'live' && game.risk.level !== 'low' && game.risk.flags.length > 0
 
+  // Spreads: everything as the home team's margin (home points minus away points).
+  const spreadLine = showKind === 'spread' && market ? impliedSpread(market.spreads ?? [], game.home.abbr) : null
+  const marginNow = q && q.status !== 'upcoming' ? q.home_points - q.away_points : null
+  const spreadPickRung = pickedRung && (pickedRung.segment ?? 'game') === segment && pickedRung.kind === 'spread' && showKind === 'spread' ? pickedRung : null
+  const spreadPick =
+    spreadPickRung && pick
+      ? { ...spreadWinZone(spreadPickRung, pick.side, game.home.abbr), label: pick.side === 'under' ? spreadPickRung.no_label : spreadPickRung.yes_label }
+      : null
+  const heldSpreads = positions
+    .filter((p) => (p.segment ?? 'game') === segment && p.kind === 'spread')
+    .map((p) => spreadWinZone(p, p.side, game.home.abbr).threshold)
+
   const segOptions = SEGMENTS.map((s) => {
     const qs = s === 'game' ? null : game.quarters?.[quarterNumber(s) - 1]
     return {
@@ -328,7 +342,7 @@ export default function GamePage() {
           <h2 className="mt-6 text-xl font-semibold text-white">
             {segment === 'game' ? 'Total points in the game' : showKind === 'total' ? `Total points in ${segment.toUpperCase()}` : `Who wins ${segment.toUpperCase()}, and by how much`}
           </h2>
-          <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-slate-300">{story(game, segment, showKind, line, q)}</p>
+          <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-slate-300">{story(game, segment, showKind, showKind === 'spread' ? spreadLine : line, q)}</p>
 
           {showKind === 'total' && (line != null || projected != null) && (
             <div className="mt-2">
@@ -338,6 +352,25 @@ export default function GamePage() {
                   The line is {lineSource}. The shaded band is where the model thinks it will most likely finish.
                 </p>
               )}
+            </div>
+          )}
+
+          {showKind === 'spread' && q && q.status !== 'final' && (spreadLine != null || q.projection != null) && (
+            <div className="mt-2">
+              <SpreadBar
+                home={game.home}
+                away={game.away}
+                now={marginNow}
+                line={spreadLine}
+                projected={q.projection?.margin_mean ?? null}
+                spread={q.projection?.margin_sd ?? null}
+                pick={spreadPick}
+                held={heldSpreads}
+              />
+              <p className="mt-3 text-xs text-dim">
+                The line is the margin where Kalshi prices both teams at 50/50. The shaded band is where the model thinks the
+                quarter will most likely end{spreadPick ? ', and green is where your pick wins' : ''}.
+              </p>
             </div>
           )}
 
@@ -352,6 +385,7 @@ export default function GamePage() {
               rungs={rungs}
               kind={showKind}
               line={line}
+              spreadLine={spreadLine}
               pick={pick}
               onPick={setPick}
               owned={new Set(positions.map((p) => p.ticker))}
