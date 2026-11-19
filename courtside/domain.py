@@ -133,6 +133,8 @@ class Game:
     quarter_view: list[dict[str, Any]] = field(default_factory=list)  # filled by the model each tick
     risk: Risk = field(default_factory=Risk)
     simulated: bool = False
+    # What is happening on the floor (players, fouls, runs). See feeds/patterns.py.
+    context: Optional[dict[str, Any]] = None
 
     @property
     def label(self) -> str:
@@ -249,6 +251,9 @@ class Game:
         d.pop("clock_seconds")
         d.pop("quarter_markets")  # heavy: served with the game detail, not on every tick
         d["quarters"] = d.pop("quarter_view")
+        ctx = d.pop("context")
+        # The player list is heavy: it is served with the game detail, not on every tick.
+        d["patterns"] = {k: v for k, v in ctx.items() if k != "players"} if ctx else None
         d["ladder"] = [rung_dict(r) for r in self.ladder]
         d.update(
             label=self.label,

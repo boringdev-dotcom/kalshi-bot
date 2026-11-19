@@ -66,6 +66,14 @@ Every game also carries Kalshi's eight quarter markets: a total and a spread for
 
 The agent does not trade these. It keeps a **shadow book** (`agent/observer.py`): shortly after each quarter starts, and again with about six minutes left, it records what every quarter market cost and what the model thought it was worth, then marks which side won. Agent → Learning shows the result by quarter, market type and price band (how often each won, what the model expected, return per dollar after fees) next to your own quarter record. Your quarter trades also go into its memory. That is the evidence to read before ever letting it trade them; there is no switch for that yet.
 
+## What's happening on the floor
+
+Each game page has a **What's happening** panel, read from ESPN's play-by-play every 8-15 seconds during a game (`feeds/patterns.py`). It turns the play-by-play into plain sentences: a team in the bonus (and how early), players in foul trouble, players shooting hot, runs, scoring speeding up or slowing down over the last five minutes, benches in, ejections. Sentences with a clear effect on scoring are marked "More points likely" or "Fewer points likely". Below that: team fouls this quarter, who is on the floor (tracked from the starters and every substitution), the full box score, and who is out tonight. Practice games have made-up players so the panel works without real games.
+
+Every trade, yours and the agent's, saves the patterns that were showing when it was placed. They go into the agent's memory (so similar spots recall them), Claude sees them in its trade review and chat (`get_players`), and Agent → Learning groups results by pattern. The agent does not act on patterns yet: this is the evidence to read first.
+
+ESPN does not say who is guarding whom, so one-on-one matchups are not covered.
+
 ## How the agent works
 
 **The play.** In the fourth quarter, buy the under on a strike well above the live betting line (line 240, buy under 250 or 252) at roughly 90-96c: risk about $300 to make about $20. It starts looking the moment Q3 ends. Sell for a small loss if the game starts threatening the number.

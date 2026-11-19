@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 from ..domain import OT_SECONDS, QUARTER_SECONDS, FanDuelOdds, Game, Rung, Team, fmt_clock, now_iso
 from ..model.quarters import QUARTER_SHARE, p_no, project_quarter
 from ..model.totals import LINE_EXTRAS, _phi, distribution
+from .patterns import build_context
 
 TEAMS = [
     ("ATL", "Atlanta Hawks", "e03a3e"), ("BOS", "Boston Celtics", "007a33"),
@@ -89,6 +90,8 @@ class SimGame:
         self._mm_bias = 0.0
         self._rung_noise: dict[Any, float] = {}
         self._rung_spread: dict[Any, int] = {}
+        # Players, fouls and runs for the desk. Seeded apart from `rng` so scoring is unchanged.
+        self.box = SimBox(self.game, seed=SimGame._counter * 7919) if quarters else None
 
     # -- game clock ------------------------------------------------------------
     @property
@@ -117,6 +120,7 @@ class SimGame:
     def _resolve_possession(self) -> None:
         g = self.game
         team = g.home if self._ball_home else g.away
+        before, fouled = team.score, False
         share = self.home_share if self._ball_home else 1 - self.home_share
         ppp = 2 * share * self.true_total / self.possessions * self.hot
         # Rubber band: trailing teams press and leaders ease off, so margins mean-revert.
@@ -127,12 +131,15 @@ class SimGame:
         if self._fouling():
             leading_has_ball = (g.home.score > g.away.score) == self._ball_home
             if leading_has_ball:  # sent to the line
+                fouled = True
                 team.add_points(self.rng.choices([0, 1, 2], [0.05, 0.3, 0.65])[0], g.period)
             elif self.rng.random() < 0.42:  # trailing team hunting quick threes
                 team.add_points(self.rng.choices([2, 3], [0.4, 0.6])[0], g.period)
         elif self.rng.random() < min(0.75, max(0.25, ppp / MEAN_GIVEN_SCORE)):
             pts, weights = zip(*POINTS_GIVEN_SCORE)
             team.add_points(self.rng.choices(pts, weights)[0], g.period)
+        if self.box:
+            self.box.possession(self._ball_home, team.score - before, fouled)
         self._ball_home = not self._ball_home
         self.hot = 1.0 + 0.97 * (self.hot - 1.0) + self.rng.gauss(0, 0.006)
 
@@ -149,6 +156,8 @@ class SimGame:
         while dt > 0 and g.state == "live":
             step = min(dt, self._poss_left, g.clock_seconds)
             g.clock_seconds -= step
+            if self.box:
+                self.box.clock(step)
             self._poss_left -= step
             dt -= step
             if self._poss_left <= 1e-9:
@@ -163,12 +172,16 @@ class SimGame:
         if g.period >= 4 and 1 <= g.margin <= 3 and self.rng.random() < TYING_SHOT[g.margin] * (1.0 if g.period == 4 else 0.4):
             # The trailing team gets the tying bucket at the horn.
             trailing = g.home if g.home.score < g.away.score else g.away
+            if self.box:
+                self.box.possession(trailing is g.home, g.margin, False)
             trailing.add_points(g.margin, g.period)
         if g.period >= 4 and g.home.score != g.away.score:
             g.state, g.clock_seconds = "final", 0.0
             return
         g.period += 1
         g.clock_seconds = float(self._period_len)
+        if self.box:
+            self.box.rotate()
         self._poss_left = self._draw_possession()
 
     def fast_forward(self, period: int, clock: float, observer: Optional[Callable[[Game], None]] = None) -> None:
@@ -325,6 +338,8 @@ class SimFeed:
         for i, sim in enumerate(self.sims):
             sim.advance(dt)
             sim.quote()
+            if sim.box:
+                sim.game.context = build_context(sim.game, sim.box.snapshot())
             if sim.game.state == "final" and sim.final_age > 420:
                 # Retire the finished game and bring a new one in mid-third-quarter.
                 fresh = SimGame(self.rng)
@@ -336,3 +351,147 @@ class SimFeed:
 
     async def aclose(self) -> None:  # symmetry with LiveFeed
         return None
+
+
+# ------------------------------------------------------------------------ box score
+FIRST = ["Marcus", "Andre", "Tyler", "Jalen", "Devin", "Isaiah", "Malik", "Cole", "Darius", "Evan", "Kobe", "Trey",
+         "Jordan", "Caleb", "Miles", "Xavier", "Damon", "Reggie", "Theo", "Quinn", "Luka", "Nico", "Omar", "Felix",
+         "Bryce", "Corey", "Elijah", "Grant", "Hassan", "Ivan"]
+LAST = ["Hollis", "Okafor", "Brandt", "Mercer", "Vance", "Whitfield", "Castellanos", "Doyle", "Ferreira", "Gaines",
+        "Halvorsen", "Ibekwe", "Jarrett", "Kowalski", "Lindqvist", "Marsh", "Nkemelu", "Oyelaran", "Pruitt", "Quarles",
+        "Redd", "Sorensen", "Tolliver", "Underwood", "Varga", "Wexler", "Yates", "Zelenko", "Abernathy", "Bellamy",
+        "Crowder", "Delacroix", "Ekwueme", "Fontaine", "Galloway", "Hartigan", "Iverson", "Jablonski", "Kessler", "Lattimore"]
+USAGE = [1.35, 1.2, 1.05, 0.95, 0.85, 0.85, 0.7, 0.6, 0.45, 0.35]
+
+
+class SimBox:
+    """A made-up box score for a practice game: rosters, a rotation, shots and fouls.
+
+    It follows the game's scoring rather than driving it, and has its own random
+    numbers, so practice scores and prices are the same with or without it.
+    """
+
+    def __init__(self, game: Game, seed: int):
+        from .patterns import PlayerLine
+
+        self.game = game
+        self.rng = random.Random(seed)
+        # Different surnames for everyone in the game, so short names are never ambiguous.
+        names = [f"{self.rng.choice(FIRST)} {last}" for last in self.rng.sample(LAST, 20)]
+        self.players: dict[str, list[PlayerLine]] = {}
+        for t, team in enumerate((game.away, game.home)):
+            roster = []
+            for i in range(10):
+                p = PlayerLine(id=f"{team.abbr}{i}", name=names[t * 10 + i], team=team.abbr, starter=i < 5)
+                roster.append(p)
+            self.players[team.abbr] = roster
+        self.usage = {p.id: USAGE[i] * self.rng.uniform(0.85, 1.15) for r in self.players.values() for i, p in enumerate(r)}
+        self.fouls: list[tuple[str, int, float]] = []
+        self.scoring: list[tuple[float, str, int]] = []
+        self.out = [(t.abbr, f"{self.rng.choice(FIRST)} {self.rng.choice(LAST)}") for t in (game.away, game.home) if self.rng.random() < 0.5]
+        self.rotate()
+
+    # -- rotation ------------------------------------------------------------
+    def _starters_wanted(self) -> int:
+        g = self.game
+        period, clock = max(g.period, 1), g.clock_seconds
+        if period == 4 and ((g.margin >= 20 and clock <= 360) or (g.margin >= 26 and clock <= 540)):
+            return 0  # garbage time
+        if period in (1, 3):
+            return 5 if clock > 240 else 2
+        if period == 2:
+            return 2 if clock > 360 else 5
+        if period == 4:
+            return 2 if clock > 480 else 5
+        return 5
+
+    def rotate(self) -> None:
+        period = max(self.game.period, 1)
+        want = self._starters_wanted()
+        for roster in self.players.values():
+            def ok(p: Any) -> bool:
+                return p.fouls < 6 and not (period <= 3 and p.fouls >= period + 1)
+
+            # When only some starters play, the ones who have played least go in: everyone gets a rest.
+            starters = sorted((p for p in roster if p.starter and ok(p)), key=lambda p: (p.minutes, -self.usage[p.id]))[:want]
+            bench = sorted((p for p in roster if not p.starter and ok(p)), key=lambda p: -self.usage[p.id])
+            lineup = starters + bench[: 5 - len(starters)]
+            if len(lineup) < 5:  # foul trouble everywhere: play whoever is left
+                spare = [p for p in roster if p not in lineup and p.fouls < 6]
+                lineup += spare[: 5 - len(lineup)]
+            ids = {p.id for p in lineup}
+            for p in roster:
+                p.on_court = p.id in ids
+
+    def clock(self, seconds: float) -> None:
+        for roster in self.players.values():
+            for p in roster:
+                if p.on_court:
+                    p.minutes += seconds / 60.0
+
+    # -- events --------------------------------------------------------------
+    def _on(self, abbr: str) -> list[Any]:
+        return [p for p in self.players[abbr] if p.on_court]
+
+    def _foul(self, abbr: str) -> None:
+        g = self.game
+        p = self.rng.choice(self._on(abbr))
+        p.fouls += 1
+        self.fouls.append((abbr, g.period, g.clock_seconds))
+
+    def possession(self, offense_home: bool, points: int, fouled: bool) -> None:
+        """Book a possession that scored `points` (fouled = a foul-game trip to the line)."""
+        g = self.game
+        off, dfn = (g.home.abbr, g.away.abbr) if offense_home else (g.away.abbr, g.home.abbr)
+        on = self._on(off)
+        shooter = self.rng.choices(on, [self.usage[p.id] for p in on])[0]
+        if fouled:
+            self._foul(dfn)
+            shooter.fta += 2
+            shooter.ftm += min(points, 2)
+        elif points == 0:
+            if self.rng.random() < 0.85:
+                shooter.fga += 1
+                shooter.tpa += self.rng.random() < 0.4
+            if self.rng.random() < 0.15:
+                self._foul(dfn)
+        elif points == 1:
+            self._foul(dfn)
+            shooter.fta += 2
+            shooter.ftm += 1
+        elif points == 2:
+            if self.rng.random() < 0.25:
+                self._foul(dfn)
+                shooter.fta += 2
+                shooter.ftm += 2
+            else:
+                shooter.fga += 1
+                shooter.fgm += 1
+        else:
+            shooter.fga += 1
+            shooter.fgm += 1
+            shooter.tpa += 1
+            shooter.tpm += 1
+            if points >= 4:
+                self._foul(dfn)
+                shooter.fta += 1
+                shooter.ftm += 1
+        if points:
+            shooter.points += points
+            self.scoring.append((g.elapsed, off, points))
+            for p in on:
+                p.plus_minus += points
+            for p in self._on(dfn):
+                p.plus_minus -= points
+        self.rotate()
+
+    def snapshot(self) -> Any:
+        from .patterns import Snapshot
+
+        return Snapshot(
+            players=[p for r in self.players.values() for p in r],
+            fouls=list(self.fouls),
+            scoring=list(self.scoring),
+            out=list(self.out),
+            source="practice",
+        )

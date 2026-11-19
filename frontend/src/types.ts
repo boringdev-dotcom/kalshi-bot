@@ -159,6 +159,59 @@ export interface QuarterMarkets {
   spreads: LadderRung[]
 }
 
+/** One thing happening on the floor, in a sentence. `lean` is which way it pushes points scored. */
+export interface PatternNote {
+  key: string
+  text: string
+  lean: 'up' | 'down' | null
+  team: string | null
+  weight: number
+}
+
+export interface TeamFloor {
+  abbr: string
+  side: 'home' | 'away'
+  /** Team fouls in the current period. */
+  fouls: number
+  /** True when this team's next foul sends the other team to the free-throw line. */
+  penalty: boolean
+  /** Player ids on the floor (see GameDetail.players). */
+  on_court: string[]
+  starters_on: number
+  /** Points in the last 5 minutes of game time. */
+  last5: number
+}
+
+/** What is happening on the floor. From ESPN play-by-play, or made up in practice games. */
+export interface GamePatterns {
+  source: 'espn' | 'practice'
+  updated_at: string
+  period: number
+  teams: TeamFloor[]
+  notes: PatternNote[]
+  out: { team: string; names: string[] }[]
+  final?: boolean
+}
+
+export interface PlayerLine {
+  id: string
+  name: string
+  short: string
+  team: string
+  starter: boolean
+  on_court: boolean
+  minutes: number
+  points: number
+  fgm: number
+  fga: number
+  tpm: number
+  tpa: number
+  ftm: number
+  fta: number
+  fouls: number
+  plus_minus: number
+}
+
 export interface Game {
   id: string
   event_ticker: string | null
@@ -182,6 +235,8 @@ export interface Game {
   quarters: QuarterSummary[]
   risk: GameRisk
   simulated: boolean
+  /** What is happening on the floor. null until the first read. */
+  patterns?: GamePatterns | null
 }
 
 export interface TimelinePoint {
@@ -219,6 +274,8 @@ export interface GameDetail {
   timeline: TimelinePoint[]
   /** Per-quarter history, keyed 'q1'..'q4'. A quarter appears once it has started. */
   quarter_timelines?: Partial<Record<Segment, QuarterPoint[]>>
+  /** Every player's line so far. Empty before tip-off. */
+  players?: PlayerLine[]
   decisions: Decision[]
   positions: Position[]
 }
@@ -423,7 +480,19 @@ export interface QuarterLearning {
   your_trades: { segment: Segment; kind: MarketKind; n: number; wins: number; pnl: number }[]
 }
 
+/** How trades went, grouped by a pattern that was showing when they were placed. key 'all' is every trade. */
+export interface PatternRecord {
+  key: string
+  label: string
+  trades: number
+  wins: number
+  pnl: number
+  /** How many of them were the user's own trades. */
+  yours: number
+}
+
 export interface LearningState {
+  patterns?: PatternRecord[]
   /** Quarter totals and spreads: watched and scored, not traded by the agent. */
   quarters: QuarterLearning
   arms: Arm[]

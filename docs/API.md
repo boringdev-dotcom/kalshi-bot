@@ -12,7 +12,7 @@ All shapes are defined in [`frontend/src/types.ts`](../frontend/src/types.ts).
 | POST | `/api/agent/start` | | `AppState` |
 | POST | `/api/agent/pause` | | `AppState` |
 | GET | `/api/games` | | `Game[]` (live first, then pre, then final) |
-| GET | `/api/games/{id}` | | `GameDetail` (includes quarter totals and spreads, the game chart `timeline`, and per-quarter `quarter_timelines`) |
+| GET | `/api/games/{id}` | | `GameDetail` (includes quarter totals and spreads, the game chart `timeline`, per-quarter `quarter_timelines`, and `players`: every player's line with who is on the floor) |
 | GET | `/api/positions` | | `Position[]` |
 | POST | `/api/positions/{id}/close` | | `Trade` |
 | GET | `/api/trades?limit=100` | | `Trade[]` (newest first) |

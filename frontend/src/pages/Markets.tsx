@@ -59,6 +59,13 @@ function GameCard({ game, mine }: { game: Game; mine: Position[] }) {
           </div>
         )}
       </div>
+      {game.state === 'live' && game.patterns?.notes?.[0] && (
+        <p className="mt-3 line-clamp-2 text-[13px] leading-snug text-mute">
+          {game.patterns.notes[0].lean === 'up' && <span className="text-gold">↑ </span>}
+          {game.patterns.notes[0].lean === 'down' && <span className="text-slate-300">↓ </span>}
+          {game.patterns.notes[0].text}
+        </p>
+      )}
     </Link>
   )
 }

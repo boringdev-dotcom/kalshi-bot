@@ -23,6 +23,7 @@ import anthropic
 
 from ..config import Config
 from ..domain import Game, now_iso
+from ..feeds.patterns import pattern_texts
 from .playbook import Q4_UNDER, STRATEGIES
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ How the desk works
 - A playbook holds the tunable parameters for that play. An automated loop applies them every second or two: it enters, monitors, exits and settles without you.
 - A learner tracks results by situation (cushion, time left, how close the game is) and by exit style, and shifts behaviour toward what has actually made money.
 - Memory holds the owner's standing guidance, lessons from past trades, and a record of each trade.
+- Each game also carries what is happening on the floor, read from ESPN's play-by-play (made-up players in practice games): who is on the court, team fouls and who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts and droughts, benches in, and who is out tonight. get_games has the headline notes; get_players has the full box. Every trade, the owner's and the agent's, saves the patterns that were showing when it was placed, and get_learning groups results by pattern. The owner trades partly so the agent can learn from their reads: when they ask what to make of a pattern, answer from that record and the game in front of them.
 - Quarter markets (total and spread for each of Q1-Q4; Q4 excludes overtime) are the owner's to trade by hand. The automated loop places no orders there. It keeps a shadow book instead: early in each quarter and again with about six minutes left it records what every quarter market cost and what the model thought, then scores them when the quarter ends. get_learning returns that book and the owner's own quarter record. If they ask whether to let the agent trade quarters, answer from those numbers and say plainly when there are too few to judge. In market data "over" always means the YES side and "under" the NO side; for a spread, YES is the named team winning the quarter by more than the line. Use the labels the tools give you.
 
 Your tools read and change that real system. Use them: never state a position, price, result or setting from memory of this conversation when a tool can tell you the current truth. The desk snapshot at the top of each message is fresh as of that message.
@@ -57,11 +59,13 @@ REVIEW_SYSTEM = """You review one proposed trade for an automated NBA totals des
 
 The play: in the fourth quarter, buy the under on a total well above the live line. It wins small most of the time and loses big rarely; the killers are late fouling in close games, a pace that is still accelerating, and overtime.
 
+`on_the_floor` lists what is happening in the game right now in plain sentences: who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts or droughts, benches in. A team in the bonus early in the fourth means more free throws, which pushes the total up.
+
 Approve unless you see a specific, stated reason not to: guidance or a lesson that clearly applies to this situation, or a concrete risk in the numbers the rules underweighted. Do not veto on general caution; the rules already require an edge. If the trade is fine but a memory suggests caution, approve with a smaller size_multiplier (0.25 to 1). Give the reason in one or two plain sentences that name the specific factor."""
 
 REFLECT_SYSTEM = """You write the lessons an NBA totals trading agent keeps in long-term memory. You are given one finished trade with its context and what happened. Write a single lesson the agent can act on next time it sees a similar spot.
 
-A good lesson names the situation (cushion, clock, margin, pace), says what happened, and says what to do differently or keep doing. It is specific and falsifiable. One trade is weak evidence: phrase it as a pattern to watch, not a law. Two or three sentences. Tags should be short lowercase situation words that will match similar future spots. Importance is 0-1: full losses and clear saves high, routine noise low."""
+A good lesson names the situation (cushion, clock, margin, pace, and what was happening on the floor when it matters: bonus, foul trouble, a run), says what happened, and says what to do differently or keep doing. It is specific and falsifiable. One trade is weak evidence: phrase it as a pattern to watch, not a law. Two or three sentences. Tags should be short lowercase situation words that will match similar future spots. Importance is 0-1: full losses and clear saves high, routine noise low."""
 
 REVIEW_SCHEMA = {
     "type": "object",
@@ -108,6 +112,9 @@ TOOLS = [
           {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"},
            "quarter": {"type": "integer", "enum": [1, 2, 3, 4]}},
           ["game", "quarter"]),
+    _tool("get_players", "Who is on the floor for one game and every player's line so far: minutes, points, shooting, fouls, plus-minus, plus team fouls this quarter and who is in the bonus.",
+          {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"}},
+          ["game"]),
     _tool("get_positions", "Open positions with live mark, P&L, current win probability and risk flags."),
     _tool("get_trades", "Closed trades, newest first, with exit reason and (for early exits on finished games) whether selling beat holding.",
           {"limit": {"type": "integer", "description": "How many, default 20"}}),
@@ -117,7 +124,7 @@ TOOLS = [
           {"query": {"type": "string"}}, ["query"]),
     _tool("save_guidance", "Save a standing instruction from the owner so it is recalled before future trades.",
           {"text": {"type": "string", "description": "The instruction, close to the owner's words"},
-           "tags": {"type": "array", "items": {"type": "string"}, "description": "Situation tags it applies to, e.g. close_game, ot_risk, late, hot_pace, blowout, a team abbreviation. Leave empty for guidance that always applies."},
+           "tags": {"type": "array", "items": {"type": "string"}, "description": "Situation tags it applies to, e.g. close_game, ot_risk, late, hot_pace, blowout, a team abbreviation, or a floor pattern: pattern:bonus_early, pattern:bonus, pattern:foul_trouble, pattern:hot_hand, pattern:run, pattern:scoring_hot, pattern:scoring_cold, pattern:bench_in. Leave empty for guidance that always applies."},
            "pinned": {"type": "boolean", "description": "Pin so it is always recalled"}},
           ["text"]),
     _tool("forget_memory", "Delete a memory by id.", {"memory_id": {"type": "integer"}}, ["memory_id"]),
@@ -190,7 +197,8 @@ class Brain:
                       "projection": game.projection.mean if game.projection else None,
                       "ot_chance": game.projection.p_ot if game.projection else None,
                       "pace_per_48": game.projection.pace if game.projection else None,
-                      "pregame_total": game.pregame_total, "risk_flags": game.risk.flags},
+                      "pregame_total": game.pregame_total, "risk_flags": game.risk.flags,
+                      "on_the_floor": pattern_texts(game)},
             "trade": {"buy": f"under {cand.rung.strike:g}", "price_cents": cand.price, "line": cand.reference,
                       "line_source": cand.reference_source, "cushion_pts": round(cand.buffer, 1),
                       "model_win_prob": round(cand.p_model, 4), "edge": round(cand.edge, 4),
@@ -396,6 +404,7 @@ class Brain:
                 "projection": g.projection.__dict__ if g.projection else None,
                 "fanduel": {"total_line": ref, "live": g.fanduel.live, "source": g.fanduel.source} if g.fanduel else None,
                 "risk": {"level": g.risk.level, "flags": g.risk.flags},
+                "on_the_floor": pattern_texts(g),
                 "unders": [{"ticker": r.ticker, "strike": r.strike, "ask": r.no_ask, "bid": r.no_bid,
                             "model_p": round(r.p_under, 3), "edge": r.edge_under} for r in near],
                 "quarters": [{k: v[k] for k in ("label", "status", "home_points", "away_points", "seconds_remaining", "projection")}
@@ -415,6 +424,20 @@ class Brain:
                      "model_p_yes": round(1 - r.p_under, 3)} for r in markets.get(kind, [])]
 
         return f"looked at Q{quarter} markets for {found.label}", {"game": found.label, "quarter": view, "totals": rows("total"), "spreads": rows("spread")}
+
+    async def _t_get_players(self, game: str) -> tuple[str, Any]:
+        found = next((g for g in self.engine.games if game.lower() in g.label.lower()), None)
+        if found is None:
+            raise ValueError(f"No game matching '{game}'")
+        ctx = found.context or {}
+        if not ctx:
+            return f"no player data yet for {found.label}", {"game": found.label, "players": []}
+        keep = ("name", "team", "on_court", "starter", "minutes", "points", "fgm", "fga", "tpm", "tpa", "ftm", "fta", "fouls", "plus_minus")
+        players = [{k: p[k] for k in keep} for p in ctx.get("players", [])]
+        return f"looked at the players in {found.label}", {
+            "game": found.label, "teams": ctx.get("teams"), "notes": [n["text"] for n in ctx.get("notes", [])],
+            "out_tonight": ctx.get("out"), "players": players,
+        }
 
     async def _t_get_positions(self) -> tuple[str, Any]:
         rows = self.engine.positions_api()

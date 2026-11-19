@@ -23,6 +23,7 @@ from courtside.events import Hub
 from courtside.kalshi.client import cents, side_and_price
 from courtside.model.quarters import implied_margin, project_quarter
 from courtside.feeds.live import LiveFeed
+from courtside.feeds.patterns import Snapshot, PlayerLine, build_context, parse_espn
 from courtside.feeds.sim import SimGame
 from courtside.kalshi.client import KalshiClient, quarter_series
 from courtside.model.totals import distribution, implied_total, refresh_game
@@ -267,6 +268,94 @@ def test_implied_margin_reads_both_teams_rungs():
     # Away favoured: MEM 60% to win by 1.5+, 40% by 3.5+, so the 50/50 margin is MEM by 2.5.
     rungs = [rung("MEM", 1.5, 60), rung("MEM", 3.5, 40), rung("CLE", 1.5, 20)]
     assert implied_margin(rungs, "CLE") == -2.5
+
+
+# ----------------------------------------------------------------- floor patterns
+def _espn_summary() -> dict:
+    """A tiny ESPN game summary: two teams, starters, a substitution, fouls and baskets."""
+    def athlete(pid, name, starter, pf="0"):
+        return {"athlete": {"id": pid, "displayName": name}, "starter": starter, "didNotPlay": False,
+                "stats": ["20", "10", "4-6", "1-2", "1-2", "3", "2", "1", "0", "0", "1", "2", pf, "+4"]}
+
+    names = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF", "+/-"]
+    home = [athlete(f"h{i}", f"Home Player{i}", i < 5, pf="5" if i == 0 else "1") for i in range(7)]
+    away = [athlete(f"a{i}", f"Away Player{i}", i < 5) for i in range(7)]
+
+    def play(kind, period, clock, team, parts=(), score=0, text=""):
+        return {"type": {"text": kind}, "period": {"number": period}, "clock": {"displayValue": clock}, "team": {"id": team},
+                "participants": [{"athlete": {"id": p}} for p in parts], "scoringPlay": score > 0, "scoreValue": score, "text": text}
+
+    plays = [play("Substitution", 4, "11:00", "1", ("h5", "h1"))]
+    plays += [play("Personal Foul", 4, f"{10 - i}:00", "2", ("a1",)) for i in range(4)]  # four away fouls
+    plays += [play("Offensive Foul", 4, "5:30", "1", ("h2",))]  # does not count toward the limit
+    plays += [play("Jump Shot", 4, f"{11 - i // 2}:{30 if i % 2 == 0 else 0:02d}", "1", ("h3",), score=2) for i in range(6)]
+    return {
+        "boxscore": {
+            "teams": [{"team": {"id": "1", "abbreviation": "CLE"}}, {"team": {"id": "2", "abbreviation": "NY"}}],
+            "players": [
+                {"team": {"abbreviation": "CLE"}, "statistics": [{"names": names, "athletes": home}]},
+                {"team": {"abbreviation": "NY"}, "statistics": [{"names": names, "athletes": away}]},
+            ],
+        },
+        "plays": plays,
+        "injuries": [{"team": {"abbreviation": "NY"}, "injuries": [{"athlete": {"displayName": "Hurt Guy"}, "status": "Out"}]}],
+    }
+
+
+def test_espn_patterns_track_the_floor_fouls_and_runs():
+    snap = parse_espn(_espn_summary(), {"NY": "NYK"})
+    on = {p.id for p in snap.players if p.on_court}
+    assert on == {"h0", "h2", "h3", "h4", "h5", "a0", "a1", "a2", "a3", "a4"}  # h1 subbed out for h5
+    assert [f[0] for f in snap.fouls] == ["NYK"] * 4  # the offensive foul is not a team foul
+    assert snap.out == [("NYK", "Hurt Guy")]
+
+    game = Game(id="g", home=Team("CLE", "Cavaliers", 90), away=Team("NYK", "Knicks", 80),
+                state="live", period=4, clock_seconds=480.0, clock="8:00")
+    ctx = build_context(game, snap)
+    keys = [n["key"] for n in ctx["notes"]]
+    assert keys[0] == "bonus_early"  # NYK has four fouls with 8:00 left: CLE shoots on the next one
+    bonus = ctx["notes"][0]
+    assert bonus["team"] == "CLE" and bonus["lean"] == "up" and "8:00 left in Q4" in bonus["text"]
+    assert "foul_trouble" in keys and "run" in keys  # Player0 has 5 fouls; CLE scored 12 unanswered
+    nyk = next(t for t in ctx["teams"] if t["abbr"] == "NYK")
+    assert nyk["fouls"] == 4 and nyk["penalty"]
+
+
+def test_last_two_minutes_bonus_rule():
+    players = [PlayerLine(id=f"{t}{i}", name=f"P {t}{i}", team=t, starter=True, on_court=True) for t in ("CLE", "NYK") for i in range(5)]
+    game = Game(id="g", home=Team("CLE", "Cavaliers", 100), away=Team("NYK", "Knicks", 98),
+                state="live", period=4, clock_seconds=90.0, clock="1:30")
+    # Two fouls before the last two minutes, one inside them: the next foul is free throws.
+    snap = Snapshot(players=players, fouls=[("NYK", 4, 400.0), ("NYK", 4, 300.0), ("NYK", 4, 110.0)])
+    assert next(t for t in build_context(game, snap)["teams"] if t["abbr"] == "NYK")["penalty"]
+    snap = Snapshot(players=players, fouls=[("NYK", 4, 400.0), ("NYK", 4, 300.0)])
+    assert not next(t for t in build_context(game, snap)["teams"] if t["abbr"] == "NYK")["penalty"]
+
+
+def test_trades_save_the_floor_patterns_for_learning():
+    async def run() -> Engine:
+        engine = make_engine()
+        engine._last_real -= 1.0
+        await engine.tick()
+        game, rung = next(
+            (g, r) for g in engine.games if g.state == "live" for r in g.ladder if r.no_ask and r.no_bid and r.no_ask <= 95
+        )
+        game.context = {"notes": [
+            {"key": "bonus_early", "text": "CLE is in the bonus with 8:00 left in Q4.", "lean": "up", "team": "CLE", "weight": 3},
+            {"key": "run", "text": "CLE is on a 12-0 run over the last 3:30.", "lean": None, "team": "CLE", "weight": 2},
+        ]}
+        pos = await engine.manual_order(rung.ticker, "under", 5, rung.no_ask)
+        await engine.close_position(pos["id"])
+        return engine
+
+    engine = asyncio.run(run())
+    row = engine.db.one("SELECT * FROM positions WHERE opened_by='user'")
+    assert row["context"]["patterns"] == ["bonus_early", "run"] and len(row["context"]["on_floor"]) == 2
+    record = engine.learning_state()["patterns"]
+    assert record[0]["key"] == "all" and record[0]["trades"] == 1 and record[0]["yours"] == 1
+    assert {r["key"] for r in record[1:]} == set(row["context"]["patterns"])
+    episode = engine.memory.list(kind="episode")[0]
+    assert any(t.startswith("pattern:") for t in episode["tags"]) and "On the floor:" in episode["text"]
 
 
 def test_live_mode_is_refused_without_keys_or_live_data():
