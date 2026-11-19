@@ -7,6 +7,7 @@ import { api, ApiError } from '../api'
 import { ActivityFeed } from '../components/Activity'
 import LineBar from '../components/game/LineBar'
 import MarketList from '../components/game/MarketList'
+import GameAnalysis from '../components/game/GameAnalysis'
 import OnTheFloor from '../components/game/OnTheFloor'
 import OrderPanel from '../components/game/OrderPanel'
 import Scoreboard from '../components/game/Scoreboard'
@@ -329,6 +330,8 @@ export default function GamePage() {
             ))}
 
           <OnTheFloor game={game} players={detail?.players ?? null} />
+
+          {game.state !== 'final' && <GameAnalysis game={game} />}
 
           {!desktop && <Holdings positions={positions} rungs={allRungs} />}
 

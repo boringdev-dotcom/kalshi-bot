@@ -74,6 +74,8 @@ Every trade, yours and the agent's, saves the patterns that were showing when it
 
 ESPN does not say who is guarding whom, so one-on-one matchups are not covered.
 
+**Agent analysis.** The button under What's happening hands Claude a briefing on that game (score by quarter, the line from FanDuel and from Kalshi, the model's projections, everything in What's happening, the box score, each quarter's lines, the prices near the line, your positions there, results by pattern, and the memories that match) and asks for a thinking-partner read: where it is heading, what on the floor matters, how your positions look, where prices look off and the case against, and what to watch. Follow-up questions in the same panel carry a fresh briefing each time. The conversation is also saved in Agent chat. It never places orders unless you ask.
+
 ## How the agent works
 
 **The play.** In the fourth quarter, buy the under on a strike well above the live betting line (line 240, buy under 250 or 252) at roughly 90-96c: risk about $300 to make about $20. It starts looking the moment Q3 ends. Sell for a small loss if the game starts threatening the number.

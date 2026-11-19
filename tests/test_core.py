@@ -8,6 +8,7 @@ import random
 import pytest
 from fastapi.testclient import TestClient
 
+from courtside.agent.brain import Brain
 from courtside.agent.engine import Engine, TradeError
 from courtside.agent.learner import Learner
 from courtside.agent.memory import MemoryStore
@@ -356,6 +357,70 @@ def test_trades_save_the_floor_patterns_for_learning():
     assert {r["key"] for r in record[1:]} == set(row["context"]["patterns"])
     episode = engine.memory.list(kind="episode")[0]
     assert any(t.startswith("pattern:") for t in episode["tags"]) and "On the floor:" in episode["text"]
+
+
+def test_game_briefing_carries_everything_for_an_analysis():
+    import json
+
+    engine = make_engine()
+    engine._last_real -= 1.0
+    asyncio.run(engine.tick())
+    brain = Brain(engine.cfg, engine)
+    game = next(g for g in engine.games if g.state == "live")
+    brief = json.loads(json.dumps(brain.game_briefing(game), default=str))
+    for key in ("score", "projection", "on_the_floor", "team_fouls_this_period", "players", "quarters",
+                "full_game_ladder_near_line", "my_positions_here", "record_by_pattern", "recalled_memories"):
+        assert key in brief
+    assert brief["players"] and sum(p["on_court"] for p in brief["players"]) == 10
+    assert len(brief["quarters"]) == 4
+
+    async def ask() -> list[dict]:
+        return [ev async for ev in brain.chat("Your read?", game_id=game.id, analysis=True)]
+
+    events = asyncio.run(ask())  # no Claude key in tests: a clear error, nothing stored
+    assert events[0]["type"] == "error" and not brain.history()
+
+    # With Claude connected, the briefing and the analysis ask go to the model; the transcript keeps only the words.
+    sent: list = []
+
+    class Block:
+        type, text = "text", "Heading under the line."
+
+    class Final:
+        stop_reason, content = "end_turn", [Block()]
+
+    class Stream:
+        def __init__(self, **kw):
+            sent.append(kw["messages"][-1]["content"])
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def __aiter__(self):
+            async def gen():
+                delta = type("D", (), {"type": "text_delta", "text": "Heading under the line."})()
+                yield type("E", (), {"type": "content_block_delta", "delta": delta})()
+            return gen()
+
+        async def get_final_message(self):
+            return Final()
+
+    class Messages:
+        def stream(self, **kw):
+            return Stream(**kw)
+
+    class Client:
+        beta = type("B", (), {"messages": Messages()})()
+
+    brain.client = Client()
+    brain.cfg.anthropic_api_key = "test"
+    events = asyncio.run(ask())
+    assert events[-1]["type"] == "done"
+    assert f"[game briefing: {game.label}]" in sent[0] and "Agent analysis" in sent[0] and sent[0].endswith("Your read?")
+    assert [m["text"] for m in brain.history()] == ["Your read?", "Heading under the line."]
 
 
 def test_live_mode_is_refused_without_keys_or_live_data():

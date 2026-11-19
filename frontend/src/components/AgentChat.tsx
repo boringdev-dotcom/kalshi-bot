@@ -31,7 +31,7 @@ function inline(text: string, keyBase: string) {
 }
 
 /** Small markdown subset: paragraphs, bullets, numbered lists, headings, bold, code. */
-function RichText({ text }: { text: string }) {
+export function RichText({ text }: { text: string }) {
   const blocks: React.ReactNode[] = []
   let list: { ordered: boolean; items: string[] } | null = null
   const flush = () => {
@@ -86,7 +86,7 @@ function RichText({ text }: { text: string }) {
 }
 
 /** What the agent looked at while answering: one quiet line each. */
-function ToolLines({ tools, live }: { tools: Tool[]; live?: boolean }) {
+export function ToolLines({ tools, live }: { tools: Tool[]; live?: boolean }) {
   if (!tools.length) return null
   return (
     <div className="mb-1.5 space-y-0.5">
@@ -104,7 +104,7 @@ function ToolLines({ tools, live }: { tools: Tool[]; live?: boolean }) {
   )
 }
 
-function AgentDot() {
+export function AgentDot() {
   return <span className="mt-[7px] h-2.5 w-2.5 shrink-0 rounded-full bg-peri" aria-hidden />
 }
 
