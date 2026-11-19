@@ -110,3 +110,47 @@ export function useMediaQuery(query: string) {
   }, [query])
   return matches
 }
+
+/* ───────────── spreads ─────────────
+ * Everything below works in one signed number: the margin from the home team's side
+ * (home points minus away points). Positive means the home team is ahead.
+ */
+
+/** The margin Kalshi prices at 50/50, read from a segment's spread markets. */
+export function impliedSpread(rungs: LadderRung[], homeAbbr: string): number | null {
+  // Each market gives one point on the curve "chance the home margin ends above x".
+  //   home team -s: P(margin > s)  = mid
+  //   away team -s: P(margin < -s) = mid, so P(margin > -s) = 1 - mid
+  const pts = rungs
+    .filter((r) => r.yes_bid != null && r.yes_ask != null && r.team)
+    .map((r) => {
+      const mid = ((r.yes_bid as number) + (r.yes_ask as number)) / 200
+      return r.team === homeAbbr ? { x: r.strike, p: mid } : { x: -r.strike, p: 1 - mid }
+    })
+    .sort((a, b) => a.x - b.x)
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const lo = pts[i]
+    const hi = pts[i + 1]
+    if (lo.p >= 0.5 && hi.p <= 0.5 && lo.p !== hi.p) {
+      const x = lo.x + ((lo.p - 0.5) / (lo.p - hi.p)) * (hi.x - lo.x)
+      return Math.round(x * 2) / 2
+    }
+  }
+  return null
+}
+
+/** Where a spread bet starts winning, as a home margin, and which way from there it wins. */
+export function spreadWinZone(r: { team: string | null; strike: number }, side: Side, homeAbbr: string) {
+  // YES on "team wins by more than s"; NO is everything else.
+  const homeBacked = r.team === homeAbbr
+  const threshold = homeBacked ? r.strike : -r.strike
+  const winsAbove = homeBacked ? side === 'over' : side === 'under'
+  return { threshold, dir: winsAbove ? ('right' as const) : ('left' as const) }
+}
+
+/** "MIA by 6", "MIL by 2.5", or "Tied". */
+export function marginText(m: number, home: string, away: string, round = false) {
+  const v = round ? Math.round(Math.abs(m)) : Math.round(Math.abs(m) * 2) / 2
+  if (v === 0) return 'Tied'
+  return `${m > 0 ? home : away} by ${v}`
+}

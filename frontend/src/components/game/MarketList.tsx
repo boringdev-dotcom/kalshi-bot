@@ -65,7 +65,7 @@ function Row({
   left,
   right,
 }: {
-  title: string
+  title: React.ReactNode
   sub: string
   chance: number | null
   chanceText: string
@@ -77,7 +77,7 @@ function Row({
   return (
     <div className="row !gap-3 !py-3 sm:!gap-5 sm:!py-3.5">
       <div className="min-w-0 flex-1 sm:w-[136px] sm:flex-none sm:shrink-0">
-        <div className="num text-[17px] font-semibold leading-tight text-white">{title}</div>
+        <div className="num whitespace-nowrap text-[17px] font-semibold leading-tight text-white">{title}</div>
         <div className="mt-0.5 text-xs text-dim">
           {sub}
           {owned && <span className="text-mint xl:hidden"> · yours</span>}
@@ -104,6 +104,7 @@ export default function MarketList({
   rungs,
   kind,
   line,
+  spreadLine = null,
   pick,
   onPick,
   owned,
@@ -116,6 +117,8 @@ export default function MarketList({
   kind: 'total' | 'spread'
   /** The betting line for this segment's total, used to say how far each strike sits from it. */
   line: number | null
+  /** Spreads only: the margin Kalshi prices at 50/50, as home points minus away points. */
+  spreadLine?: number | null
   pick: Pick | null
   onPick: (p: Pick) => void
   owned: Set<string>
@@ -156,19 +159,39 @@ export default function MarketList({
           const mine = sorted.filter((r) => r.team === team.abbr)
           if (mine.length === 0) return null
           const other = team.abbr === game.home.abbr ? game.away : game.home
+          // The line in this team's terms. Only the favourite's list has rows on both sides of it.
+          const lineHere = spreadLine == null ? null : team.abbr === game.home.abbr ? spreadLine : -spreadLine
+          const showLine = !closed && lineHere != null && lineHere > 0.25
+          const lineAt = showLine ? mine.findIndex((r) => r.strike > (lineHere as number)) : -1
+          const divider = (
+            <div className="flex items-center gap-3 py-2 text-xs font-medium text-mute">
+              <span className="h-px flex-1 bg-white/20" />
+              The line is {team.abbr} by {Math.round((lineHere ?? 0) * 2) / 2}
+              <span className="h-px flex-1 bg-white/20" />
+            </div>
+          )
           return (
             <div key={team.abbr} className="mb-4 last:mb-0">
               <div className="flex items-center gap-2 pb-1 pt-3 text-[13px] font-medium text-slate-200">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: teamColor(team.color) }} />
                 {team.abbr} to win it by…
               </div>
-              {mine.map((r) => {
+              {!closed && lineHere != null && lineHere < -0.25 && (
+                <div className="pb-1 text-xs text-dim">The line has {other.abbr} winning this quarter, so each of these needs {team.abbr} to come out on top.</div>
+              )}
+              {mine.map((r, i) => {
                 const by = Math.ceil(r.strike)
                 const chance = r.yes_ask != null ? r.yes_ask / 100 : null
                 return (
-                  <Row
-                    key={r.ticker}
-                    title={`${by} or more`}
+                  <div key={r.ticker}>
+                    {showLine && i === lineAt && divider}
+                    <Row
+                    title={
+                      <>
+                        <span className="sm:hidden">{by}+ pts</span>
+                        <span className="hidden sm:inline">{by} or more</span>
+                      </>
+                    }
                     sub={yesLabel(r)}
                     chance={chance}
                     chanceText={chance == null ? 'No price right now' : `${Math.round(chance * 100)}% chance ${team.abbr} win it by ${by}+`}
@@ -177,8 +200,10 @@ export default function MarketList({
                     left={<PriceButton wide label={yesLabel(r)} price={r.yes_ask} selected={is(r, 'over')} disabled={closed} onClick={() => onPick({ ticker: r.ticker, side: 'over' })} />}
                     right={<PriceButton wide label={noLabel(r)} price={r.no_ask} selected={is(r, 'under')} disabled={closed} onClick={() => onPick({ ticker: r.ticker, side: 'under' })} />}
                   />
+                  </div>
                 )
               })}
+              {showLine && lineAt === -1 && divider}
             </div>
           )
         })}

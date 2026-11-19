@@ -33,14 +33,17 @@ export default function LineBar({
 
   // Labels above the track: now and projected. Below: the line and your pick. When two on the
   // same row sit close, push them apart so they never print over each other.
-  const anchor = (self: number | null, other: number | null): 'center' | 'left' | 'right' => {
+  // `first` breaks ties: when two labels share a row and land on the same spot, the first
+  // one hangs left and the other hangs right, so they never print on top of each other.
+  const anchor = (self: number | null, other: number | null, first = false): 'center' | 'left' | 'right' => {
     if (self == null) return 'center'
-    // Near either end, hang the label inward so it never runs off a narrow screen.
     if (x(self) < 10) return 'left'
     if (x(self) > 90) return 'right'
     if (other == null || Math.abs(x(self) - x(other)) > 17) return 'center'
-    return self <= other ? 'right' : 'left'
+    if (Math.abs(x(self) - x(other)) < 0.5) return first ? 'right' : 'left'
+    return self < other ? 'right' : 'left'
   }
+
 
   const cushion = pick != null && line != null ? pick - line : null
 
@@ -71,13 +74,13 @@ export default function LineBar({
         ))}
 
         {now != null && (
-          <Marker x={x(now)} place="above" anchor={anchor(now, projected)} dot="bg-white" label="Score now" value={String(now)} />
+          <Marker x={x(now)} place="above" anchor={anchor(now, projected, true)} dot="bg-white" label="Score now" value={String(now)} />
         )}
         {projected != null && (
           <Marker x={x(projected)} place="above" anchor={anchor(projected, now)} dot="bg-white/50" label="Heading for" value={projected.toFixed(0)} dim />
         )}
         {line != null && (
-          <Marker x={x(line)} place="below" anchor={anchor(line, pick ?? null)} tick="bg-white" label="The line" value={String(line)} />
+          <Marker x={x(line)} place="below" anchor={anchor(line, pick ?? null, true)} tick="bg-white" label="The line" value={String(line)} />
         )}
         {pick != null && (
           <Marker x={x(pick)} place="below" anchor={anchor(pick, line)} tick="bg-mint" label={pickLabel ?? 'Your pick'} value={String(pick)} tone="text-mint" />
@@ -87,7 +90,7 @@ export default function LineBar({
   )
 }
 
-function Marker({
+export function Marker({
   x,
   place,
   anchor,
