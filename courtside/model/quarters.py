@@ -30,6 +30,7 @@ from .totals import (
     MARGIN_VAR_PER_SEC,
     PRIOR_WEIGHT_SECONDS,
     VAR_PER_SEC,
+    implied_total,
     _phi,
     p_close_at_late_window,
 )
@@ -128,3 +129,25 @@ def refresh_quarters(game: Game) -> None:
                 r.edge_under = round(r.p_under - r.no_ask / 100.0, 4) if r.no_ask else None
                 r.edge_over = round((1 - r.p_under) - r.yes_ask / 100.0, 4) if r.yes_ask else None
     game.quarter_view = view
+
+
+def implied_quarter_total(rungs: list[Rung]) -> Optional[float]:
+    """The quarter total Kalshi's own prices put at 50/50."""
+    return implied_total(sorted(rungs, key=lambda r: r.strike))
+
+
+def implied_margin(rungs: list[Rung], home: str) -> Optional[float]:
+    """The home margin (home minus away) Kalshi's spread prices put at 50/50.
+
+    A rung backing the home team by `strike` says P(margin > strike) = mid. A rung backing
+    the away team by `strike` says P(margin < -strike) = mid, so P(margin > -strike) = 1 - mid.
+    """
+    pts = sorted(
+        (r.strike, (r.yes_bid + r.yes_ask) / 200.0) if r.team == home else (-r.strike, 1 - (r.yes_bid + r.yes_ask) / 200.0)
+        for r in rungs
+        if r.yes_bid and r.yes_ask and r.team
+    )
+    for (lo_x, lo_p), (hi_x, hi_p) in zip(pts, pts[1:]):
+        if lo_p >= 0.5 >= hi_p and lo_p != hi_p:
+            return round((lo_x + (lo_p - 0.5) / (lo_p - hi_p) * (hi_x - lo_x)) * 2) / 2
+    return None
