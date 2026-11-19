@@ -23,6 +23,9 @@ import anthropic
 
 from ..config import Config
 from ..domain import Game, now_iso
+from ..feeds.patterns import pattern_keys, pattern_texts
+from ..model.quarters import implied_margin, implied_quarter_total
+from ..model.totals import implied_total
 from .playbook import Q4_UNDER, STRATEGIES
 
 log = logging.getLogger(__name__)
@@ -38,6 +41,7 @@ How the desk works
 - A playbook holds the tunable parameters for that play. An automated loop applies them every second or two: it enters, monitors, exits and settles without you.
 - A learner tracks results by situation (cushion, time left, how close the game is) and by exit style, and shifts behaviour toward what has actually made money.
 - Memory holds the owner's standing guidance, lessons from past trades, and a record of each trade.
+- Each game also carries what is happening on the floor, read from ESPN's play-by-play (made-up players in practice games): who is on the court, team fouls and who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts and droughts, benches in, and who is out tonight. get_games has the headline notes; get_players has the full box. Every trade, the owner's and the agent's, saves the patterns that were showing when it was placed, and get_learning groups results by pattern. The owner trades partly so the agent can learn from their reads: when they ask what to make of a pattern, answer from that record and the game in front of them.
 - Quarter markets (total and spread for each of Q1-Q4; Q4 excludes overtime) are the owner's to trade by hand. The automated loop places no orders there. It keeps a shadow book instead: early in each quarter and again with about six minutes left it records what every quarter market cost and what the model thought, then scores them when the quarter ends. get_learning returns that book and the owner's own quarter record. If they ask whether to let the agent trade quarters, answer from those numbers and say plainly when there are too few to judge. In market data "over" always means the YES side and "under" the NO side; for a spread, YES is the named team winning the quarter by more than the line. Use the labels the tools give you.
 
 Your tools read and change that real system. Use them: never state a position, price, result or setting from memory of this conversation when a tool can tell you the current truth. The desk snapshot at the top of each message is fresh as of that message.
@@ -53,15 +57,27 @@ You can place and close orders when asked. Check the trading mode first: in live
 
 Be direct and concrete. Lead with the answer. Use the actual numbers. Say when the sample is too small to conclude anything; a handful of trades proves nothing either way, and simulated results say nothing about real markets. Keep replies short unless they ask for depth. Plain text with light markdown; no headers for short answers."""
 
+ANALYSIS_ASK = """The owner pressed "Agent analysis" on this game. Be their thinking partner, not a signal service. Use the game briefing above (fresh as of now); call tools only if something is missing.
+
+1. Lead with your read in one or two sentences: where the full-game total, and the quarter in play, look to be heading against the line, and how sure you are.
+2. What on the floor matters right now and which way it pushes scoring: the bonus, foul trouble, who is on or off, runs, pace, a close finish. Say plainly what you know and what you are inferring.
+3. If they hold positions in this game, how each one looks now and what would make you want out.
+4. Where prices look off to you against the model and what is happening on the floor, if anywhere, with the numbers, and the best case against your view. If nothing looks off, say so.
+5. What to watch over the next few minutes that would change the read.
+
+Keep it tight: short paragraphs or a few bullets, real numbers, no boilerplate caveats. End with one question back to them if their read would sharpen yours. Do not place or close any orders unless they ask."""
+
 REVIEW_SYSTEM = """You review one proposed trade for an automated NBA totals desk before the order is sent. The trade already passed the numeric rules; your job is to catch what the rules cannot see and to apply the owner's standing guidance and past lessons.
 
 The play: in the fourth quarter, buy the under on a total well above the live line. It wins small most of the time and loses big rarely; the killers are late fouling in close games, a pace that is still accelerating, and overtime.
+
+`on_the_floor` lists what is happening in the game right now in plain sentences: who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts or droughts, benches in. A team in the bonus early in the fourth means more free throws, which pushes the total up.
 
 Approve unless you see a specific, stated reason not to: guidance or a lesson that clearly applies to this situation, or a concrete risk in the numbers the rules underweighted. Do not veto on general caution; the rules already require an edge. If the trade is fine but a memory suggests caution, approve with a smaller size_multiplier (0.25 to 1). Give the reason in one or two plain sentences that name the specific factor."""
 
 REFLECT_SYSTEM = """You write the lessons an NBA totals trading agent keeps in long-term memory. You are given one finished trade with its context and what happened. Write a single lesson the agent can act on next time it sees a similar spot.
 
-A good lesson names the situation (cushion, clock, margin, pace), says what happened, and says what to do differently or keep doing. It is specific and falsifiable. One trade is weak evidence: phrase it as a pattern to watch, not a law. Two or three sentences. Tags should be short lowercase situation words that will match similar future spots. Importance is 0-1: full losses and clear saves high, routine noise low."""
+A good lesson names the situation (cushion, clock, margin, pace, and what was happening on the floor when it matters: bonus, foul trouble, a run), says what happened, and says what to do differently or keep doing. It is specific and falsifiable. One trade is weak evidence: phrase it as a pattern to watch, not a law. Two or three sentences. Tags should be short lowercase situation words that will match similar future spots. Importance is 0-1: full losses and clear saves high, routine noise low."""
 
 REVIEW_SCHEMA = {
     "type": "object",
@@ -108,6 +124,9 @@ TOOLS = [
           {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"},
            "quarter": {"type": "integer", "enum": [1, 2, 3, 4]}},
           ["game", "quarter"]),
+    _tool("get_players", "Who is on the floor for one game and every player's line so far: minutes, points, shooting, fouls, plus-minus, plus team fouls this quarter and who is in the bonus.",
+          {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"}},
+          ["game"]),
     _tool("get_positions", "Open positions with live mark, P&L, current win probability and risk flags."),
     _tool("get_trades", "Closed trades, newest first, with exit reason and (for early exits on finished games) whether selling beat holding.",
           {"limit": {"type": "integer", "description": "How many, default 20"}}),
@@ -117,7 +136,7 @@ TOOLS = [
           {"query": {"type": "string"}}, ["query"]),
     _tool("save_guidance", "Save a standing instruction from the owner so it is recalled before future trades.",
           {"text": {"type": "string", "description": "The instruction, close to the owner's words"},
-           "tags": {"type": "array", "items": {"type": "string"}, "description": "Situation tags it applies to, e.g. close_game, ot_risk, late, hot_pace, blowout, a team abbreviation. Leave empty for guidance that always applies."},
+           "tags": {"type": "array", "items": {"type": "string"}, "description": "Situation tags it applies to, e.g. close_game, ot_risk, late, hot_pace, blowout, a team abbreviation, or a floor pattern: pattern:bonus_early, pattern:bonus, pattern:foul_trouble, pattern:hot_hand, pattern:run, pattern:scoring_hot, pattern:scoring_cold, pattern:bench_in. Leave empty for guidance that always applies."},
            "pinned": {"type": "boolean", "description": "Pin so it is always recalled"}},
           ["text"]),
     _tool("forget_memory", "Delete a memory by id.", {"memory_id": {"type": "integer"}}, ["memory_id"]),
@@ -190,7 +209,8 @@ class Brain:
                       "projection": game.projection.mean if game.projection else None,
                       "ot_chance": game.projection.p_ot if game.projection else None,
                       "pace_per_48": game.projection.pace if game.projection else None,
-                      "pregame_total": game.pregame_total, "risk_flags": game.risk.flags},
+                      "pregame_total": game.pregame_total, "risk_flags": game.risk.flags,
+                      "on_the_floor": pattern_texts(game)},
             "trade": {"buy": f"under {cand.rung.strike:g}", "price_cents": cand.price, "line": cand.reference,
                       "line_source": cand.reference_source, "cushion_pts": round(cand.buffer, 1),
                       "model_win_prob": round(cand.p_model, 4), "edge": round(cand.edge, 4),
@@ -273,8 +293,73 @@ class Brain:
         ]
         return "[desk snapshot " + now_iso() + "]\n" + "\n".join(lines)
 
-    async def chat(self, message: str) -> AsyncIterator[dict[str, Any]]:
-        """Run one user turn. Yields ChatEvent dicts; persists both sides of the turn."""
+    def game_briefing(self, game: Game) -> dict[str, Any]:
+        """Everything about one game in one place, for an analysis or a follow-up about it."""
+        e = self.engine
+        fd = game.fanduel
+        ctx = game.context or {}
+        ladder = sorted(game.ladder, key=lambda r: r.strike)
+        anchor = (fd.total_line if fd and fd.total_line else None) or implied_total(ladder) or game.pregame_total or 0
+        near = [r for r in ladder if abs(r.strike - anchor) <= 25 and (r.no_ask or r.yes_ask)][:16]
+        quarters = []
+        for view in game.quarter_view:
+            markets = game.quarter_markets.get(view["segment"], {})
+            quarters.append({
+                **{k: view[k] for k in ("label", "status", "home_points", "away_points", "seconds_remaining", "projection")},
+                "kalshi_total_line": implied_quarter_total(markets.get("total", [])),
+                "kalshi_margin_line_home": implied_margin(markets.get("spread", []), game.home.abbr),
+            })
+        q_now = f"q{min(max(game.period, 1), 4)}"
+        q_markets = game.quarter_markets.get(q_now, {})
+
+        def rung_rows(rungs: list[Any], limit: int) -> list[dict[str, Any]]:
+            rows = [r for r in rungs if r.yes_ask or r.no_ask]
+            return [{"yes": r.label("over"), "yes_ask": r.yes_ask, "no": r.label("under"), "no_ask": r.no_ask,
+                     "model_p_yes": round(1 - r.p_under, 3)} for r in rows[:limit]]
+
+        players = [
+            {k: p[k] for k in ("name", "team", "on_court", "starter", "points", "fgm", "fga", "tpm", "tpa", "ftm", "fta", "fouls", "plus_minus")}
+            | {"minutes": round(p["minutes"])}
+            for p in ctx.get("players", []) if p["minutes"] > 0 or p["on_court"]
+        ]
+        recalled = e.memory.recall(
+            [game.home.abbr.lower(), game.away.abbr.lower()] + [f"pattern:{k}" for k in pattern_keys(game)],
+            text=f"{game.label} {' '.join(pattern_texts(game))}", k=5, touch=False,
+        )
+        return {
+            "game": game.label, "home": game.home.abbr, "away": game.away.abbr, "state": game.state,
+            "clock": f"Q{game.period} {game.clock}" if 1 <= game.period <= 4 else ("OT " + game.clock if game.period > 4 else "pre-game"),
+            "score": {game.away.abbr: game.away.score, game.home.abbr: game.home.score},
+            "by_quarter": {game.away.abbr: game.away.quarters, game.home.abbr: game.home.quarters},
+            "simulated": game.simulated,
+            "pregame_total": game.pregame_total,
+            "sportsbook": fd.__dict__ if fd else None,
+            "kalshi_total_line": implied_total(ladder),
+            "projection": game.projection.__dict__ if game.projection else None,
+            "risk": {"level": game.risk.level, "flags": game.risk.flags},
+            "on_the_floor": [{"text": n["text"], "pushes_scoring": n["lean"]} for n in ctx.get("notes", [])],
+            "team_fouls_this_period": [{"team": t["abbr"], "fouls": t["fouls"], "next_foul_is_free_throws": t["penalty"],
+                                         "points_last_5_min": t["last5"], "starters_on_floor": t["starters_on"]} for t in ctx.get("teams", [])],
+            "out_tonight": ctx.get("out", []),
+            "players": players,
+            "full_game_ladder_near_line": [{"strike": r.strike, "under_ask": r.no_ask, "under_bid": r.no_bid, "over_ask": r.yes_ask,
+                                            "over_bid": r.yes_bid, "model_p_under": round(r.p_under, 3)} for r in near],
+            "quarters": quarters,
+            f"{q_now}_markets": {"totals": rung_rows(q_markets.get("total", []), 12), "spreads": rung_rows(q_markets.get("spread", []), 12)},
+            "my_positions_here": [
+                {k: p[k] for k in ("label", "contracts", "entry_price", "mark_price", "cost", "pnl", "p_win", "p_win_entry", "opened_by")}
+                for p in e.positions_api() if p["game_id"] == game.id
+            ],
+            "record_by_pattern": e._pattern_record(),
+            "recalled_memories": [{"kind": m["kind"], "text": m["text"], "from_owner": m["source"] == "user"} for m in recalled],
+        }
+
+    async def chat(self, message: str, game_id: Optional[str] = None, analysis: bool = False) -> AsyncIterator[dict[str, Any]]:
+        """Run one user turn. Yields ChatEvent dicts; persists both sides of the turn.
+
+        With `game_id`, a fresh briefing on that game rides along with the message (it is not
+        stored in the transcript). With `analysis`, the turn asks for a full read of the game.
+        """
         db = self.engine.db
         if not self.available:
             yield {"type": "error", "message": "Claude is not connected. Add ANTHROPIC_API_KEY to .env and restart to chat with the agent."}
@@ -283,7 +368,14 @@ class Brain:
             prior = self.history()[-16:]
             db.insert("chat", {"role": "user", "text": message, "ts": now_iso(), "tools": []})
             messages: list[dict[str, Any]] = [{"role": m["role"], "content": m["text"]} for m in prior if m["text"]]
-            messages.append({"role": "user", "content": f"{self._snapshot()}\n\n{message}"})
+            game = self.engine.by_id.get(game_id) if game_id else None
+            parts = [self._snapshot()]
+            if game is not None:
+                parts.append(f"[game briefing: {game.label}]\n{json.dumps(self.game_briefing(game), default=str)}")
+            if game is not None and analysis:
+                parts.append(ANALYSIS_ASK)
+            parts.append(message)
+            messages.append({"role": "user", "content": "\n\n".join(parts)})
             text_parts: list[str] = []
             used: list[dict[str, str]] = []
             try:
@@ -396,6 +488,7 @@ class Brain:
                 "projection": g.projection.__dict__ if g.projection else None,
                 "fanduel": {"total_line": ref, "live": g.fanduel.live, "source": g.fanduel.source} if g.fanduel else None,
                 "risk": {"level": g.risk.level, "flags": g.risk.flags},
+                "on_the_floor": pattern_texts(g),
                 "unders": [{"ticker": r.ticker, "strike": r.strike, "ask": r.no_ask, "bid": r.no_bid,
                             "model_p": round(r.p_under, 3), "edge": r.edge_under} for r in near],
                 "quarters": [{k: v[k] for k in ("label", "status", "home_points", "away_points", "seconds_remaining", "projection")}
@@ -415,6 +508,20 @@ class Brain:
                      "model_p_yes": round(1 - r.p_under, 3)} for r in markets.get(kind, [])]
 
         return f"looked at Q{quarter} markets for {found.label}", {"game": found.label, "quarter": view, "totals": rows("total"), "spreads": rows("spread")}
+
+    async def _t_get_players(self, game: str) -> tuple[str, Any]:
+        found = next((g for g in self.engine.games if game.lower() in g.label.lower()), None)
+        if found is None:
+            raise ValueError(f"No game matching '{game}'")
+        ctx = found.context or {}
+        if not ctx:
+            return f"no player data yet for {found.label}", {"game": found.label, "players": []}
+        keep = ("name", "team", "on_court", "starter", "minutes", "points", "fgm", "fga", "tpm", "tpa", "ftm", "fta", "fouls", "plus_minus")
+        players = [{k: p[k] for k in keep} for p in ctx.get("players", [])]
+        return f"looked at the players in {found.label}", {
+            "game": found.label, "teams": ctx.get("teams"), "notes": [n["text"] for n in ctx.get("notes", [])],
+            "out_tonight": ctx.get("out"), "players": players,
+        }
 
     async def _t_get_positions(self) -> tuple[str, Any]:
         rows = self.engine.positions_api()

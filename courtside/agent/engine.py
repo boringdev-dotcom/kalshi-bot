@@ -22,6 +22,7 @@ from ..db import DB
 from ..domain import QUARTER_SECONDS, Game, Rung, now_iso
 from ..events import Hub
 from ..feeds.live import LiveFeed
+from ..feeds.patterns import PATTERN_LABELS, pattern_keys, pattern_texts
 from ..feeds.sim import SimFeed
 from ..kalshi.client import KalshiClient, KalshiError
 from ..model.quarters import implied_margin, implied_quarter_total
@@ -603,7 +604,8 @@ class Engine:
                 "exit_profile": exit_profile,
                 "arm_key": arm,
                 "p_win_entry": round(position_p_win(side, rung), 4),
-                "context": context or {},
+                # What was happening on the floor, so the agent can learn which patterns matter.
+                "context": {**(context or {}), "patterns": pattern_keys(game), "on_floor": pattern_texts(game, 4)},
                 "memory_ids": memory_ids or [],
             },
         )
@@ -692,10 +694,11 @@ class Engine:
         ctx = row["context"] or {}
         away, _, home = row["game_label"].partition(" @ ")
         pace_gap = (ctx.get("pace") or 0) - (ctx.get("pregame_total") or ctx.get("pace") or 0)
+        patterns = [f"pattern:{k}" for k in ctx.get("patterns") or []]
         if not row["arm_key"]:
             tags = ["nba", home.lower(), away.lower(), "manual", row["kind"]]
-            return tags + (["quarter", row["segment"]] if row["segment"] != "game" else [])
-        return situation_tags(arm=row["arm_key"], home=home, away=away, p_ot=ctx.get("p_ot") or 0.0, pace_gap=pace_gap)
+            return tags + (["quarter", row["segment"]] if row["segment"] != "game" else []) + patterns
+        return situation_tags(arm=row["arm_key"], home=home, away=away, p_ot=ctx.get("p_ot") or 0.0, pace_gap=pace_gap, extra=patterns)
 
     def _describe(self, row: dict[str, Any]) -> str:
         ctx = row["context"] or {}
@@ -706,7 +709,9 @@ class Engine:
             )
         else:
             where = f"your trade, {ctx['when']}" if ctx.get("when") else "your trade"
-        return f"{row['game_label']} {self._label(row)} at {row['entry_price']}c x{row['contracts']} ({where})"
+        floor = ctx.get("on_floor") or []
+        happening = f" On the floor: {' '.join(floor[:2])}" if floor else ""
+        return f"{row['game_label']} {self._label(row)} at {row['entry_price']}c x{row['contracts']} ({where}).{happening}"
 
     def _remember_trade(self, row: dict[str, Any]) -> None:
         outcome = {
@@ -978,7 +983,10 @@ class Engine:
             return None
         proj = game.projection
         pace_gap = (proj.pace - (game.pregame_total or proj.pace)) if proj else 0.0
-        tags = situation_tags(arm=cand.arm, home=game.home.abbr, away=game.away.abbr, p_ot=proj.p_ot if proj else 0.0, pace_gap=pace_gap)
+        tags = situation_tags(
+            arm=cand.arm, home=game.home.abbr, away=game.away.abbr, p_ot=proj.p_ot if proj else 0.0, pace_gap=pace_gap,
+            extra=[f"pattern:{k}" for k in pattern_keys(game)],
+        )
         memories = self.memory.recall(tags, text=f"{game.label} fourth quarter under total", k=6)
         return {
             "ticker": cand.rung.ticker, "cand": cand, "view": view, "contracts": contracts, "cost": cost,
@@ -1126,6 +1134,7 @@ class Engine:
         losses = [r["pnl"] for r in real if r["pnl"] <= 0]
         curve = self.db.query("SELECT ts, equity, book FROM equity WHERE book=? ORDER BY id DESC LIMIT 500", [self.book])
         return {
+            "patterns": self._pattern_record(),
             "quarters": self.observer.summary(simulated=self.settings["data_source"] == "sim"),
             "arms": self.learner.arms(),
             "exit_arms": self.learner.exit_arms(),
@@ -1142,6 +1151,25 @@ class Engine:
                 "sim_episodes": int(self.db.get("sim_episodes", 0)),
             },
         }
+
+    def _pattern_record(self) -> list[dict[str, Any]]:
+        """How trades went, yours and the agent's, grouped by what was happening when they were placed."""
+        rows = self.db.query(
+            "SELECT context, pnl, cost, opened_by FROM positions WHERE status='closed' AND training=0 AND simulated=?",
+            [1 if self.settings["data_source"] == "sim" else 0],
+        )
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            for key in (r["context"] or {}).get("patterns") or []:
+                rec = out.setdefault(key, {"key": key, "label": PATTERN_LABELS.get(key, key), "trades": 0, "wins": 0,
+                                           "pnl": 0.0, "yours": 0})
+                rec["trades"] += 1
+                rec["wins"] += r["pnl"] > 0
+                rec["pnl"] = round(rec["pnl"] + r["pnl"], 2)
+                rec["yours"] += r["opened_by"] == "user"
+        base = {"key": "all", "label": "All trades", "trades": len(rows), "wins": sum(1 for r in rows if r["pnl"] > 0),
+                "pnl": round(sum(r["pnl"] for r in rows), 2), "yours": sum(1 for r in rows if r["opened_by"] == "user")}
+        return [base] + sorted(out.values(), key=lambda x: -x["trades"])
 
     async def aclose(self) -> None:
         await self.feed.aclose()

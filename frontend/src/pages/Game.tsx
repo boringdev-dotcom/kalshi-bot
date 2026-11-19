@@ -7,6 +7,8 @@ import { api, ApiError } from '../api'
 import { ActivityFeed } from '../components/Activity'
 import LineBar from '../components/game/LineBar'
 import MarketList from '../components/game/MarketList'
+import GameAnalysis from '../components/game/GameAnalysis'
+import OnTheFloor from '../components/game/OnTheFloor'
 import OrderPanel from '../components/game/OrderPanel'
 import Scoreboard from '../components/game/Scoreboard'
 import SpreadBar from '../components/game/SpreadBar'
@@ -326,6 +328,10 @@ export default function GamePage() {
             ) : (
               <p className="mt-4 text-[13px] text-gold">Worth knowing: {game.risk.flags.join('. ')}.</p>
             ))}
+
+          <OnTheFloor game={game} players={detail?.players ?? null} />
+
+          {game.state !== 'final' && <GameAnalysis game={game} />}
 
           {!desktop && <Holdings positions={positions} rungs={allRungs} />}
 

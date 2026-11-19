@@ -1,12 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import clsx from 'clsx'
-import { Grid3x3, LogOut, Play, Target } from 'lucide-react'
+import { Activity, Grid3x3, LogOut, Play, Target } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../../api'
 import { Badge, Button, Card, Empty, Meter, Segmented, Skeleton, Slider, Stat } from '../../components/ui'
 import { money, pct, pnlColor, signedPct } from '../../format'
 import { useStore } from '../../store'
-import type { Arm, ExitArm, LearningState, TrainResult } from '../../types'
+import type { Arm, ExitArm, LearningState, PatternRecord, TrainResult } from '../../types'
 import QuarterBook from './QuarterBook'
 
 const GREEN = '#19c37d'
@@ -329,6 +329,51 @@ function ExitStyles({ arms }: { arms: ExitArm[] }) {
   )
 }
 
+/* ───────────────────────── What was happening on the floor ───────────────────────── */
+
+function Patterns({ rows }: { rows: PatternRecord[] }) {
+  const all = rows.find((r) => r.key === 'all')
+  const groups = rows.filter((r) => r.key !== 'all')
+  const rate = (r: PatternRecord) => (r.trades ? r.wins / r.trades : 0)
+  return (
+    <section>
+      <h3 className="h-section">What was happening when trades were placed</h3>
+      <p className="hint mt-1">
+        Every trade, yours and the agent's, saves what was going on in the game: the bonus, foul trouble, runs, scoring bursts.
+        Here is how trades went when each one was showing, next to all trades. The agent only watches these for now; a few
+        trades prove nothing either way.
+      </p>
+      <Card className="mt-3 px-5">
+        {!all || groups.length === 0 ? (
+          <Empty icon={<Activity size={18} />} title="No trades with a pattern yet" body="Trade a live game with something going on and it shows up here once it closes." className="!py-8" />
+        ) : (
+          [all, ...groups].map((r) => {
+            const diff = r.key === 'all' || !all.trades ? null : rate(r) - rate(all)
+            return (
+              <div key={r.key} className={clsx('flex items-center gap-4 border-b border-hair py-3.5 last:border-b-0', r.key === 'all' && 'text-mute')}>
+                <div className="min-w-0 flex-1">
+                  <div className={clsx('text-sm', r.key === 'all' ? 'text-mute' : 'font-medium text-white')}>{r.label}</div>
+                  <div className="mt-0.5 text-xs text-dim">
+                    {r.trades} {r.trades === 1 ? 'trade' : 'trades'}
+                    {r.yours > 0 && ` · ${r.yours} yours`}
+                    {diff != null && r.trades >= 3 && Math.abs(diff) >= 0.05 && (
+                      <span className={diff > 0 ? 'text-mint' : 'text-coral'}> · {diff > 0 ? 'better' : 'worse'} than usual</span>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="num text-sm font-semibold text-white">{pct(rate(r))} won</div>
+                  <div className={clsx('num text-xs', pnlColor(r.pnl))}>{money(r.pnl, { sign: true })}</div>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </Card>
+    </section>
+  )
+}
+
 /* ───────────────────────── Is the model honest? ───────────────────────── */
 
 function Calibration({ rows }: { rows: LearningState['calibration'] }) {
@@ -491,6 +536,7 @@ export default function LearningTab() {
         <ExitStyles arms={state.exit_arms} />
         <Calibration rows={state.calibration} />
       </div>
+      <Patterns rows={state.patterns ?? []} />
       <Gym onDone={load} />
       <QuarterBook data={state.quarters} />
     </div>

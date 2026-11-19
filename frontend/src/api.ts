@@ -99,13 +99,19 @@ export const api = {
 }
 
 /** POST /api/chat and feed each server-sent `ChatEvent` to `onEvent`. */
-export async function streamChat(message: string, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) {
+export async function streamChat(
+  message: string,
+  onEvent: (e: ChatEvent) => void,
+  signal?: AbortSignal,
+  /** Talk about one game (a fresh briefing on it goes with the message); `analysis` asks for a full read. */
+  about?: { gameId: string; analysis?: boolean },
+) {
   let res: Response
   try {
     res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, game_id: about?.gameId, analysis: about?.analysis ?? false }),
       signal,
     })
   } catch (err) {

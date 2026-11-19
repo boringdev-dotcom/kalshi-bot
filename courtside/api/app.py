@@ -65,6 +65,10 @@ class MemoryPatch(BaseModel):
 
 class ChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
+    # Talk about one game: a fresh briefing on it rides along with the message.
+    game_id: Optional[str] = Field(default=None, max_length=64)
+    # Ask for a full read of that game (the "Agent analysis" button).
+    analysis: bool = False
 
 
 class LoginBody(BaseModel):
@@ -181,6 +185,7 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
             ],
             "timeline": engine.timelines.get(game_id, []),
             "quarter_timelines": engine.quarter_timelines.get(game_id, {}),
+            "players": (game.context or {}).get("players", []),
             "decisions": decisions,
             "positions": [p for p in engine.positions_api() if p["game_id"] == game_id],
         }
@@ -283,7 +288,7 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
     async def chat(body: ChatBody) -> StreamingResponse:
         async def stream():
             try:
-                async for event in brain.chat(body.message):
+                async for event in brain.chat(body.message, game_id=body.game_id, analysis=body.analysis):
                     yield f"data: {json.dumps(event, default=str)}\n\n"
             except Exception as exc:
                 log.exception("chat failed")

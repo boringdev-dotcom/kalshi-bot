@@ -20,6 +20,7 @@ from ..config import Config
 from ..domain import FanDuelOdds, Game, Rung, Team, now_iso
 from ..kalshi.client import KalshiClient, cents, quarter_series
 from ..model.totals import implied_total
+from .patterns import ESPN_SUMMARY, build_context, parse_espn
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ class LiveFeed:
         self._next = {"scores": 0.0, "kalshi": 0.0, "fanduel": 0.0}
         self._espn_lines: dict[str, FanDuelOdds] = {}
         self._next_quarter: dict[tuple[int, str], float] = {}
+        self._next_patterns: dict[str, float] = {}
         self._odds_markets = "totals,spreads,h2h"
 
     async def aclose(self) -> None:
@@ -98,6 +100,7 @@ class LiveFeed:
             self._next["kalshi"] = now + (3 if any_live else 30)
             await self._guard("kalshi", self._refresh_ladders)
         await self._refresh_quarter_markets(now, any_live)
+        await self._refresh_patterns(now)
         if self.cfg.has_odds and now >= self._next["fanduel"]:
             # The Odds API bills one credit per market per request, so be frugal:
             # the full board hourly while idle, totals only while games are live,
@@ -175,6 +178,31 @@ class LiveFeed:
                 del self.games[gid]
         live = sum(1 for g in self.games.values() if g.state == "live")
         return f"{len(self.games)} games today, {live} live"
+
+    # -- players, fouls and runs (ESPN game summary) ---------------------------
+    async def _refresh_patterns(self, now: float) -> None:
+        """Who is on the floor, fouls, runs. Fast for live games, slow before tip-off, once after."""
+        due = [
+            g for gid, g in self.games.items()
+            if now >= self._next_patterns.get(gid, 0.0) and not (g.context or {}).get("final")
+        ]
+        due.sort(key=lambda g: g.state != "live")  # live games first
+        for game in due[:8]:
+            wait = (8 if game.period >= 3 else 15) if game.state == "live" else 600
+            self._next_patterns[game.id] = now + wait
+        if due:
+            await asyncio.gather(*(self._load_patterns(g) for g in due[:8]))
+
+    async def _load_patterns(self, game: Game) -> None:
+        try:
+            resp = await self._http.get(ESPN_SUMMARY, params={"event": game.id.removeprefix("nba-")}, timeout=6.0)
+            resp.raise_for_status()
+            snap = parse_espn(resp.json(), ABBR_FIX)
+            game.context = build_context(game, snap)
+            if game.state == "final":
+                game.context["final"] = True
+        except Exception as exc:  # patterns are a nice-to-have; keep the last good ones
+            log.info("patterns for %s unavailable: %s", game.label, exc)
 
     @staticmethod
     def _quarters(side: dict[str, Any], score: int, period: int) -> list[int]:
