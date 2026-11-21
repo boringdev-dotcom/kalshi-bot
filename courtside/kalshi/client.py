@@ -190,6 +190,37 @@ class KalshiClient:
             "portfolio_value": float(data.get("portfolio_value", 0)) / 100.0,
         }
 
+    async def positions(self) -> dict[str, float]:
+        """Contracts held per market: positive is YES, negative is NO."""
+        held: dict[str, float] = {}
+        cursor: Optional[str] = None
+        for _ in range(10):
+            params: dict[str, Any] = {"count_filter": "position", "limit": 200, **({"cursor": cursor} if cursor else {})}
+            data = await self._request("GET", "/portfolio/positions", params=params, signed=True)
+            for row in data.get("market_positions") or []:
+                count = float(row.get("position_fp") or row.get("position") or 0)
+                if count:
+                    held[row["ticker"]] = count
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+        return held
+
+    async def fills(self, ticker: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Recent fills on one market, newest first: contracts, YES/NO price in cents, fee, time."""
+        data = await self._request("GET", "/portfolio/fills", params={"ticker": ticker, "limit": limit}, signed=True)
+        out = []
+        for row in data.get("fills") or []:
+            out.append({
+                "count": float(row.get("count_fp") or row.get("count") or 0),
+                "yes_price": float(row.get("yes_price_dollars") or 0) * 100,
+                "no_price": float(row.get("no_price_dollars") or 0) * 100,
+                "fee": float(row.get("fee_cost") or 0),
+                "created_time": row.get("created_time") or "",
+                "order_id": row.get("order_id"),
+            })
+        return out
+
     async def shard_balances(self) -> dict[int, float]:
         """Cash in each exchange shard, in dollars."""
         data = await self._request("GET", "/portfolio/balance", signed=True)
