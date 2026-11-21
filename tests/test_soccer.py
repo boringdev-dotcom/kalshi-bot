@@ -358,3 +358,72 @@ def test_favs_keep_only_85_to_90_confidence_priced_below_it():
         raise AssertionError("favs without Claude should say so")
     except ValueError as exc:
         assert "Claude" in str(exc)
+
+
+class FakeKalshi:
+    """What Kalshi reports holding and filling, for the live position sync."""
+
+    def __init__(self, held: dict, fills: list):
+        self.held, self._fills = held, fills
+
+    async def positions(self):
+        return self.held
+
+    async def fills(self, ticker, limit=100):
+        return [f for f in self._fills if f.get("ticker", ticker) == ticker]
+
+
+def live_row(desk: SoccerDesk, ticker: str, side: str, contracts: int, price: int, opened_at: str) -> int:
+    cost = round(contracts * price / 100 + 1.0, 2)
+    return desk.db.insert("soccer_positions", {
+        "match_id": "soccer-1", "match_label": "Nice vs PSG", "league": "ligue1", "ticker": ticker, "segment": "match",
+        "kind": "spread", "outcome": "away", "strike": 2.5, "side": side, "label": "PSG not by 3+", "contracts": contracts,
+        "entry_price": price, "cost": cost, "fees": 1.0, "mode": "live", "status": "open", "opened_at": opened_at,
+    })
+
+
+def test_live_positions_sold_on_kalshi_close_at_the_kalshi_fill_price():
+    desk, engine = make_desk()
+    t = "KXLIGUE1SPREAD-26NOV21NICPSG-PSG3"
+    pid = live_row(desk, t, "no", 120, 82, "2026-11-21T17:41:13+00:00")
+    engine.kalshi = FakeKalshi({}, [
+        # The user's sell on Kalshi (two fills of one order), then the desk's own entry just before opened_at.
+        {"count": 119, "yes_price": 16, "no_price": 84, "fee": 1.1195, "created_time": "2026-11-21T17:47:26.126778Z"},
+        {"count": 1, "yes_price": 16, "no_price": 84, "fee": 0.0095, "created_time": "2026-11-21T17:47:26.126778Z"},
+        {"count": 120, "yes_price": 18, "no_price": 82, "fee": 1.24, "created_time": "2026-11-21T17:41:12.840844Z"},
+    ])
+    engine.settings["trading_mode"] = "live"
+    closed = asyncio.run(desk.sync_with_kalshi())
+    assert [c["id"] for c in closed] == [pid]
+    trade = closed[0]
+    assert trade["exit_price"] == 84 and trade["exit_reason"] == "sold_on_kalshi"
+    assert trade["pnl"] == round(120 * 0.84 - (120 * 0.82 + 1.0) - 1.13, 2)
+    assert desk.positions_api() == []
+
+
+def test_partial_sale_on_kalshi_splits_the_position():
+    desk, engine = make_desk()
+    t = "KXEPLTOTAL-26NOV22ABCDEF-3"
+    pid = live_row(desk, t, "yes", 100, 40, "2026-11-21T10:00:00+00:00")
+    engine.kalshi = FakeKalshi({t: 60.0}, [{"count": 40, "yes_price": 55, "no_price": 45, "fee": 0.4, "created_time": "2026-11-21T10:05:00Z"}])
+    engine.settings["trading_mode"] = "live"
+    closed = asyncio.run(desk.sync_with_kalshi())
+    assert len(closed) == 1 and closed[0]["contracts"] == 40 and closed[0]["exit_price"] == 55
+    left = desk.db.one("SELECT * FROM soccer_positions WHERE id=?", [pid])
+    assert left["status"] == "open" and left["contracts"] == 60 and abs(left["cost"] + closed[0]["cost"] - 41.0) < 0.011
+
+
+def test_sync_leaves_settled_held_and_fresh_positions_alone():
+    desk, engine = make_desk()
+    engine.settings["trading_mode"] = "live"
+    # Gone from Kalshi with no sale on record: settled, so settlement handles it.
+    live_row(desk, "KXA-1", "no", 10, 80, "2026-11-21T10:00:00+00:00")
+    # Still held on Kalshi (as NO, i.e. a negative count).
+    live_row(desk, "KXB-1", "no", 10, 80, "2026-11-21T10:00:00+00:00")
+    # Bought seconds ago: Kalshi may not list it yet.
+    from courtside.domain import now_iso
+    live_row(desk, "KXC-1", "yes", 10, 50, now_iso())
+    engine.kalshi = FakeKalshi({"KXB-1": -10.0}, [{"ticker": "KXA-1", "count": 10, "yes_price": 20, "no_price": 80, "fee": 0.1,
+                                                   "created_time": "2026-11-21T09:59:59Z"}])
+    assert asyncio.run(desk.sync_with_kalshi()) == []
+    assert len(desk.positions_api()) == 3

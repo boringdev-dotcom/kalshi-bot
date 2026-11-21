@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..agent.policy import kalshi_fee
@@ -23,6 +25,10 @@ if TYPE_CHECKING:
     from ..agent.engine import Engine
 
 log = logging.getLogger(__name__)
+
+
+SYNC_EVERY_S = 20.0  # how often live positions are checked against what Kalshi says you hold
+SYNC_GRACE_S = 30  # leave positions this fresh alone: Kalshi may not list the fill yet
 
 
 class SoccerTradeError(Exception):
@@ -61,6 +67,7 @@ class SoccerDesk:
         self.matches: list[Match] = []
         self.by_id: dict[str, Match] = {}
         self.last_tick: Optional[str] = None
+        self._last_sync = 0.0
 
     @property
     def mode(self) -> str:
@@ -79,6 +86,12 @@ class SoccerDesk:
         self.matches = await self.feed.refresh()
         self.by_id = {m.id: m for m in self.matches}
         self._settle()
+        if self.mode == "live" and time.monotonic() - self._last_sync > SYNC_EVERY_S:
+            self._last_sync = time.monotonic()
+            try:
+                await self.sync_with_kalshi()
+            except KalshiError as exc:
+                log.warning("soccer: Kalshi position sync failed: %s", exc)
         self.last_tick = now_iso()
 
     async def aclose(self) -> None:
@@ -164,6 +177,63 @@ class SoccerDesk:
                   "fees": round(row["fees"] + exit_fees, 2), "closed_at": now_iso()}
         self.db.update("soccer_positions", row["id"], fields)
         return self._trade({**row, **fields})
+
+    async def sync_with_kalshi(self) -> list[dict[str, Any]]:
+        """Close live positions you sold outside Courtside (on Kalshi's own app or site).
+
+        Kalshi holding fewer contracts than the desk thinks means some were sold elsewhere.
+        They are closed at the prices of the sell fills Kalshi reports after the position
+        opened. Without such fills nothing is touched: a market Kalshi has settled also
+        empties the position, and settlement is `_settle`'s job.
+        """
+        rows = self.db.query("SELECT * FROM soccer_positions WHERE status='open' AND mode='live' ORDER BY id DESC")
+        if not rows:
+            return []
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=SYNC_GRACE_S)).isoformat()
+        held = await self.engine.kalshi.positions()
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in rows:
+            groups.setdefault((row["ticker"], row["side"]), []).append(row)
+        closed: list[dict[str, Any]] = []
+        for (ticker, side), group in groups.items():
+            if any(r["opened_at"] > cutoff for r in group):
+                continue
+            count = held.get(ticker, 0.0)
+            on_kalshi = int(round(max(count, 0) if side == "yes" else max(-count, 0)))
+            missing = sum(r["contracts"] for r in group) - on_kalshi
+            if missing <= 0:
+                continue
+            first_open = min(r["opened_at"] for r in group)
+            sells = [f for f in await self.engine.kalshi.fills(ticker)
+                     if _iso(f["created_time"]) > first_open and not _is_entry(f, group)]
+            sold = sum(f["count"] for f in sells)
+            if sold + 1e-9 < missing:
+                continue  # no sale on record: likely settled, so leave it to settlement
+            for row in group:  # newest first, matching how the sells were most likely meant
+                if missing <= 0:
+                    break
+                take = min(row["contracts"], missing)
+                px, fees = _fill_price(sells, side, take)
+                if take < row["contracts"]:
+                    row = self._split(row, take)
+                closed.append(self._finish(row, px, "sold_on_kalshi", fees))
+                missing -= take
+        for trade in closed:
+            log.info("soccer: %s %s closed, sold on Kalshi at %sc", trade["match_label"], trade["label"], trade["exit_price"])
+        return closed
+
+    def _split(self, row: dict[str, Any], take: int) -> dict[str, Any]:
+        """Carve `take` contracts off an open position into a row of their own; returns that row."""
+        share = take / row["contracts"]
+        part = {k: v for k, v in row.items() if k != "id"}
+        part.update(contracts=take, cost=round(row["cost"] * share, 2), fees=round(row["fees"] * share, 2))
+        part["id"] = self.db.insert("soccer_positions", part)
+        self.db.update("soccer_positions", row["id"], {
+            "contracts": row["contracts"] - take,
+            "cost": round(row["cost"] - part["cost"], 2),
+            "fees": round(row["fees"] - part["fees"], 2),
+        })
+        return part
 
     def _settle(self) -> None:
         if not self.by_id:
@@ -313,3 +383,34 @@ class SoccerDesk:
         return self.by_id.get(query) or next(
             (m for m in self.matches if q in m.label.lower() or q in f"{m.home.name} {m.away.name}".lower()), None
         )
+
+
+def _iso(ts: str) -> str:
+    """Kalshi's '...Z' timestamps in the same form as `now_iso()`, so they compare as strings."""
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat(timespec="seconds")
+    except ValueError:
+        return ""
+
+
+def _is_entry(fill: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
+    """A fill from one of the desk's own buys: it lands just before that position's `opened_at`."""
+    t = _iso(fill["created_time"])
+    for r in rows:
+        opened = datetime.fromisoformat(r["opened_at"])
+        if (opened - timedelta(seconds=5)).isoformat(timespec="seconds") <= t <= r["opened_at"]:
+            return True
+    return False
+
+
+def _fill_price(fills: list[dict[str, Any]], side: str, contracts: int) -> tuple[int, float]:
+    """Average price (cents, for `side`) and fees of the most recent `contracts` sold."""
+    left, value, fees = float(contracts), 0.0, 0.0
+    for f in fills:  # newest first
+        if left <= 0:
+            break
+        n = min(f["count"], left)
+        value += n * (f["yes_price"] if side == "yes" else f["no_price"])
+        fees += f["fee"] * n / f["count"] if f["count"] else 0.0
+        left -= n
+    return round(value / contracts), round(fees, 2)
