@@ -44,7 +44,7 @@ Top navigation bar (no side rail): **Markets · Portfolio · Agent · Settings**
 | Route | Page | Job |
 |---|---|---|
 | `/` | Markets | Tonight's games as simple cards: score, clock, the line, the projection. Agent one-liner on top. |
-| `/game/:id` | Game | Scoreboard, What's happening (patterns in sentences, team fouls, who is on the floor, box score), the line bar (or spread bar), markets list (Game total / Q1-Q4, Total / Spread), a chart of how the selected market has moved (game total, quarter total or quarter margin), sticky order panel on the right. |
+| `/game/:id` | Game | Scoreboard, Agent analysis (minimizable to one line), What's happening (patterns in sentences, team fouls, who is on the floor, box score), the line bar (or spread bar), markets list (Game total / Q1-Q4, Total / Spread), a chart of how the selected market has moved (game total, quarter total or quarter margin), sticky order panel on the right. |
 | `/portfolio` | Portfolio | Big account value and chart, open positions as rows, history. |
 | `/agent` | Agent | Tabs: Activity (what it did, in sentences, plus chat) · Rules · Memory · Learning. |
 | `/settings` | Settings | Mode, data, limits, connections. |

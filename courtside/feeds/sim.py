@@ -172,11 +172,16 @@ class SimGame:
         if g.period >= 4 and 1 <= g.margin <= 3 and self.rng.random() < TYING_SHOT[g.margin] * (1.0 if g.period == 4 else 0.4):
             # The trailing team gets the tying bucket at the horn.
             trailing = g.home if g.home.score < g.away.score else g.away
+            points = g.margin
+            trailing.add_points(points, g.period)
             if self.box:
-                self.box.possession(trailing is g.home, g.margin, False)
-            trailing.add_points(g.margin, g.period)
+                self.box.possession(trailing is g.home, points, False)
+        if self.box:
+            self.box.log(None, f"End of {'Q' + str(g.period) if g.period <= 4 else 'OT' + str(g.period - 4)}")
         if g.period >= 4 and g.home.score != g.away.score:
             g.state, g.clock_seconds = "final", 0.0
+            if self.box:
+                self.box.log(None, "End of game")
             return
         g.period += 1
         g.clock_seconds = float(self._period_len)
@@ -340,6 +345,7 @@ class SimFeed:
             sim.quote()
             if sim.box:
                 sim.game.context = build_context(sim.game, sim.box.snapshot())
+                sim.game.plays = sim.box.plays
             if sim.game.state == "final" and sim.final_age > 420:
                 # Retire the finished game and bring a new one in mid-third-quarter.
                 fresh = SimGame(self.rng)
@@ -362,6 +368,10 @@ LAST = ["Hollis", "Okafor", "Brandt", "Mercer", "Vance", "Whitfield", "Castellan
         "Redd", "Sorensen", "Tolliver", "Underwood", "Varga", "Wexler", "Yates", "Zelenko", "Abernathy", "Bellamy",
         "Crowder", "Delacroix", "Ekwueme", "Fontaine", "Galloway", "Hartigan", "Iverson", "Jablonski", "Kessler", "Lattimore"]
 USAGE = [1.35, 1.2, 1.05, 0.95, 0.85, 0.85, 0.7, 0.6, 0.45, 0.35]
+
+
+SHOTS = ["jump shot", "driving layup", "pullup jump shot", "dunk", "floating jump shot", "step back jump shot", "hook shot"]
+TURNOVERS = ["bad pass turnover", "lost ball turnover", "traveling", "offensive foul turnover"]
 
 
 class SimBox:
@@ -388,6 +398,8 @@ class SimBox:
         self.usage = {p.id: USAGE[i] * self.rng.uniform(0.85, 1.15) for r in self.players.values() for i, p in enumerate(r)}
         self.fouls: list[tuple[str, int, float]] = []
         self.scoring: list[tuple[float, str, int]] = []
+        self.plays: list[dict[str, Any]] = []
+        self._scored: Optional[tuple[str, int]] = None  # points already on the board for the play being logged
         self.out = [(t.abbr, f"{self.rng.choice(FIRST)} {self.rng.choice(LAST)}") for t in (game.away, game.home) if self.rng.random() < 0.5]
         self.rotate()
 
@@ -420,6 +432,11 @@ class SimBox:
                 spare = [p for p in roster if p not in lineup and p.fouls < 6]
                 lineup += spare[: 5 - len(lineup)]
             ids = {p.id for p in lineup}
+            if self.game.period >= 1:
+                coming = [p for p in lineup if not p.on_court]
+                going = [p for p in roster if p.on_court and p.id not in ids]
+                for a, b in zip(coming, going):
+                    self.log(a.team, f"{a.name} enters the game for {b.name}")
             for p in roster:
                 p.on_court = p.id in ids
 
@@ -433,11 +450,22 @@ class SimBox:
     def _on(self, abbr: str) -> list[Any]:
         return [p for p in self.players[abbr] if p.on_court]
 
-    def _foul(self, abbr: str) -> None:
+    def log(self, team: Optional[str], text: str, points: int = 0) -> None:
+        g = self.game
+        away, home = g.away.score, g.home.score
+        if self._scored and not points:  # a foul or miss logged before the points it led to
+            away -= self._scored[1] if self._scored[0] == g.away.abbr else 0
+            home -= self._scored[1] if self._scored[0] == g.home.abbr else 0
+        self.plays.append({"period": max(g.period, 1), "clock": fmt_clock(g.clock_seconds), "team": team, "text": text,
+                           "away": away, "home": home, "points": points})
+
+    def _foul(self, abbr: str, kind: str = "personal foul") -> Any:
         g = self.game
         p = self.rng.choice(self._on(abbr))
         p.fouls += 1
         self.fouls.append((abbr, g.period, g.clock_seconds))
+        self.log(abbr, f"{p.name} {kind}")
+        return p
 
     def possession(self, offense_home: bool, points: int, fouled: bool) -> None:
         """Book a possession that scored `points` (fouled = a foul-game trip to the line)."""
@@ -445,37 +473,51 @@ class SimBox:
         off, dfn = (g.home.abbr, g.away.abbr) if offense_home else (g.away.abbr, g.home.abbr)
         on = self._on(off)
         shooter = self.rng.choices(on, [self.usage[p.id] for p in on])[0]
+        me = shooter.name
+        self._scored = (off, points)
         if fouled:
-            self._foul(dfn)
+            self._foul(dfn, "intentional foul")
             shooter.fta += 2
             shooter.ftm += min(points, 2)
+            self.log(off, f"{me} makes {min(points, 2)} of 2 free throws", points)
         elif points == 0:
             if self.rng.random() < 0.85:
                 shooter.fga += 1
-                shooter.tpa += self.rng.random() < 0.4
+                three = self.rng.random() < 0.4
+                shooter.tpa += three
+                self.log(off, f"{me} misses {'three point jumper' if three else self.rng.choice(SHOTS)}")
+            else:
+                self.log(off, f"{me} {self.rng.choice(TURNOVERS)}")
             if self.rng.random() < 0.15:
                 self._foul(dfn)
         elif points == 1:
-            self._foul(dfn)
+            self._foul(dfn, "shooting foul")
             shooter.fta += 2
             shooter.ftm += 1
+            self.log(off, f"{me} makes 1 of 2 free throws", 1)
         elif points == 2:
             if self.rng.random() < 0.25:
-                self._foul(dfn)
+                self._foul(dfn, "shooting foul")
                 shooter.fta += 2
                 shooter.ftm += 2
+                self.log(off, f"{me} makes 2 of 2 free throws", 2)
             else:
                 shooter.fga += 1
                 shooter.fgm += 1
+                self.log(off, f"{me} makes {self.rng.choice(SHOTS)}", 2)
         else:
             shooter.fga += 1
             shooter.fgm += 1
             shooter.tpa += 1
             shooter.tpm += 1
             if points >= 4:
-                self._foul(dfn)
+                self._foul(dfn, "shooting foul")
                 shooter.fta += 1
                 shooter.ftm += 1
+                self.log(off, f"{me} makes three point jumper and the free throw (4-point play)", points)
+            else:
+                self.log(off, f"{me} makes three point jumper", 3)
+        self._scored = None
         if points:
             shooter.points += points
             self.scoring.append((g.elapsed, off, points))
@@ -494,4 +536,5 @@ class SimBox:
             scoring=list(self.scoring),
             out=list(self.out),
             source="practice",
+            plays=self.plays,
         )

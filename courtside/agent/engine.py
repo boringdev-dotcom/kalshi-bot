@@ -82,6 +82,7 @@ class Engine:
         self._last_real = time.monotonic()
         self._last_skip: dict[str, set[str]] = {}
         self._cooldown: set[str] = set()  # games the agent already exited; no re-entry
+        self._archived: set[str] = set()  # finished games already saved to game_archive this run
         self._reviewing: set[str] = set()
         self._vetoed: dict[str, float] = {}
         self._hold_noted: dict[int, str] = {}
@@ -150,6 +151,7 @@ class Engine:
 
         self.observer.observe(self.games)  # quarter markets: watched, never traded by the agent
         await self._settle_finished()
+        self._archive_finished()
         if self.settings["agent_enabled"]:
             await self._manage_exits()
             await self._scan_entries()
@@ -790,6 +792,31 @@ class Engine:
         for gid in finals:
             self._cooldown.discard(gid)
             self._last_skip.pop(gid, None)
+
+    def _archive_finished(self) -> None:
+        """Save each finished real game, with every play and the final box score, once its last
+        play-by-play has been read. Practice games are not kept."""
+        for g in self.games:
+            if g.simulated or g.state != "final" or g.id in self._archived or not g.plays or not (g.context or {}).get("final"):
+                continue
+            ctx = {k: v for k, v in (g.context or {}).items() if k in ("players", "notes", "teams", "out")}
+            self.db.execute("DELETE FROM game_archive WHERE game_id=?", [g.id])
+            self.db.insert("game_archive", {
+                "game_id": g.id, "label": g.label, "start_time": g.start_time,
+                "away": g.away.abbr, "home": g.home.abbr, "away_score": g.away.score, "home_score": g.home.score,
+                "by_quarter": {g.away.abbr: g.away.quarters, g.home.abbr: g.home.quarters},
+                "pregame_total": g.pregame_total, "closing_line": g.fanduel.total_line if g.fanduel else None,
+                "plays": g.plays, "context": ctx, "archived_at": now_iso(),
+            })
+            self._archived.add(g.id)
+            log.info("archived %s: %d plays", g.label, len(g.plays))
+
+    def archived_game(self, query: str) -> Optional[dict[str, Any]]:
+        """The most recent archived game whose label or game id matches, e.g. 'MEM' or 'GSW @ MEM'."""
+        like = f"%{query.strip()}%"
+        return self.db.one(
+            "SELECT * FROM game_archive WHERE label LIKE ? OR game_id = ? ORDER BY start_time DESC LIMIT 1", [like, query.strip()]
+        )
 
     def _grade_exit(self, row: dict[str, Any], final_total: float) -> None:
         """Once the market has settled, compare an early exit with what holding would have paid."""

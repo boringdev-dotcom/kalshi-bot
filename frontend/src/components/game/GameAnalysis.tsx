@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
-import { ArrowUp, RotateCw } from 'lucide-react'
+import clsx from 'clsx'
+import { ArrowUp, ChevronDown, RotateCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError, streamChat } from '../../api'
@@ -13,6 +14,8 @@ type Turn = { id: number; role: 'user' | 'assistant'; text: string; tools: Tool[
 
 // Each game's conversation survives moving between pages for this visit. It is also saved in Agent chat.
 const threads = new Map<string, Turn[]>()
+// Which games have the panel minimized, for this visit.
+const minimized = new Set<string>()
 let nextId = 1
 
 /**
@@ -29,10 +32,12 @@ export default function GameAnalysis({ game }: { game: Game }) {
   const [draftTools, setDraftTools] = useState<Tool[]>([])
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(() => !minimized.has(game.id))
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     setTurns(threads.get(game.id) ?? [])
+    setOpen(!minimized.has(game.id))
     setError(null)
     return () => abortRef.current?.abort()
   }, [game.id])
@@ -94,7 +99,18 @@ export default function GameAnalysis({ game }: { game: Game }) {
 
   const offline = anthropic === false
   const started = turns.length > 0 || streaming
-  const analyse = () => void ask(`Agent analysis: ${game.label}`, true)
+  const analyse = () => {
+    toggle(true)
+    void ask(`Agent analysis: ${game.label}`, true)
+  }
+  const toggle = (next: boolean) => {
+    setOpen(next)
+    if (next) minimized.delete(game.id)
+    else minimized.add(game.id)
+  }
+  const lastReply = [...turns].reverse().find((t) => t.role === 'assistant')?.text ?? ''
+  const preview = streaming ? (draft ? plain(draft) : 'Reading the game…') : plain(lastReply)
+  const collapsed = started && !open
   const send = () => {
     const t = input.trim()
     if (!t) return
@@ -108,8 +124,26 @@ export default function GameAnalysis({ game }: { game: Game }) {
         <AgentDot />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-white">Agent analysis</div>
+            <div className="min-w-0 flex-1">
+              {started ? (
+                <button
+                  onClick={() => toggle(!open)}
+                  className="flex w-full min-w-0 items-center gap-1.5 text-left"
+                  aria-expanded={open}
+                  title={open ? 'Minimize' : 'Expand'}
+                >
+                  <span className="text-sm font-semibold text-white">Agent analysis</span>
+                  <ChevronDown size={15} className={clsx('shrink-0 text-mute transition-transform', open && 'rotate-180')} />
+                </button>
+              ) : (
+                <div className="text-sm font-semibold text-white">Agent analysis</div>
+              )}
+              {collapsed && preview && (
+                <button onClick={() => toggle(true)} className="mt-0.5 block w-full truncate text-left text-[13px] text-mute hover:text-slate-300">
+                  {streaming && <Spinner size={11} className="mr-1.5 inline-block align-[-1px]" />}
+                  {preview}
+                </button>
+              )}
               {!started && (
                 <p className="mt-0.5 text-[13px] leading-snug text-mute">
                   {offline
@@ -126,7 +160,7 @@ export default function GameAnalysis({ game }: { game: Game }) {
               >
                 Analyse this game
               </button>
-            ) : (
+            ) : open ? (
               <button
                 onClick={analyse}
                 disabled={streaming || offline}
@@ -135,10 +169,10 @@ export default function GameAnalysis({ game }: { game: Game }) {
               >
                 <RotateCw size={13} /> Fresh read
               </button>
-            )}
+            ) : null}
           </div>
 
-          {started && (
+          {started && open && (
             <div className="mt-4 space-y-4">
               {turns.map((t) =>
                 t.role === 'user' ? (
@@ -219,4 +253,9 @@ export default function GameAnalysis({ game }: { game: Game }) {
       </div>
     </section>
   )
+}
+
+/** One line of the latest reply for the minimized panel: markdown stripped. */
+function plain(text: string): string {
+  return text.replace(/[*_`#>]+/g, '').replace(/\s+/g, ' ').trim()
 }

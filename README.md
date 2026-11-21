@@ -74,7 +74,9 @@ Every trade, yours and the agent's, saves the patterns that were showing when it
 
 ESPN does not say who is guarding whom, so one-on-one matchups are not covered.
 
-**Agent analysis.** The button under What's happening hands Claude a briefing on that game (score by quarter, the line from FanDuel and from Kalshi, the model's projections, everything in What's happening, the box score, each quarter's lines, the prices near the line, your positions there, results by pattern, and the memories that match) and asks for a thinking-partner read: where it is heading, what on the floor matters, how your positions look, where prices look off and the case against, and what to watch. Follow-up questions in the same panel carry a fresh briefing each time. The conversation is also saved in Agent chat. It never places orders unless you ask.
+**Agent analysis.** The button under What's happening hands Claude a briefing on that game (score by quarter, the line from FanDuel and from Kalshi, the model's projections, everything in What's happening, the box score, each quarter's lines, the prices near the line, your positions there, results by pattern, and the memories that match) plus every play of the game so far, from the tip (about 500 plays, roughly 9K tokens, for a full game), and asks for a thinking-partner read: where it is heading, what on the floor matters, how your positions look, where prices look off and the case against, and what to watch. Follow-up questions in the same panel carry a fresh briefing and play-by-play each time. The panel can be minimized to one line (the start of the latest reply). The conversation is also saved in Agent chat. It never places orders unless you ask.
+
+**Game archive.** Once a real game is final and its last play-by-play has been read, it is saved to the `game_archive` table: every play, the final box score, points by quarter, the pregame and closing lines. Practice games are not kept. Claude's `get_plays` tool reads any game's plays, on the board or archived, so you can ask about last night's game after it has left the board.
 
 ## How the agent works
 
