@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import clsx from 'clsx'
-import { Briefcase, ChevronDown, History } from 'lucide-react'
+import { Briefcase, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import { api, ApiError } from '../api'
 import { Badge, Button, Dialog, Empty, Segmented, SimTag, Skeleton, Stat, Ticker } from '../components/ui'
 import { cents, money, pct, pnlColor, relTime, segmentLabel, shortDate, tradeLabel } from '../format'
+import { soccerApi, usePoll, type SPosition } from '../soccer'
 import { useStore } from '../store'
 import type { LearningState, Position, Trade } from '../types'
 
@@ -90,6 +92,74 @@ function PositionRow({ p, onSell }: { p: Position; onSell: (p: Position) => void
         Sell
       </Button>
     </motion.li>
+  )
+}
+
+/* ───────────────────────── Soccer ───────────────────────── */
+
+/** Soccer keeps its own book; it is listed here so every open bet is in one place. Tap to manage it on its match page. */
+function SoccerRow({ p }: { p: SPosition }) {
+  return (
+    <li className="border-b border-hair last:border-b-0">
+      <Link to={`/soccer/${p.match_id}`} className="row row-hover group !border-b-0">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-white">
+            {p.label} <span className="font-normal text-mute">· {p.match_label}</span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-dim">
+            <span>
+              {p.contracts} at {cents(p.entry_price)}
+            </span>
+            <span>·</span>
+            <span>{relTime(p.opened_at)}</span>
+            {p.mode === 'live' && <Badge tone="coral">Live</Badge>}
+          </div>
+        </div>
+        <div className="hidden w-[200px] shrink-0 sm:block">
+          <div className="num text-[13px] text-slate-200">{p.p_win != null ? `${pct(p.p_win)} chance now` : ''}</div>
+        </div>
+        <div className="w-[96px] shrink-0 text-right">
+          <div className="num text-sm font-semibold text-white">{money(p.value)}</div>
+          <div className={clsx('num text-xs', pnlColor(p.pnl))}>{money(p.pnl, { sign: true })}</div>
+        </div>
+        <ChevronRight size={16} className="shrink-0 text-dim group-hover:text-white" />
+      </Link>
+    </li>
+  )
+}
+
+function SoccerPositions() {
+  const { data } = usePoll(soccerApi.board, 10000, 'portfolio-soccer')
+  if (!data) return null
+  const { positions, account } = data
+  const record = account.wins + account.losses
+  return (
+    <section className="mt-10">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="h-section">Soccer positions</h2>
+        <Link to="/soccer" className="text-[13px] text-mute hover:text-white">
+          Soccer desk
+        </Link>
+      </div>
+      <p className="hint mt-1">
+        Its own book: {money(account.exposure)} at risk
+        {record > 0 && (
+          <>
+            {' '}· settled <span className={clsx('num', pnlColor(account.pnl_total))}>{money(account.pnl_total, { sign: true })}</span> ({account.wins}W {account.losses}L)
+          </>
+        )}
+        .
+      </p>
+      {positions.length === 0 ? (
+        <p className="mt-3 text-[13px] text-dim">No soccer bets open.</p>
+      ) : (
+        <ul className="mt-2">
+          {positions.map((p) => (
+            <SoccerRow key={p.id} p={p} />
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -281,12 +351,12 @@ export default function Portfolio() {
       </div>
 
       <section className="mt-10">
-        <h2 className="h-section">Open positions</h2>
+        <h2 className="h-section">NBA positions</h2>
         {positions.length === 0 ? (
           <Empty
             icon={<Briefcase size={18} />}
             title="Nothing open right now"
-            body="Anything you or the agent buys shows up here with what it is worth and its chance of winning."
+            body="Any NBA bet you or the agent makes shows up here with what it is worth and its chance of winning."
           />
         ) : (
           <ul className="mt-2">
@@ -298,6 +368,8 @@ export default function Portfolio() {
           </ul>
         )}
       </section>
+
+      <SoccerPositions />
 
       <section className="mt-10">
         <div className="flex items-center justify-between gap-3">
