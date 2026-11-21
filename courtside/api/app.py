@@ -24,6 +24,7 @@ from ..config import Config, get_config
 from ..db import DB
 from ..domain import SEGMENTS, rung_dict
 from ..events import Hub
+from ..soccer.desk import SoccerDesk, SoccerTradeError
 
 log = logging.getLogger(__name__)
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -63,6 +64,13 @@ class MemoryPatch(BaseModel):
     importance: Optional[float] = Field(None, ge=0, le=1)
 
 
+class SoccerOrderBody(BaseModel):
+    ticker: str
+    side: str = Field(pattern="^(yes|no)$")
+    contracts: int = Field(ge=1, le=100000)
+    price: int = Field(ge=1, le=99)
+
+
 class ChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     # Talk about one game: a fresh briefing on it rides along with the message.
@@ -87,6 +95,8 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
     engine = Engine(cfg, db, hub)
     brain = Brain(cfg, engine)
     engine.brain = brain
+    soccer = SoccerDesk(cfg, db, engine)
+    brain.soccer = soccer
     background: set[asyncio.Task] = set()
 
     def spawn(coro) -> None:
@@ -97,13 +107,17 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         loop_task = asyncio.create_task(engine.run()) if start_engine else None
+        soccer_task = asyncio.create_task(soccer.run()) if start_engine else None
         yield
-        if loop_task:
-            loop_task.cancel()
+        for task in (loop_task, soccer_task):
+            if task:
+                task.cancel()
+        await soccer.aclose()
         await engine.aclose()
 
     app = FastAPI(title="Courtside", lifespan=lifespan)
     app.state.engine = engine
+    app.state.soccer = soccer
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -219,6 +233,36 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
             return await engine.manual_order(body.ticker, body.side, body.contracts, body.price)
         except TradeError as exc:
             raise guard(exc)
+
+    # ------------------------------------------------------------------ soccer
+    @app.get("/api/soccer")
+    async def soccer_board() -> dict[str, Any]:
+        return soccer.board()
+
+    @app.get("/api/soccer/matches/{match_id}")
+    async def soccer_match(match_id: str) -> dict[str, Any]:
+        match = soccer.by_id.get(match_id)
+        if match is None:
+            raise HTTPException(404, "No such match")
+        return soccer.detail(match)
+
+    @app.post("/api/soccer/orders")
+    async def soccer_order(body: SoccerOrderBody) -> dict[str, Any]:
+        try:
+            return await soccer.order(body.ticker, body.side, body.contracts, body.price)
+        except SoccerTradeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.post("/api/soccer/positions/{position_id}/close")
+    async def soccer_close(position_id: int) -> dict[str, Any]:
+        try:
+            return await soccer.close(position_id)
+        except SoccerTradeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.get("/api/soccer/trades")
+    async def soccer_trades(limit: int = 50) -> list[dict[str, Any]]:
+        return soccer.trades_api(min(max(limit, 1), 500))
 
     # ---------------------------------------------------------------- playbook
     @app.get("/api/playbook")

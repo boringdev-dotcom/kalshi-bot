@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import clsx from 'clsx'
-import { AlertTriangle, Bot, CheckCircle2, Info, LayoutGrid, Settings2, Wallet, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, Goal, Info, LayoutGrid, Settings2, Wallet, X, XCircle } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { money, pnlColor } from '../format'
@@ -9,7 +9,8 @@ import type { AgentStatus } from '../types'
 import { LiveDot, Spinner, Ticker } from './ui'
 
 const NAV = [
-  { to: '/', label: 'Markets', key: 'm', icon: LayoutGrid },
+  { to: '/', label: 'NBA', key: 'm', icon: LayoutGrid },
+  { to: '/soccer', label: 'Soccer', key: 'f', icon: Goal },
   { to: '/portfolio', label: 'Portfolio', key: 'p', icon: Wallet },
   { to: '/agent', label: 'Agent', key: 'a', icon: Bot },
   { to: '/settings', label: 'Settings', key: 's', icon: Settings2 },
@@ -73,7 +74,7 @@ function TabBar() {
   const { pathname } = useLocation()
   return (
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-hair bg-ink-950/95 backdrop-blur md:hidden">
-      <div className="grid h-16 grid-cols-4">
+      <div className="grid h-16 grid-cols-5">
         {NAV.map((n) => {
           const active = isActive(n.to, pathname)
           const Icon = n.icon
