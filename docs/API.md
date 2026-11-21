@@ -32,6 +32,7 @@ All shapes are defined in [`frontend/src/types.ts`](../frontend/src/types.ts).
 | POST | `/api/soccer/orders` | `{ ticker, side: "yes" \| "no", contracts, price }` | `SoccerPosition` (paper or live, by the site's trading mode) |
 | POST | `/api/soccer/positions/{id}/close` | | `SoccerTrade` (sold at the bid) |
 | GET | `/api/soccer/trades?limit=50` | | `SoccerTrade[]` (newest first) |
+| POST | `/api/favs` | `{ game_id }` (an NBA game id or a soccer match id) | `{ game, generated_at, summary, picks: [{ ticker, side, label, where, ask, confidence, model_p, edge, reason }], candidates, dropped }`: picks are 0.85-0.90 confidence with ask below it |
 | GET | `/api/chat/history` | | `ChatMessage[]` (oldest first) |
 | POST | `/api/chat` | `{ message: string, game_id?: string, analysis?: boolean }` (with `game_id`, a fresh briefing on that game and its full play-by-play go to Claude with the message; a soccer match id (`soccer-…`) sends the match briefing and its commentary instead; `analysis` asks for a full read) | SSE stream of `ChatEvent` |
 | DELETE | `/api/chat/history` | | `{ ok: true }` |

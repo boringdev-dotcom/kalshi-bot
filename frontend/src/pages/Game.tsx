@@ -17,7 +17,7 @@ import { Button, Dialog, Empty, LiveDot, Segmented, Skeleton } from '../componen
 import { cents, mmss, money, pct, periodLabel, pnlColor, tradeLabel } from '../format'
 import { bidOf, fee, gameLine, impliedLine, impliedSpread, marginText, quarterNumber, spreadWinZone, useGameDetail, useMediaQuery, type Pick } from '../lib'
 import { useStore } from '../store'
-import type { Game, LadderRung, Position, QuarterSummary, Segment } from '../types'
+import type { Game, LadderRung, Position, QuarterSummary, Segment, Side } from '../types'
 
 const SEGMENTS: Segment[] = ['game', 'q1', 'q2', 'q3', 'q4']
 
@@ -331,7 +331,7 @@ export default function GamePage() {
 
           <OnTheFloor game={game} players={detail?.players ?? null} />
 
-          {game.state !== 'final' && <GameAnalysis game={game} />}
+          {game.state !== 'final' && <GameAnalysis game={game} onPickFav={(ticker, side) => setPick({ ticker, side: side as Side })} />}
 
           {!desktop && <Holdings positions={positions} rungs={allRungs} />}
 

@@ -32,6 +32,11 @@ EASTERN = ZoneInfo("America/New_York")
 ABBR_FIX = {"GS": "GSW", "NY": "NYK", "SA": "SAS", "NO": "NOP", "UTAH": "UTA", "WSH": "WAS"}
 
 
+def redact(text: str) -> str:
+    """Keep API keys out of logs and the status line (httpx errors quote the full URL)."""
+    return re.sub(r"(api[_-]?key=)[^&\s']+", r"\1REDACTED", text, flags=re.IGNORECASE)
+
+
 def _status(ok: bool, detail: str) -> dict[str, Any]:
     return {"ok": ok, "detail": detail, "updated_at": now_iso()}
 
@@ -129,8 +134,11 @@ class LiveFeed:
             detail = await fn()
             self.status[name] = _status(True, detail)
         except Exception as exc:  # a feed outage must never take the loop down
-            log.warning("%s feed failed: %s", name, exc)
-            self.status[name] = _status(False, f"{type(exc).__name__}: {exc}"[:200])
+            text = redact(str(exc))
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401 and name == "fanduel":
+                text = "The Odds API refused the key (401): it is invalid or out of credits. Showing ESPN's line instead."
+            log.warning("%s feed failed: %s", name, text)
+            self.status[name] = _status(False, f"{type(exc).__name__}: {text}"[:200])
 
     # -- ESPN ---------------------------------------------------------------
     async def _refresh_scores(self) -> str:

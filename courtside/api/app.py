@@ -71,6 +71,10 @@ class SoccerOrderBody(BaseModel):
     price: int = Field(ge=1, le=99)
 
 
+class FavsBody(BaseModel):
+    game_id: str
+
+
 class ChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     # Talk about one game: a fresh briefing on it rides along with the message.
@@ -327,6 +331,17 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
     async def chat_clear() -> dict[str, bool]:
         db.execute("DELETE FROM chat")
         return {"ok": True}
+
+    @app.post("/api/favs")
+    async def favs(body: FavsBody) -> dict[str, Any]:
+        """The agent's favourite bets on one game or match: 85-90% confidence, priced below it."""
+        try:
+            return await brain.favs(body.game_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except Exception as exc:
+            log.exception("favs failed")
+            raise HTTPException(502, f"The agent could not pick right now: {type(exc).__name__}")
 
     @app.post("/api/chat")
     async def chat(body: ChatBody) -> StreamingResponse:

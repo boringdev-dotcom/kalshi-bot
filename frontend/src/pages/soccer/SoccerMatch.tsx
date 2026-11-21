@@ -306,7 +306,7 @@ export default function SoccerMatch() {
             <GameAnalysis
               game={{ id: m.id, label: m.label, state: m.state }}
               noun="match"
-              blurb="Its read on this match: the run of play, the prices, your positions, and what to watch. Then talk it through."
+              onPickFav={(ticker, side) => setPick({ ticker, side: side as SSide })}
             />
           )}
 

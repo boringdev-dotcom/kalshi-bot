@@ -806,3 +806,10 @@ def test_finished_games_are_archived_with_every_play():
     engine.games = [game]
     engine._archive_finished()
     assert len(engine.db.query("SELECT * FROM game_archive")) == 1
+
+
+def test_feed_errors_never_show_the_odds_api_key():
+    from courtside.feeds.live import redact
+
+    text = "Client error '401 Unauthorized' for url 'https://api.the-odds-api.com/v4/x?apiKey=abc123secret&regions=us'"
+    assert "abc123secret" not in redact(text) and "apiKey=REDACTED&regions=us" in redact(text)
