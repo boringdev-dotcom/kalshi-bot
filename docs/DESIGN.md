@@ -43,7 +43,9 @@ Top navigation bar (no side rail): **Markets · Portfolio · Agent · Settings**
 
 | Route | Page | Job |
 |---|---|---|
-| `/` | Markets | Tonight's games as simple cards: score, clock, the line, the projection. Agent one-liner on top. |
+| `/` | NBA | Tonight's games as simple cards: score, clock, the line, the projection. Agent one-liner on top. |
+| `/soccer` | Soccer | Its own account strip (paper cash, open P&L, settled record), league filter, matches grouped Live now / by day / Finished. Each card: crests, score and minute, Kalshi's home/draw/away prices with the model's chance under each, the goal line. Polls every 5s; no socket. |
+| `/soccer/:id` | Soccer match | Scoreboard with crests, Agent analysis, Full match / 1st half markets (Who wins, Total goals, Winning margin) as Yes/No price pairs with the model's chance, your positions with Sell, What's happening (stat bars, goals and cards, commentary). Order panel on the right; a bottom sheet on phones. |
 | `/game/:id` | Game | Scoreboard, Agent analysis (minimizable to one line), What's happening (patterns in sentences, team fouls, who is on the floor, box score), the line bar (or spread bar), markets list (Game total / Q1-Q4, Total / Spread), a chart of how the selected market has moved (game total, quarter total or quarter margin), sticky order panel on the right. |
 | `/portfolio` | Portfolio | Big account value and chart, open positions as rows, history. |
 | `/agent` | Agent | Tabs: Activity (what it did, in sentences, plus chat) · Rules · Memory · Learning. |

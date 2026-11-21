@@ -11,6 +11,7 @@ Courtside thinks in under/over, so `side_and_price` does the translation.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 import uuid
@@ -22,6 +23,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 API_PREFIX = "/trade-api/v2"
 PUBLIC_HOST = "https://api.elections.kalshi.com"
+READS_PER_SECOND = 8.0  # Kalshi turns away bursts of reads past about a dozen at once
 NBA_TOTAL_SERIES = "KXNBATOTAL"
 
 
@@ -82,6 +84,8 @@ class KalshiClient:
         self.host = host.rstrip("/")
         self._key = load_private_key(private_key_pem) if private_key_pem.strip() else None
         self._http = httpx.AsyncClient(timeout=15.0)
+        self._read_lock = asyncio.Lock()
+        self._next_read = 0.0
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -116,13 +120,28 @@ class KalshiClient:
         host: Optional[str] = None,
     ) -> dict[str, Any]:
         full = API_PREFIX + path
-        headers = self._headers(method, full) if signed else {}
-        resp = await self._http.request(
-            method, (host or self.host) + full, params=params, json=body, headers=headers
-        )
+        for attempt in range(2):
+            if method == "GET":
+                await self._pace()
+            headers = self._headers(method, full) if signed else {}
+            resp = await self._http.request(
+                method, (host or self.host) + full, params=params, json=body, headers=headers
+            )
+            if resp.status_code != 429 or method != "GET" or attempt:
+                break
+            await asyncio.sleep(1.0)  # turned away for going too fast: wait, then once more
         if resp.status_code >= 400:
             raise KalshiError(f"Kalshi {method} {path} -> {resp.status_code}: {resp.text[:300]}")
         return resp.json() if resp.content else {}
+
+    async def _pace(self) -> None:
+        """Space reads out evenly. The NBA and soccer desks share this client and Kalshi's limit."""
+        async with self._read_lock:
+            now = time.monotonic()
+            wait = self._next_read - now
+            self._next_read = max(now, self._next_read) + 1.0 / READS_PER_SECOND
+        if wait > 0:
+            await asyncio.sleep(wait)
 
     # -- public market data (always from production: real prices) ------------
     async def nba_total_events(self) -> list[dict[str, Any]]:

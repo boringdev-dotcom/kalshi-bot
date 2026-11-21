@@ -16,6 +16,9 @@ type Turn = { id: number; role: 'user' | 'assistant'; text: string; tools: Tool[
 const threads = new Map<string, Turn[]>()
 // Which games have the panel minimized, for this visit.
 const minimized = new Set<string>()
+// When each game last got a full read. Opening a live game asks for a fresh one if this is stale.
+const lastRead = new Map<string, number>()
+const AUTO_EVERY_MS = 5 * 60_000
 let nextId = 1
 
 /**
@@ -24,7 +27,7 @@ let nextId = 1
  * your positions here, how trades have gone by pattern). Then a follow-up box to think it
  * through together.
  */
-export default function GameAnalysis({ game }: { game: Game }) {
+export default function GameAnalysis({ game, blurb, noun = 'game' }: { game: Pick<Game, 'id' | 'label' | 'state'>; blurb?: string; noun?: string }) {
   const anthropic = useStore((s) => s.app?.health.anthropic)
   const [turns, setTurns] = useState<Turn[]>(() => threads.get(game.id) ?? [])
   const [streaming, setStreaming] = useState(false)
@@ -77,6 +80,7 @@ export default function GameAnalysis({ game }: { game: Game }) {
               setDraftTools([...tools])
             } else if (ev.type === 'done') {
               done = true
+              if (analysis) lastRead.set(game.id, Date.now())
               push({ id: nextId++, role: 'assistant', text: ev.message.text, tools })
             } else if (ev.type === 'error') {
               setError(ev.message)
@@ -97,12 +101,23 @@ export default function GameAnalysis({ game }: { game: Game }) {
     [streaming, push, game.id],
   )
 
+  // Opening a live game starts a read by itself, unless one finished in the last few minutes.
+  const autoRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    if (game.state !== 'live' || anthropic !== true) return
+    if (Date.now() - (lastRead.get(game.id) ?? 0) < AUTO_EVERY_MS) return
+    // A short wait that is cancelled on unmount, so a quick remount (or passing through) starts one read, not two.
+    const t = window.setTimeout(() => autoRef.current(), 400)
+    return () => window.clearTimeout(t)
+  }, [game.id, game.state, anthropic])
+
   const offline = anthropic === false
   const started = turns.length > 0 || streaming
   const analyse = () => {
     toggle(true)
     void ask(`Agent analysis: ${game.label}`, true)
   }
+  autoRef.current = analyse
   const toggle = (next: boolean) => {
     setOpen(next)
     if (next) minimized.delete(game.id)
@@ -148,7 +163,7 @@ export default function GameAnalysis({ game }: { game: Game }) {
                 <p className="mt-0.5 text-[13px] leading-snug text-mute">
                   {offline
                     ? 'Needs Claude: add an ANTHROPIC_API_KEY to the server.'
-                    : 'Its read on this game: the line, the floor, your positions, and what to watch. Then talk it through.'}
+                    : (blurb ?? 'Its read on this game: the line, the floor, your positions, and what to watch. Then talk it through.')}
                 </p>
               )}
             </div>
@@ -158,7 +173,7 @@ export default function GameAnalysis({ game }: { game: Game }) {
                 disabled={offline}
                 className="min-h-[40px] shrink-0 rounded-full bg-white px-4 text-sm font-semibold text-ink-950 transition-colors hover:bg-slate-200 disabled:bg-white/[0.08] disabled:text-dim"
               >
-                Analyse this game
+                Analyse this {noun}
               </button>
             ) : open ? (
               <button

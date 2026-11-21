@@ -149,6 +149,35 @@ CREATE TABLE IF NOT EXISTS game_archive (
 );
 CREATE INDEX IF NOT EXISTS idx_game_archive_start ON game_archive(start_time);
 
+-- Soccer trades, kept apart from the NBA book. side is 'yes' or 'no'.
+CREATE TABLE IF NOT EXISTS soccer_positions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id TEXT NOT NULL,
+  match_label TEXT NOT NULL,
+  league TEXT NOT NULL,
+  ticker TEXT NOT NULL,
+  segment TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  outcome TEXT,
+  strike REAL,
+  side TEXT NOT NULL,
+  label TEXT NOT NULL,
+  contracts INTEGER NOT NULL,
+  entry_price INTEGER NOT NULL,
+  cost REAL NOT NULL,
+  fees REAL NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  exit_price INTEGER,
+  exit_reason TEXT,
+  pnl REAL,
+  p_entry REAL,
+  context TEXT,
+  opened_at TEXT NOT NULL,
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_soccer_positions_status ON soccer_positions(status, mode);
+
 CREATE TABLE IF NOT EXISTS equity (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL,

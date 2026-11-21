@@ -78,7 +78,7 @@ function story(game: Game, segment: Segment, kind: 'total' | 'spread', line: num
 }
 
 /** Phones: the order panel slides up from the bottom when a price is tapped. */
-function OrderSheet({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+export function OrderSheet({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
   // Drag down from the handle to dismiss. Only the handle starts a drag, so the order form scrolls normally.
   const drag = useDragControls()
   useEffect(() => {
@@ -310,7 +310,7 @@ export default function GamePage() {
     <div className="page">
       <div className="mb-5 flex items-center gap-3 sm:gap-4">
         <Link to="/" className="flex shrink-0 items-center gap-1.5 text-sm text-mute hover:text-white" aria-label="Back to markets">
-          <ArrowLeft size={15} /> <span className="hidden sm:inline">Markets</span>
+          <ArrowLeft size={15} /> <span className="hidden sm:inline">NBA</span>
         </Link>
         <GameSwitcher games={games} current={game.id} />
       </div>

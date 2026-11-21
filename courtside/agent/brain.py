@@ -42,6 +42,7 @@ How the desk works
 - A learner tracks results by situation (cushion, time left, how close the game is) and by exit style, and shifts behaviour toward what has actually made money.
 - Memory holds the owner's standing guidance, lessons from past trades, and a record of each trade.
 - Each game also carries what is happening on the floor, read from ESPN's play-by-play (made-up players in practice games): who is on the court, team fouls and who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts and droughts, benches in, and who is out tonight. get_games has the headline notes; get_players has the full box; get_plays has every play of a game, live or finished (finished real games are archived with their play-by-play and box score, so you can go back to them). Every trade, the owner's and the agent's, saves the patterns that were showing when it was placed, and get_learning groups results by pattern. The owner trades partly so the agent can learn from their reads: when they ask what to make of a pattern, answer from that record and the game in front of them.
+- A separate soccer desk covers Europe's top five leagues (Premier League, LaLiga, Serie A, Bundesliga, Ligue 1): match winner (home / draw / away), total goals, goal spreads, and the same three for the first half. The owner trades soccer by hand only; the automated loop never touches it, and it has its own positions and P&L. A Poisson goals model, fitted before kickoff to the bookmaker's odds (or Kalshi's own prices), prices every line in play from the score, the minute and red cards. get_soccer lists the board or briefs one match. In soccer market data "yes" is the outcome named and "no" is everything else.
 - Quarter markets (total and spread for each of Q1-Q4; Q4 excludes overtime) are the owner's to trade by hand. The automated loop places no orders there. It keeps a shadow book instead: early in each quarter and again with about six minutes left it records what every quarter market cost and what the model thought, then scores them when the quarter ends. get_learning returns that book and the owner's own quarter record. If they ask whether to let the agent trade quarters, answer from those numbers and say plainly when there are too few to judge. In market data "over" always means the YES side and "under" the NO side; for a spread, YES is the named team winning the quarter by more than the line. Use the labels the tools give you.
 
 Your tools read and change that real system. Use them: never state a position, price, result or setting from memory of this conversation when a tool can tell you the current truth. The desk snapshot at the top of each message is fresh as of that message.
@@ -64,6 +65,16 @@ ANALYSIS_ASK = """The owner pressed "Agent analysis" on this game. Be their thin
 3. If they hold positions in this game, how each one looks now and what would make you want out.
 4. Where prices look off to you against the model and what is happening on the floor, if anywhere, with the numbers, and the best case against your view. If nothing looks off, say so.
 5. What to watch over the next few minutes that would change the read.
+
+Keep it tight: short paragraphs or a few bullets, real numbers, no boilerplate caveats. End with one question back to them if their read would sharpen yours. Do not place or close any orders unless they ask."""
+
+SOCCER_ANALYSIS_ASK = """The owner pressed "Agent analysis" on this soccer match. Be their thinking partner, not a signal service. Use the match briefing and the full commentary above (fresh as of now); call tools only if something is missing.
+
+1. Lead with your read in one or two sentences: how the match is likely to finish (result and goals) against what Kalshi is pricing, and how sure you are.
+2. What in the play matters and which way it pushes: who is on top (shots, shots on target, possession, corners), chances in the commentary, cards and a red card's effect, substitutions, a team chasing the game, the minute. Say plainly what you know and what you are inferring.
+3. If they hold positions in this match, how each one looks now and what would make you want out.
+4. Where prices look off to you against the model and the run of play, with the numbers, and the best case against your view. Remember the model only knows the score, the minute, red cards and the pre-match odds; it does not see who is dominating. If nothing looks off, say so.
+5. What to watch over the next ten minutes that would change the read.
 
 Keep it tight: short paragraphs or a few bullets, real numbers, no boilerplate caveats. End with one question back to them if their read would sharpen yours. Do not place or close any orders unless they ask."""
 
@@ -131,6 +142,8 @@ TOOLS = [
           {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"},
            "quarter": {"type": "integer", "description": "Optional: only this period (5 = first overtime)"}},
           ["game"]),
+    _tool("get_soccer", "The soccer desk: with no match, every match on the board (league, score, minute, Kalshi winner prices and the model's result probabilities); with a match, its full briefing (stats, goals and cards, every Kalshi line with the model's probability, positions).",
+          {"match": {"type": "string", "description": "Optional team name or match label, e.g. 'Arsenal' or 'Newcastle vs Arsenal'"}}),
     _tool("get_positions", "Open positions with live mark, P&L, current win probability and risk flags."),
     _tool("get_trades", "Closed trades, newest first, with exit reason and (for early exits on finished games) whether selling beat holding.",
           {"limit": {"type": "integer", "description": "How many, default 20"}}),
@@ -192,6 +205,7 @@ class Brain:
     def __init__(self, cfg: Config, engine: Any):
         self.cfg = cfg
         self.engine = engine
+        self.soccer: Any = None  # the soccer desk, attached by the app
         self.client: Optional[anthropic.AsyncAnthropic] = None
         if cfg.has_claude:
             self.client = anthropic.AsyncAnthropic(
@@ -373,7 +387,14 @@ class Brain:
             db.insert("chat", {"role": "user", "text": message, "ts": now_iso(), "tools": []})
             messages: list[dict[str, Any]] = [{"role": m["role"], "content": m["text"]} for m in prior if m["text"]]
             game = self.engine.by_id.get(game_id) if game_id else None
+            match = self.soccer.by_id.get(game_id) if (game_id and self.soccer is not None) else None
             parts = [self._snapshot()]
+            if match is not None:
+                parts.append(f"[soccer match briefing: {match.label}]\n{json.dumps(self.soccer.briefing(match), default=str)}")
+                if match.commentary:
+                    parts.append(f"[commentary: {match.label}, all {len(match.commentary)} lines so far, oldest first]\n{self.soccer.commentary_text(match)}")
+                if analysis:
+                    parts.append(SOCCER_ANALYSIS_ASK)
             if game is not None:
                 parts.append(f"[game briefing: {game.label}]\n{json.dumps(self.game_briefing(game), default=str)}")
                 if game.plays:
@@ -547,6 +568,27 @@ class Brain:
         n = text.count("\n") + 1 if text else 0
         where = f"Q{quarter}" if quarter and quarter <= 4 else f"OT{quarter - 4}" if quarter else "the game"
         return f"read {n} plays from {where} in {label}", {"game": label, "source": source, "score_order": f"{away}-{home}", "plays": text}
+
+    async def _t_get_soccer(self, match: str = "") -> tuple[str, Any]:
+        desk = self.soccer
+        if desk is None:
+            raise ValueError("The soccer desk is not running")
+        if match:
+            found = desk.find(match)
+            if found is None:
+                raise ValueError(f"No soccer match matching '{match}'")
+            return f"briefed on {found.label}", desk.briefing(found)
+        rows = []
+        for m in desk.matches:
+            card = desk.card(m)
+            rows.append({
+                "match": m.label, "league": card["league_name"], "state": m.state, "minute": m.clock, "kickoff": m.start_time,
+                "score": f"{m.home.score}-{m.away.score}",
+                "winner_yes_asks": {k: v["yes_ask"] for k, v in (card["winner"] or {}).items()},
+                "kalshi_total_line": card["total_line"],
+                "model": (m.projection or {}).get("match"),
+            })
+        return f"looked at {len(rows)} soccer matches", rows
 
     async def _t_get_positions(self) -> tuple[str, Any]:
         rows = self.engine.positions_api()

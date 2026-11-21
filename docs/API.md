@@ -27,8 +27,13 @@ All shapes are defined in [`frontend/src/types.ts`](../frontend/src/types.ts).
 | GET | `/api/learning` | | `LearningState` |
 | POST | `/api/sim/train` | `{ episodes: number }` | `TrainResult` |
 | POST | `/api/sim/reset` | | `AppState` (new slate of simulated games) |
+| GET | `/api/soccer` | | `{ leagues, matches: SoccerMatch[], account, positions, feeds, updated_at }` |
+| GET | `/api/soccer/matches/{id}` | | `{ match, markets, first_half_line, events, stats, commentary, prior, positions, account }` |
+| POST | `/api/soccer/orders` | `{ ticker, side: "yes" \| "no", contracts, price }` | `SoccerPosition` (paper or live, by the site's trading mode) |
+| POST | `/api/soccer/positions/{id}/close` | | `SoccerTrade` (sold at the bid) |
+| GET | `/api/soccer/trades?limit=50` | | `SoccerTrade[]` (newest first) |
 | GET | `/api/chat/history` | | `ChatMessage[]` (oldest first) |
-| POST | `/api/chat` | `{ message: string, game_id?: string, analysis?: boolean }` (with `game_id`, a fresh briefing on that game and its full play-by-play go to Claude with the message; `analysis` asks for a full read) | SSE stream of `ChatEvent` |
+| POST | `/api/chat` | `{ message: string, game_id?: string, analysis?: boolean }` (with `game_id`, a fresh briefing on that game and its full play-by-play go to Claude with the message; a soccer match id (`soccer-…`) sends the match briefing and its commentary instead; `analysis` asks for a full read) | SSE stream of `ChatEvent` |
 | DELETE | `/api/chat/history` | | `{ ok: true }` |
 
 Errors are `{ "detail": string }` with a 4xx/5xx status.

@@ -168,7 +168,7 @@ export default function Markets() {
 
   return (
     <div className="page">
-      <h1 className="h-page">Markets</h1>
+      <h1 className="h-page">NBA</h1>
       <p className="hint mb-6 mt-1">
         {practice ? 'These are practice games with made-up scores and prices. Switch to real games in Settings.' : "Tonight's NBA games and their total-points markets on Kalshi."}
       </p>
