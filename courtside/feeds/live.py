@@ -215,6 +215,7 @@ class LiveFeed:
             resp.raise_for_status()
             snap = parse_espn(resp.json(), ABBR_FIX)
             game.context = build_context(game, snap)
+            game.plays = snap.plays
             if game.state == "final":
                 game.context["final"] = True
         except Exception as exc:  # patterns are a nice-to-have; keep the last good ones

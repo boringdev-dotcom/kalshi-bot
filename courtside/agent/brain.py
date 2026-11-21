@@ -23,7 +23,7 @@ import anthropic
 
 from ..config import Config
 from ..domain import Game, now_iso
-from ..feeds.patterns import pattern_keys, pattern_texts
+from ..feeds.patterns import pattern_keys, pattern_texts, play_lines
 from ..model.quarters import implied_margin, implied_quarter_total
 from ..model.totals import implied_total
 from .playbook import Q4_UNDER, STRATEGIES
@@ -41,7 +41,7 @@ How the desk works
 - A playbook holds the tunable parameters for that play. An automated loop applies them every second or two: it enters, monitors, exits and settles without you.
 - A learner tracks results by situation (cushion, time left, how close the game is) and by exit style, and shifts behaviour toward what has actually made money.
 - Memory holds the owner's standing guidance, lessons from past trades, and a record of each trade.
-- Each game also carries what is happening on the floor, read from ESPN's play-by-play (made-up players in practice games): who is on the court, team fouls and who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts and droughts, benches in, and who is out tonight. get_games has the headline notes; get_players has the full box. Every trade, the owner's and the agent's, saves the patterns that were showing when it was placed, and get_learning groups results by pattern. The owner trades partly so the agent can learn from their reads: when they ask what to make of a pattern, answer from that record and the game in front of them.
+- Each game also carries what is happening on the floor, read from ESPN's play-by-play (made-up players in practice games): who is on the court, team fouls and who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts and droughts, benches in, and who is out tonight. get_games has the headline notes; get_players has the full box; get_plays has every play of a game, live or finished (finished real games are archived with their play-by-play and box score, so you can go back to them). Every trade, the owner's and the agent's, saves the patterns that were showing when it was placed, and get_learning groups results by pattern. The owner trades partly so the agent can learn from their reads: when they ask what to make of a pattern, answer from that record and the game in front of them.
 - Quarter markets (total and spread for each of Q1-Q4; Q4 excludes overtime) are the owner's to trade by hand. The automated loop places no orders there. It keeps a shadow book instead: early in each quarter and again with about six minutes left it records what every quarter market cost and what the model thought, then scores them when the quarter ends. get_learning returns that book and the owner's own quarter record. If they ask whether to let the agent trade quarters, answer from those numbers and say plainly when there are too few to judge. In market data "over" always means the YES side and "under" the NO side; for a spread, YES is the named team winning the quarter by more than the line. Use the labels the tools give you.
 
 Your tools read and change that real system. Use them: never state a position, price, result or setting from memory of this conversation when a tool can tell you the current truth. The desk snapshot at the top of each message is fresh as of that message.
@@ -57,7 +57,7 @@ You can place and close orders when asked. Check the trading mode first: in live
 
 Be direct and concrete. Lead with the answer. Use the actual numbers. Say when the sample is too small to conclude anything; a handful of trades proves nothing either way, and simulated results say nothing about real markets. Keep replies short unless they ask for depth. Plain text with light markdown; no headers for short answers."""
 
-ANALYSIS_ASK = """The owner pressed "Agent analysis" on this game. Be their thinking partner, not a signal service. Use the game briefing above (fresh as of now); call tools only if something is missing.
+ANALYSIS_ASK = """The owner pressed "Agent analysis" on this game. Be their thinking partner, not a signal service. Use the game briefing and the full play-by-play above (fresh as of now); call tools only if something is missing. Read the plays, not just the summary numbers: who is getting the ball, how the scoring is coming (threes, free throws, the paint), turnovers, how each team has answered runs, who has been subbed in and why. Patterns the summary does not name are often the useful ones.
 
 1. Lead with your read in one or two sentences: where the full-game total, and the quarter in play, look to be heading against the line, and how sure you are.
 2. What on the floor matters right now and which way it pushes scoring: the bonus, foul trouble, who is on or off, runs, pace, a close finish. Say plainly what you know and what you are inferring.
@@ -126,6 +126,10 @@ TOOLS = [
           ["game", "quarter"]),
     _tool("get_players", "Who is on the floor for one game and every player's line so far: minutes, points, shooting, fouls, plus-minus, plus team fouls this quarter and who is in the bonus.",
           {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"}},
+          ["game"]),
+    _tool("get_plays", "Every play of one game, oldest first, one per line with quarter, clock, team and the away-home score after the play. Works for games on the board and for finished real games in the archive (the most recent game matching).",
+          {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"},
+           "quarter": {"type": "integer", "description": "Optional: only this period (5 = first overtime)"}},
           ["game"]),
     _tool("get_positions", "Open positions with live mark, P&L, current win probability and risk flags."),
     _tool("get_trades", "Closed trades, newest first, with exit reason and (for early exits on finished games) whether selling beat holding.",
@@ -372,6 +376,11 @@ class Brain:
             parts = [self._snapshot()]
             if game is not None:
                 parts.append(f"[game briefing: {game.label}]\n{json.dumps(self.game_briefing(game), default=str)}")
+                if game.plays:
+                    parts.append(
+                        f"[play-by-play: {game.label}, all {len(game.plays)} plays so far, oldest first; "
+                        f"score after each play is {game.away.abbr}-{game.home.abbr}]\n{play_lines(game.plays)}"
+                    )
             if game is not None and analysis:
                 parts.append(ANALYSIS_ASK)
             parts.append(message)
@@ -522,6 +531,22 @@ class Brain:
             "game": found.label, "teams": ctx.get("teams"), "notes": [n["text"] for n in ctx.get("notes", [])],
             "out_tonight": ctx.get("out"), "players": players,
         }
+
+    async def _t_get_plays(self, game: str, quarter: Optional[int] = None) -> tuple[str, Any]:
+        found = next((g for g in self.engine.games if game.lower() in g.label.lower()), None)
+        if found is not None and found.plays:
+            label, away, home, plays, source = found.label, found.away.abbr, found.home.abbr, found.plays, "live board"
+        else:
+            row = self.engine.archived_game(game)
+            if row is None:
+                if found is not None:
+                    return f"no plays yet for {found.label}", {"game": found.label, "plays": ""}
+                raise ValueError(f"No game matching '{game}' on the board or in the archive")
+            label, away, home, plays, source = row["label"], row["away"], row["home"], row["plays"], f"archive ({row['start_time'][:10]})"
+        text = play_lines(plays, quarter)
+        n = text.count("\n") + 1 if text else 0
+        where = f"Q{quarter}" if quarter and quarter <= 4 else f"OT{quarter - 4}" if quarter else "the game"
+        return f"read {n} plays from {where} in {label}", {"game": label, "source": source, "score_order": f"{away}-{home}", "plays": text}
 
     async def _t_get_positions(self) -> tuple[str, Any]:
         rows = self.engine.positions_api()

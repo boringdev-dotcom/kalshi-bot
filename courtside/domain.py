@@ -135,6 +135,8 @@ class Game:
     simulated: bool = False
     # What is happening on the floor (players, fouls, runs). See feeds/patterns.py.
     context: Optional[dict[str, Any]] = None
+    # Every play so far (see patterns.play_lines). For the agent and the archive, not sent to the UI.
+    plays: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -247,7 +249,12 @@ class Game:
         return float(home - away) if team == self.home.abbr else float(away - home)
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
+        plays, self.plays = self.plays, []  # do not deep-copy hundreds of plays every tick
+        try:
+            d = asdict(self)
+        finally:
+            self.plays = plays
+        d.pop("plays")
         d.pop("clock_seconds")
         d.pop("quarter_markets")  # heavy: served with the game detail, not on every tick
         d["quarters"] = d.pop("quarter_view")

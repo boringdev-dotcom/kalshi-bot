@@ -73,6 +73,8 @@ class Snapshot:
     out: list[tuple[str, str]] = field(default_factory=list)
     ejected: list[str] = field(default_factory=list)
     source: str = "espn"
+    # Every play, oldest first: {period, clock, team, text, away, home, points} (scores after the play).
+    plays: list[dict[str, Any]] = field(default_factory=list)
 
 
 def elapsed_at(period: int, clock: float) -> float:
@@ -236,6 +238,20 @@ def pattern_texts(game: Game, limit: int = 6) -> list[str]:
 FOUL_EXCLUDE = ("offensive", "technical", "double")
 
 
+def play_lines(plays: list[dict[str, Any]], period: Optional[int] = None) -> str:
+    """The play-by-play as compact text, one play per line: 'Q4 5:32 MEM 88-90 Ja Morant makes ...'.
+
+    The score is away-home after the play.
+    """
+    lines = []
+    for p in plays:
+        if period is not None and p["period"] != period:
+            continue
+        per = f"Q{p['period']}" if p["period"] <= 4 else f"OT{p['period'] - 4}"
+        lines.append(f"{per} {p['clock']} {p['team'] or '-'} {p['away']}-{p['home']} {p['text']}")
+    return "\n".join(lines)
+
+
 def parse_espn(data: dict[str, Any], fix_abbr: dict[str, str]) -> Snapshot:
     """ESPN's game summary -> Snapshot. Who is on the floor: the starters, then every substitution."""
     fix = lambda a: fix_abbr.get(a, a)  # noqa: E731
@@ -286,6 +302,15 @@ def parse_espn(data: dict[str, Any], fix_abbr: dict[str, str]) -> Snapshot:
                 on[entering.team].add(entering.id)
         elif "Foul" in kind and team and not any(x in kind.lower() for x in FOUL_EXCLUDE):
             snap.fouls.append((team, period, clock))
+        snap.plays.append({
+            "period": period,
+            "clock": ((play.get("clock") or {}).get("displayValue")) or "",
+            "team": team,
+            "text": " ".join(text.split()) or " ".join(kind.split()),
+            "away": int(play.get("awayScore") or 0),
+            "home": int(play.get("homeScore") or 0),
+            "points": int(play.get("scoreValue") or 0) if play.get("scoringPlay") else 0,
+        })
         if play.get("scoringPlay") and team:
             snap.scoring.append((elapsed_at(period, clock), team, int(play.get("scoreValue") or 0)))
         if "ejected" in text.lower() and parts and parts[0] in by_id:

@@ -309,6 +309,8 @@ def test_espn_patterns_track_the_floor_fouls_and_runs():
     assert on == {"h0", "h2", "h3", "h4", "h5", "a0", "a1", "a2", "a3", "a4"}  # h1 subbed out for h5
     assert [f[0] for f in snap.fouls] == ["NYK"] * 4  # the offensive foul is not a team foul
     assert snap.out == [("NYK", "Hurt Guy")]
+    assert len(snap.plays) == 12 and snap.plays[0]["team"] == "CLE" and snap.plays[0]["clock"] == "11:00"
+    assert sum(p["points"] for p in snap.plays) == 12
 
     game = Game(id="g", home=Team("CLE", "Cavaliers", 90), away=Team("NYK", "Knicks", 80),
                 state="live", period=4, clock_seconds=480.0, clock="8:00")
@@ -420,6 +422,8 @@ def test_game_briefing_carries_everything_for_an_analysis():
     events = asyncio.run(ask())
     assert events[-1]["type"] == "done"
     assert f"[game briefing: {game.label}]" in sent[0] and "Agent analysis" in sent[0] and sent[0].endswith("Your read?")
+    assert game.plays and f"[play-by-play: {game.label}, all {len(game.plays)} plays" in sent[0]
+    assert "Q1 " in sent[0] and " makes " in sent[0]  # every play from the tip, not only the latest
     assert [m["text"] for m in brain.history()] == ["Your read?", "Heading under the line."]
 
 
@@ -763,3 +767,42 @@ def test_slate_day_rolls_over_at_six_eastern():
     assert slate_day(at(2026, 11, 19, 10, 12)) == "20261119"  # ESPN's default was still on the 18th here
     assert slate_day(at(2026, 11, 19, 23, 50)) == "20261119"
     assert slate_day(datetime(2026, 11, 20, 3, 0, tzinfo=timezone.utc)) == "20261119"  # 10 PM ET
+
+
+def test_finished_games_are_archived_with_every_play():
+    from courtside.feeds.patterns import play_lines
+
+    engine = make_engine()
+    brain = Brain(engine.cfg, engine)
+    snap = parse_espn(_espn_summary(), {"NY": "NYK"})
+    game = Game(id="nba-1", home=Team("CLE", "Cavaliers", 112, quarters=[30, 28, 26, 28]),
+                away=Team("NYK", "Knicks", 104, quarters=[25, 27, 30, 22]), state="final", period=4,
+                clock_seconds=0.0, clock="0:00", pregame_total=221.5)
+    game.context = build_context(game, snap)
+    game.plays = snap.plays
+    engine.games, engine.by_id = [game], {game.id: game}
+
+    engine._archive_finished()  # not yet: the last play-by-play after the final has not been read
+    assert engine.db.query("SELECT * FROM game_archive") == []
+
+    game.context["final"] = True
+    engine._archive_finished()
+    engine._archive_finished()  # once only
+    rows = engine.db.query("SELECT * FROM game_archive")
+    assert len(rows) == 1 and rows[0]["label"] == "NYK @ CLE" and rows[0]["home_score"] == 112
+    assert rows[0]["plays"] == snap.plays and rows[0]["by_quarter"]["CLE"] == [30, 28, 26, 28]
+    assert {p["name"] for p in rows[0]["context"]["players"]} >= {"Home Player0", "Away Player0"}
+
+    # Once it has left the board, the agent can still read every play.
+    engine.games, engine.by_id = [], {}
+    summary, out = asyncio.run(brain._t_get_plays("CLE"))
+    assert out["plays"] == play_lines(snap.plays) and out["source"].startswith("archive")
+    assert "read 12 plays" in summary
+    summary, out = asyncio.run(brain._t_get_plays("NYK @ CLE", quarter=4))
+    assert out["plays"].startswith("Q4 11:00 CLE")
+
+    # Practice games are not kept.
+    game.simulated, game.id = True, "sim-1"
+    engine.games = [game]
+    engine._archive_finished()
+    assert len(engine.db.query("SELECT * FROM game_archive")) == 1

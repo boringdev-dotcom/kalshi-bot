@@ -131,6 +131,24 @@ CREATE TABLE IF NOT EXISTS observations (
 );
 CREATE INDEX IF NOT EXISTS idx_observations_game ON observations(game_id, segment);
 
+-- Finished real games, kept after they leave the board: every play, the box score, the lines.
+CREATE TABLE IF NOT EXISTS game_archive (
+  game_id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  away TEXT NOT NULL,
+  home TEXT NOT NULL,
+  away_score INTEGER NOT NULL,
+  home_score INTEGER NOT NULL,
+  by_quarter TEXT NOT NULL DEFAULT '{}',
+  pregame_total REAL,
+  closing_line REAL,
+  plays TEXT NOT NULL DEFAULT '[]',
+  context TEXT,
+  archived_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_game_archive_start ON game_archive(start_time);
+
 CREATE TABLE IF NOT EXISTS equity (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL,
@@ -147,7 +165,7 @@ MIGRATIONS = [
     ("positions", "label", "TEXT"),
 ]
 
-JSON_COLUMNS = {"context", "memory_ids", "data", "tags", "tools"}
+JSON_COLUMNS = {"context", "memory_ids", "data", "tags", "tools", "plays", "by_quarter"}
 BOOL_COLUMNS = {"simulated", "training", "pinned"}
 
 
