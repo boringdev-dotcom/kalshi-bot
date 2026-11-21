@@ -116,4 +116,5 @@ A separate desk at `/soccer` for Europe's top five leagues (Premier League, LaLi
 - **The simulator is a sandbox, not evidence.** Its games, market and biases are invented (see the docstring in `feeds/sim.py`). What the agent learns there stays there: real-market decisions use real results only.
 - **The model's constants are league-level starting points**, not fitted to historical data. The learner corrects for where they are off, which takes real trades.
 - **Live order placement is written to Kalshi's V2 order API** (`POST /portfolio/events/orders`) and the request translation is unit-tested, but it has not sent a real order. Make the first live trade a small one and check it on Kalshi.
+- **Kalshi splits cash into exchange shards** (NBA markets sit on shard 3, the soccer leagues on shard 0). The Kalshi app moves cash between them when you order; API orders do not, so before every live buy Courtside tops up the market's shard from the others (`KalshiClient.fund_shard`, via `POST /portfolio/intra_exchange_instance_transfer`) and waits for the cash to land.
 - Kalshi fees are modelled with the standard taker formula; check your actual fills.
