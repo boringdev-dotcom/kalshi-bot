@@ -293,3 +293,68 @@ def test_soccer_api_routes(tmp_path, monkeypatch):
         assert pos["contracts"] == 5
         assert client.post(f"/api/soccer/positions/{pos['id']}/close").status_code == 200
         assert client.get("/api/soccer/trades").json()[0]["exit_reason"] == "sold"
+
+
+def test_favs_keep_only_85_to_90_confidence_priced_below_it():
+    import json
+
+    desk, engine = make_desk()
+    brain = Brain(engine.cfg, engine)
+    brain.soccer = desk
+    m = with_markets(a_match(lam_home=1.6, lam_away=1.1, state="live", period=1, minute=20.0, clock="20'"))
+    m.commentary = [{"minute": "18'", "text": "Corner, Augsburg."}]
+    model.price(m)
+    desk.matches, desk.by_id = [m], {m.id: m}
+
+    _, context, candidates = brain._fav_candidates(m.id)
+    assert candidates and all(55 <= c["ask"] <= 93 and 0.72 <= c["model_p"] <= 0.97 for c in candidates)
+    assert "[commentary:" in context and "Corner, Augsburg." in context
+    cheap = next(c for c in candidates if c["ask"] <= 86)
+    dear = next(c for c in candidates if c["ask"] >= 89)
+
+    reply = {"summary": "Augsburg pressing.", "picks": [
+        {"candidate_id": cheap["id"], "confidence": 0.88, "reason": "Fits."},
+        {"candidate_id": cheap["id"], "confidence": 0.87, "reason": "Duplicate."},
+        {"candidate_id": dear["id"], "confidence": 0.88, "reason": "Priced above the confidence: no profit."},
+        {"candidate_id": candidates[-1]["id"], "confidence": 0.95, "reason": "Too sure: outside the band."},
+        {"candidate_id": candidates[0]["id"], "confidence": 0.80, "reason": "Not sure enough."},
+    ]}
+    sent: dict = {}
+
+    class Final:
+        stop_reason = "end_turn"
+        content = [type("T", (), {"type": "text", "text": json.dumps(reply)})()]
+
+    class Stream:
+        def __init__(self, **kw):
+            sent.update(kw)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get_final_message(self):
+            return Final()
+
+    brain.client = type("C", (), {"beta": type("B", (), {"messages": type("M", (), {"stream": lambda self, **kw: Stream(**kw)})()})()})()
+    brain.cfg.anthropic_api_key = "test"
+    out = asyncio.run(brain.favs(m.id))
+
+    fmt = sent["output_config"]["format"]
+    assert fmt["type"] == "json_schema"
+    assert fmt["schema"]["properties"]["picks"]["items"]["properties"]["candidate_id"]["enum"] == [c["id"] for c in candidates]
+    assert "85% and 90%" in sent["messages"][0]["content"]
+    assert [p["ticker"] for p in out["picks"]] == [cheap["ticker"]] and out["dropped"] == 4
+    pick = out["picks"][0]
+    assert pick["confidence"] == 0.88 and pick["side"] == cheap["side"] and pick["edge"] == round(0.88 - cheap["ask"] / 100, 3)
+    assert out["summary"] == "Augsburg pressing."
+
+    brain.cfg.anthropic_api_key = ""
+    brain.client = None
+    try:
+        asyncio.run(brain.favs(m.id))
+        raise AssertionError("favs without Claude should say so")
+    except ValueError as exc:
+        assert "Claude" in str(exc)

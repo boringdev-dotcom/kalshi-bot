@@ -16,6 +16,28 @@ import type {
   TrainResult,
 } from './types'
 
+/** The agent's favourite bets on one game or match (85-90% confidence, priced below it). */
+export interface FavPick {
+  ticker: string
+  side: string // 'under' | 'over' for NBA, 'yes' | 'no' for soccer
+  label: string
+  where: string
+  ask: number
+  confidence: number
+  model_p: number
+  edge: number
+  reason: string
+}
+
+export interface FavsResult {
+  game: string
+  generated_at: string
+  summary: string
+  picks: FavPick[]
+  candidates: number
+  dropped: number
+}
+
 export class ApiError extends Error {
   status: number
   constructor(message: string, status: number) {
@@ -93,6 +115,8 @@ export const api = {
   learning: () => req<LearningState>('/learning'),
   train: (episodes: number) => req<TrainResult>('/sim/train', json('POST', { episodes })),
   resetSim: () => req<AppState>('/sim/reset', json('POST')),
+
+  favs: (gameId: string) => req<FavsResult>('/favs', json('POST', { game_id: gameId })),
 
   chatHistory: () => req<ChatMessage[]>('/chat/history'),
   clearChat: () => req<{ ok: true }>('/chat/history', json('DELETE')),

@@ -78,6 +78,39 @@ SOCCER_ANALYSIS_ASK = """The owner pressed "Agent analysis" on this soccer match
 
 Keep it tight: short paragraphs or a few bullets, real numbers, no boilerplate caveats. End with one question back to them if their read would sharpen yours. Do not place or close any orders unless they ask."""
 
+FAV_MIN, FAV_MAX = 0.85, 0.90  # the owner's band: likely enough to trust, not so sure the price leaves no profit
+
+FAVS_ASK = """The owner pressed "Show favs" on this game. Go through every candidate line below and pick their favourite bets right now.
+
+A pick must meet all of these:
+- Your confidence that the side wins is between 85% and 90%. Not higher: above 90% the price leaves almost nothing to win. Not lower: the owner wants likely winners.
+- Its ask is below your confidence in cents (confidence 88% means you would pay at most 87c), so it is profitable at the current price.
+- Your confidence is your own judgement from everything in the briefing: the model's probability, the price, the score and clock, the play-by-play or commentary, fouls, cards, who is on the floor, pace, how a close finish plays out. Do not just copy the model; say so in the reason when you differ from it by more than a few points.
+
+Pick only from the candidate ids given. Several picks are fine (aim for up to 6, best first); none is a fine answer when nothing honestly fits the band. Avoid near-duplicates (two strikes on the same total) unless both are genuinely good, and say which you prefer. Each reason is one short sentence (under 25 words) a trader can act on. The summary is one or two sentences on the game state and what drove the picks."""
+
+FAVS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "picks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "string"},
+                    "confidence": {"type": "number"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["candidate_id", "confidence", "reason"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["summary", "picks"],
+    "additionalProperties": False,
+}
+
 REVIEW_SYSTEM = """You review one proposed trade for an automated NBA totals desk before the order is sent. The trade already passed the numeric rules; your job is to catch what the rules cannot see and to apply the owner's standing guidance and past lessons.
 
 The play: in the fourth quarter, buy the under on a total well above the live line. It wins small most of the time and loses big rarely; the killers are late fouling in close games, a pace that is still accelerating, and overtime.
@@ -371,6 +404,97 @@ class Brain:
             "record_by_pattern": e._pattern_record(),
             "recalled_memories": [{"kind": m["kind"], "text": m["text"], "from_owner": m["source"] == "user"} for m in recalled],
         }
+
+    # ------------------------------------------------------------------- favs
+    def _fav_candidates(self, game_id: str) -> tuple[str, str, list[dict[str, Any]]]:
+        """(label, context text, candidates): every side of every open line on this game worth a look.
+
+        A candidate is one side of one market with an offer, whose model probability is in a wide band
+        around the owner's 85-90%, so Claude can disagree with the model in either direction.
+        """
+        out: list[dict[str, Any]] = []
+
+        def add(ticker: str, side: str, label: str, where: str, ask: Optional[int], bid: Optional[int], p: Optional[float], volume: float) -> None:
+            if ask is None or p is None or not 55 <= ask <= 93 or not 0.72 <= p <= 0.97:
+                return
+            out.append({"id": f"C{len(out) + 1}", "ticker": ticker, "side": side, "label": label, "where": where,
+                        "ask": ask, "bid": bid, "model_p": round(p, 3), "volume": round(volume)})
+
+        match = self.soccer.by_id.get(game_id) if self.soccer is not None else None
+        if match is not None:
+            for m in match.markets:
+                if match.settles_yes(m) is not None or m.p_yes is None:
+                    continue
+                where = f"{'1st half' if m.segment == '1h' else 'full match'} {m.kind}"
+                add(m.ticker, "yes", m.label("yes", match), where, m.yes_ask, m.yes_bid, m.p_yes, m.volume)
+                add(m.ticker, "no", m.label("no", match), where, m.no_ask, m.no_bid, 1 - m.p_yes, m.volume)
+            context = [f"[soccer match briefing: {match.label}]\n{json.dumps(self.soccer.briefing(match), default=str)}"]
+            if match.commentary:
+                context.append(f"[commentary: {match.label}, all {len(match.commentary)} lines, oldest first]\n{self.soccer.commentary_text(match)}")
+            return match.label, "\n\n".join(context), out
+
+        game = self.engine.by_id.get(game_id)
+        if game is None:
+            raise ValueError("No such game on the board")
+        rungs = [(r, "full game total") for r in game.ladder]
+        for seg, kinds in game.quarter_markets.items():
+            if game.quarter_status(int(seg[1])) == "final":
+                continue
+            for kind, rs in kinds.items():
+                rungs += [(r, f"{seg.upper()} {kind}") for r in rs]
+        for r, where in rungs:
+            add(r.ticker, "under", r.label("under"), where, r.no_ask, r.no_bid, r.p_under, r.volume)
+            add(r.ticker, "over", r.label("over"), where, r.yes_ask, r.yes_bid, 1 - r.p_under, r.volume)
+        context = [f"[game briefing: {game.label}]\n{json.dumps(self.game_briefing(game), default=str)}"]
+        if game.plays:
+            context.append(f"[play-by-play: {game.label}, all {len(game.plays)} plays, oldest first; score is {game.away.abbr}-{game.home.abbr}]\n{play_lines(game.plays)}")
+        return game.label, "\n\n".join(context), out
+
+    async def favs(self, game_id: str) -> dict[str, Any]:
+        """The agent's favourite bets on one game right now: confidence 85-90%, priced below it, with a reason each."""
+        if not self.available:
+            raise ValueError("Claude is not connected. Add ANTHROPIC_API_KEY to the server.")
+        label, context, candidates = self._fav_candidates(game_id)
+        base = {"game": label, "generated_at": now_iso(), "candidates": len(candidates), "dropped": 0}
+        if not candidates:
+            return {**base, "summary": "No line is priced in a range where an 85-90% favourite could still pay. Try again as the game moves.", "picks": []}
+        schema = json.loads(json.dumps(FAVS_SCHEMA))
+        schema["properties"]["picks"]["items"]["properties"]["candidate_id"]["enum"] = [c["id"] for c in candidates]
+        lines = [{k: c[k] for k in ("id", "label", "where", "ask", "bid", "model_p", "volume")} for c in candidates]
+        content = f"{self._snapshot()}\n\n{context}\n\n[candidate lines: ask/bid in cents for that side, model_p = the numeric model's chance that side wins]\n{json.dumps(lines)}\n\n{FAVS_ASK}"
+        async with self.client.beta.messages.stream(
+            model=self.cfg.claude_model,
+            max_tokens=16000,
+            betas=[FALLBACK_BETA],
+            fallbacks="default",
+            system=[{"type": "text", "text": CHAT_SYSTEM, "cache_control": {"type": "ephemeral"}}],
+            output_config={"effort": "high", "format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": content}],
+        ) as stream:
+            response = await stream.get_final_message()
+        if response.stop_reason == "refusal":
+            raise ValueError("The agent declined to pick on this game.")
+        if response.stop_reason == "max_tokens":
+            raise ValueError("The agent ran out of room before finishing; try again.")
+        text = next((b.text for b in response.content if b.type == "text"), "")
+        data = json.loads(text)
+        by_id = {c["id"]: c for c in candidates}
+        picks, seen, dropped = [], set(), 0
+        for p in data.get("picks") or []:
+            c = by_id.get(p.get("candidate_id"))
+            conf = float(p.get("confidence") or 0)
+            conf = conf / 100.0 if conf > 1 else conf  # accept 88 as 0.88
+            # The band and the profit test are the owner's rules, so they are enforced here, not trusted.
+            if c is None or (c["ticker"], c["side"]) in seen or not FAV_MIN - 1e-9 <= conf <= FAV_MAX + 1e-9 or c["ask"] > conf * 100 - 1:
+                dropped += 1
+                continue
+            seen.add((c["ticker"], c["side"]))
+            picks.append({
+                "ticker": c["ticker"], "side": c["side"], "label": c["label"], "where": c["where"], "ask": c["ask"],
+                "confidence": round(conf, 3), "model_p": c["model_p"], "edge": round(conf - c["ask"] / 100.0, 3),
+                "reason": " ".join(str(p.get("reason") or "").split()),
+            })
+        return {**base, "summary": " ".join(str(data.get("summary") or "").split()), "picks": picks, "dropped": dropped}
 
     async def chat(self, message: str, game_id: Optional[str] = None, analysis: bool = False) -> AsyncIterator[dict[str, Any]]:
         """Run one user turn. Yields ChatEvent dicts; persists both sides of the turn.
