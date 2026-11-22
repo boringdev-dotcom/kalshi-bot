@@ -120,7 +120,7 @@ export default function OrderPanel({
   const profit = order.contracts - order.cost
   const limit = fixedLimit ?? (ask != null ? Math.min(99, ask + SLIPPAGE) : null)
   const model = modelChance(rung, side)
-  const where = rung.segment && rung.segment !== 'game' ? `${segmentLabel(rung.segment)} ${rung.kind === 'spread' ? 'spread' : 'total'}` : 'Full game total'
+  const where = rung.segment && rung.segment !== 'game' ? `${segmentLabel(rung.segment)} ${rung.kind === 'spread' ? 'spread' : 'total'}` : `Full game ${rung.kind === 'spread' ? 'spread' : 'total'}`
 
   const problem = closed
     ? 'This market has finished.'

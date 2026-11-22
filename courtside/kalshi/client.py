@@ -32,6 +32,7 @@ API_PREFIX = "/trade-api/v2"
 PUBLIC_HOST = "https://api.elections.kalshi.com"
 READS_PER_SECOND = 8.0  # Kalshi turns away bursts of reads past about a dozen at once
 NBA_TOTAL_SERIES = "KXNBATOTAL"
+NBA_SPREAD_SERIES = "KXNBASPREAD"  # full-game spreads; quarters have their own series below
 CENTICENTS_PER_DOLLAR = 10_000  # shard transfers are sized in hundredths of a cent
 
 

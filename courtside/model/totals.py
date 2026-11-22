@@ -236,11 +236,12 @@ def implied_total(ladder: list[Rung]) -> Optional[float]:
 
 def refresh_game(game: Game) -> Optional[TotalDist]:
     """Recompute projection, risk and ladder pricing for a game."""
-    from .quarters import refresh_quarters  # here to avoid a circular import
+    from .quarters import price_game_spreads, refresh_quarters  # here to avoid a circular import
 
     dist = game_distribution(game)
     game.projection = dist.projection() if dist else None
     game.risk = assess_risk(game, dist)
     price_ladder(game, dist)
+    price_game_spreads(game)
     refresh_quarters(game)
     return dist

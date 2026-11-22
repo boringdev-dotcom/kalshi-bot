@@ -387,6 +387,9 @@ class Brain:
             "sportsbook": fd.__dict__ if fd else None,
             "kalshi_total_line": implied_total(ladder),
             "projection": game.projection.__dict__ if game.projection else None,
+            "full_game_margin_projection_home": game.margin_projection,
+            "kalshi_full_game_margin_line_home": implied_margin(game.spreads, game.home.abbr),
+            "full_game_spreads": rung_rows([r for r in game.spreads if r.yes_ask and 8 <= r.yes_ask <= 92], 14),
             "risk": {"level": game.risk.level, "flags": game.risk.flags},
             "on_the_floor": [{"text": n["text"], "pushes_scoring": n["lean"]} for n in ctx.get("notes", [])],
             "team_fouls_this_period": [{"team": t["abbr"], "fouls": t["fouls"], "next_foul_is_free_throws": t["penalty"],
@@ -436,7 +439,7 @@ class Brain:
         game = self.engine.by_id.get(game_id)
         if game is None:
             raise ValueError("No such game on the board")
-        rungs = [(r, "full game total") for r in game.ladder]
+        rungs = [(r, "full game total") for r in game.ladder] + [(r, "full game spread") for r in game.spreads]
         for seg, kinds in game.quarter_markets.items():
             if game.quarter_status(int(seg[1])) == "final":
                 continue

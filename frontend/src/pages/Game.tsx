@@ -49,6 +49,16 @@ function GameSwitcher({ games, current }: { games: Game[]; current: string }) {
 
 /** One or two plain sentences saying where this market stands right now. */
 function story(game: Game, segment: Segment, kind: 'total' | 'spread', line: number | null, q: QuarterSummary | undefined): string {
+  if (segment === 'game' && kind === 'spread') {
+    const market = line == null ? '' : Math.abs(line) < 0.25 ? ' The market has it even.' : ` The market's line is ${marginText(line, game.home.abbr, game.away.abbr)}.`
+    if (game.state === 'pre') return `Pick a team to win the game by a margin. Overtime counts.${market}`
+    const score = `${game.away.abbr} ${game.away.score}, ${game.home.abbr} ${game.home.score}`
+    if (game.state === 'final') return `It finished ${score}.`
+    const m = game.margin_projection?.margin_mean
+    const lead = m == null ? '' : Math.abs(m) < 0.75 ? ' The model has it about even.' : ` The model has ${m > 0 ? game.home.abbr : game.away.abbr} winning by about ${Math.abs(m).toFixed(0)}.`
+    const when = game.period > 4 ? 'in overtime' : `with ${game.clock} left in ${periodLabel(game.period)}`
+    return `${score} ${when}.${market}${lead}`
+  }
   if (segment === 'game') {
     const proj = game.projection?.mean
     if (game.state === 'pre') return line != null ? `The line is ${line}: the total points both teams are expected to score. Bet under if you think it will be a lower-scoring game, over if higher.` : 'Waiting for a line on this game.'
@@ -245,9 +255,14 @@ export default function GamePage() {
 
   const positions = useMemo(() => allPositions.filter((p) => p.game_id === id), [allPositions, id])
   const quarterMarkets = detail?.quarter_markets ?? null
+  const gameSpreads = detail?.game_spreads ?? null
   const allRungs = useMemo<LadderRung[]>(
-    () => [...(game?.ladder ?? []), ...(quarterMarkets ?? []).flatMap((m) => [...(m.totals ?? []), ...(m.spreads ?? [])])],
-    [game?.ladder, quarterMarkets],
+    () => [
+      ...(game?.ladder ?? []),
+      ...(gameSpreads ?? []),
+      ...(quarterMarkets ?? []).flatMap((m) => [...(m.totals ?? []), ...(m.spreads ?? [])]),
+    ],
+    [game?.ladder, gameSpreads, quarterMarkets],
   )
 
   if (!game) {
@@ -261,11 +276,13 @@ export default function GamePage() {
 
   const q = segment === 'game' ? undefined : game.quarters?.[quarterNumber(segment) - 1]
   const market = segment === 'game' ? null : quarterMarkets?.find((m) => m.segment === segment)
-  const rungs: LadderRung[] | null = segment === 'game' ? game.ladder : market ? (kind === 'total' ? market.totals : market.spreads) : null
-  const showKind = segment === 'game' ? 'total' : kind
+  const showKind = kind
+  const spreadRungs: LadderRung[] | null = segment === 'game' ? gameSpreads : market ? market.spreads : null
+  const rungs: LadderRung[] | null =
+    showKind === 'spread' ? spreadRungs : segment === 'game' ? game.ladder : market ? market.totals : null
 
   const gl = gameLine(game)
-  const line = segment === 'game' ? gl.value : showKind === 'total' && market ? impliedLine(market.totals ?? []) : null
+  const line = showKind !== 'total' ? null : segment === 'game' ? gl.value : market ? impliedLine(market.totals ?? []) : null
   const lineSource = segment === 'game' ? gl.source : 'the point where Kalshi prices over and under at 50/50'
 
   const closedSegments = new Set<string>()
@@ -282,8 +299,11 @@ export default function GamePage() {
   const risky = game.state === 'live' && game.risk.level !== 'low' && game.risk.flags.length > 0
 
   // Spreads: everything as the home team's margin (home points minus away points).
-  const spreadLine = showKind === 'spread' && market ? impliedSpread(market.spreads ?? [], game.home.abbr) : null
-  const marginNow = q && q.status !== 'upcoming' ? q.home_points - q.away_points : null
+  const spreadLine = showKind === 'spread' && spreadRungs ? impliedSpread(spreadRungs, game.home.abbr) : null
+  const marginNow =
+    segment === 'game' ? (game.state === 'pre' ? null : game.home.score - game.away.score) : q && q.status !== 'upcoming' ? q.home_points - q.away_points : null
+  const marginProj = segment === 'game' ? (game.margin_projection ?? null) : (q?.projection ?? null)
+  const spreadOpen = segment === 'game' ? game.state !== 'final' : !!q && q.status !== 'final'
   const spreadPickRung = pickedRung && (pickedRung.segment ?? 'game') === segment && pickedRung.kind === 'spread' && showKind === 'spread' ? pickedRung : null
   const spreadPick =
     spreadPickRung && pick
@@ -338,15 +358,15 @@ export default function GamePage() {
           {/* which market */}
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <div className="no-scrollbar -mx-4 max-w-[calc(100%+2rem)] overflow-x-auto px-4 sm:mx-0 sm:max-w-full sm:px-0">
-              <Segmented id="segment" size="md" options={segOptions} value={segment} onChange={(s) => { setSegment(s); if (s === 'game') setKind('total') }} />
+              <Segmented id="segment" size="md" options={segOptions} value={segment} onChange={setSegment} />
             </div>
-            {segment !== 'game' && (
-              <Segmented id="kind" size="md" options={[{ value: 'total', label: 'Total points' }, { value: 'spread', label: 'Spread' }]} value={kind} onChange={setKind} />
-            )}
+            <Segmented id="kind" size="md" options={[{ value: 'total', label: 'Total points' }, { value: 'spread', label: 'Spread' }]} value={kind} onChange={setKind} />
           </div>
 
           <h2 className="mt-6 text-xl font-semibold text-white">
-            {segment === 'game' ? 'Total points in the game' : showKind === 'total' ? `Total points in ${segment.toUpperCase()}` : `Who wins ${segment.toUpperCase()}, and by how much`}
+            {showKind === 'spread'
+              ? `Who wins ${segment === 'game' ? 'the game' : segment.toUpperCase()}, and by how much`
+              : segment === 'game' ? 'Total points in the game' : `Total points in ${segment.toUpperCase()}`}
           </h2>
           <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-slate-300">{story(game, segment, showKind, showKind === 'spread' ? spreadLine : line, q)}</p>
 
@@ -361,21 +381,21 @@ export default function GamePage() {
             </div>
           )}
 
-          {showKind === 'spread' && q && q.status !== 'final' && (spreadLine != null || q.projection != null) && (
+          {showKind === 'spread' && spreadOpen && (spreadLine != null || marginProj != null) && (
             <div className="mt-2">
               <SpreadBar
                 home={game.home}
                 away={game.away}
                 now={marginNow}
                 line={spreadLine}
-                projected={q.projection?.margin_mean ?? null}
-                spread={q.projection?.margin_sd ?? null}
+                projected={marginProj?.margin_mean ?? null}
+                spread={marginProj?.margin_sd ?? null}
                 pick={spreadPick}
                 held={heldSpreads}
               />
               <p className="mt-3 text-xs text-dim">
                 The line is the margin where Kalshi prices both teams at 50/50. The shaded band is where the model thinks the
-                quarter will most likely end{spreadPick ? ', and green is where your pick wins' : ''}.
+                {segment === 'game' ? ' game' : ' quarter'} will most likely end{spreadPick ? ', and green is where your pick wins' : ''}.
               </p>
             </div>
           )}
@@ -396,13 +416,17 @@ export default function GamePage() {
               onPick={setPick}
               owned={new Set(positions.map((p) => p.ticker))}
               closed={closedSegments.has(segment)}
-              loading={segment !== 'game' && !detail}
-              emptyText={segment === 'game' ? 'Kalshi has not opened total-points markets for this game yet.' : `Kalshi has no ${segment.toUpperCase()} ${showKind === 'total' ? 'total' : 'spread'} market for this game yet.`}
+              loading={(segment !== 'game' || showKind === 'spread') && !detail}
+              emptyText={
+                segment === 'game'
+                  ? `Kalshi has not opened ${showKind === 'total' ? 'total-points' : 'spread'} markets for this game yet.`
+                  : `Kalshi has no ${segment.toUpperCase()} ${showKind === 'total' ? 'total' : 'spread'} market for this game yet.`
+              }
             />
             {closedSegments.has(segment) && <p className="mt-3 text-[13px] text-mute">This market has finished, so it can no longer be traded.</p>}
           </div>
 
-          {game.state !== 'pre' && (segment === 'game' || (q && q.status !== 'upcoming')) && (
+          {game.state !== 'pre' && (segment === 'game' ? showKind === 'total' : q && q.status !== 'upcoming') && (
             <div className="mt-10">
               <button onClick={() => setShowChart((v) => !v)} className="text-[13px] font-medium text-mute hover:text-white">
                 {showChart ? 'Hide chart' : 'Show chart'}
@@ -426,7 +450,9 @@ export default function GamePage() {
 
           <div className="mt-12">
             <div className="h-section">What the agent did in this game</div>
-            <p className="hint mt-1">{segment === 'game' ? 'The agent trades the full-game total on its own.' : 'The agent only watches quarter markets. Anything you buy here is yours to manage.'}</p>
+            <p className="hint mt-1">{segment === 'game' && showKind === 'total'
+                ? 'The agent trades the full-game total on its own.'
+                : 'The agent does not trade these markets itself. Anything you buy here is yours to manage.'}</p>
             <div className="mt-3">
               <ActivityFeed gameId={game.id} limit={6} compact />
             </div>

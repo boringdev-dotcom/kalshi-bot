@@ -153,6 +153,7 @@ export default function MarketList({
 
   if (kind === 'spread') {
     const teams = [game.away, game.home]
+    const what = (rungs[0]?.segment ?? 'game') === 'game' ? 'the game' : 'this quarter'
     return (
       <div>
         {teams.map((team) => {
@@ -177,7 +178,7 @@ export default function MarketList({
                 {team.abbr} to win it by…
               </div>
               {!closed && lineHere != null && lineHere < -0.25 && (
-                <div className="pb-1 text-xs text-dim">The line has {other.abbr} winning this quarter, so each of these needs {team.abbr} to come out on top.</div>
+                <div className="pb-1 text-xs text-dim">The line has {other.abbr} winning {what}, so each of these needs {team.abbr} to come out on top.</div>
               )}
               {mine.map((r, i) => {
                 const by = Math.ceil(r.strike)

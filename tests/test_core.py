@@ -577,6 +577,9 @@ def test_live_feed_joins_espn_kalshi_and_fanduel():
     assert set(spreads) == {"CLE", "GSW"}  # the rung naming neither team is dropped, not guessed at
     assert (spreads["CLE"].label("over"), spreads["CLE"].label("under")) == ("CLE -3.5", "GSW +3.5")
     assert spreads["GSW"].position_label("under") == "Q1 CLE +1.5"
+    # Full-game spreads come from their own series and belong to the whole game.
+    assert {r.team for r in game.spreads} == {"CLE", "GSW"} and all(r.segment == "game" and r.kind == "spread" for r in game.spreads)
+    assert game.spreads[0].ticker.startswith("KXNBASPREAD-") and game.spreads[0].position_label("over") == "GSW -1.5"
     refresh_game(game)
     assert [v["status"] for v in game.quarter_view] == ["final", "final", "final", "live"]
     assert game.settle_value("q1", "total", None) == 57 and game.settle_value("q1", "spread", "CLE") == 3
