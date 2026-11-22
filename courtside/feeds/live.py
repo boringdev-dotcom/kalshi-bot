@@ -18,7 +18,7 @@ import httpx
 
 from ..config import Config
 from ..domain import FanDuelOdds, Game, Rung, Team, now_iso
-from ..kalshi.client import KalshiClient, cents, quarter_series
+from ..kalshi.client import NBA_SPREAD_SERIES, KalshiClient, cents, quarter_series
 from ..model.totals import implied_total
 from .patterns import ESPN_SUMMARY, build_context, parse_espn
 
@@ -292,44 +292,49 @@ class LiveFeed:
                     game.pregame_total = implied_total(game.ladder)
         return f"{matched}/{len(self.games)} games matched to Kalshi total markets"
 
-    # -- Kalshi quarter totals and spreads -------------------------------------
+    # -- Kalshi full-game spreads, quarter totals and spreads ------------------
     async def _refresh_quarter_markets(self, now: float, any_live: bool) -> None:
-        """Eight more series (four quarters x total/spread), each on its own clock.
+        """Nine more series (full-game spread, four quarters x total/spread), each on its own clock.
 
-        The quarter being played, and the next one when a quarter is nearly
-        over, refresh fast enough to trade off; the rest tick over slowly.
+        The full-game spread and the quarter being played (and the next one
+        when a quarter is nearly over) refresh fast enough to trade off; the
+        rest tick over slowly.
         """
         if not self.games:
             return
-        hot: set[int] = set()
+        hot: set[int] = {0}  # 0 is the full game: always in play while a game is live
         for g in self.games.values():
             if g.state == "live" and 1 <= g.period <= 4:
                 hot.add(g.period)
                 if g.clock_seconds <= 150 and g.period < 4:
                     hot.add(g.period + 1)
         due = []
-        for q in (1, 2, 3, 4):
-            for kind in ("total", "spread"):
-                if now >= self._next_quarter.get((q, kind), 0.0):
-                    self._next_quarter[(q, kind)] = now + (4 if (q in hot and any_live) else 45 if any_live else 120)
-                    due.append((q, kind))
+        for q, kind in [(0, "spread")] + [(q, k) for q in (1, 2, 3, 4) for k in ("total", "spread")]:
+            if now >= self._next_quarter.get((q, kind), 0.0):
+                self._next_quarter[(q, kind)] = now + (4 if (q in hot and any_live) else 45 if any_live else 120)
+                due.append((q, kind))
         if not due:
             return
-        results = await asyncio.gather(*(self.kalshi.events(quarter_series(q, k)) for q, k in due), return_exceptions=True)
+        series = [NBA_SPREAD_SERIES if q == 0 else quarter_series(q, k) for q, k in due]
+        results = await asyncio.gather(*(self.kalshi.events(s) for s in series), return_exceptions=True)
         for (q, kind), events in zip(due, results):
+            segment = "game" if q == 0 else f"q{q}"
             if isinstance(events, Exception):
-                log.warning("Kalshi Q%s %s fetch failed: %s", q, kind, events)
+                log.warning("Kalshi %s %s fetch failed: %s", segment, kind, events)
                 continue
             for game in self.games.values():
                 event = self._match_event(game, events)
                 if event is None:
                     continue
-                rungs = [r for r in (self._quarter_rung(game, q, kind, m) for m in event.get("markets") or []) if r]
+                rungs = [r for r in (self._quarter_rung(game, segment, kind, m) for m in event.get("markets") or []) if r]
                 if rungs:
                     rungs.sort(key=lambda r: (r.team != game.away.abbr, r.strike))
-                    game.quarter_markets.setdefault(f"q{q}", {})[kind] = rungs
+                    if segment == "game":
+                        game.spreads = rungs
+                    else:
+                        game.quarter_markets.setdefault(segment, {})[kind] = rungs
 
-    def _quarter_rung(self, game: Game, q: int, kind: str, m: dict[str, Any]) -> Optional[Rung]:
+    def _quarter_rung(self, game: Game, segment: str, kind: str, m: dict[str, Any]) -> Optional[Rung]:
         strike = m.get("floor_strike")
         if strike is None:
             return None
@@ -342,7 +347,7 @@ class LiveFeed:
             no_ask=cents(m.get("no_ask_dollars")),
             volume=float(m.get("volume_fp") or 0),
             result=m.get("result") or "",
-            segment=f"q{q}",
+            segment=segment,
             kind=kind,
         )
         if kind == "spread":

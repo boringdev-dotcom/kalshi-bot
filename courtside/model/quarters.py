@@ -1,4 +1,4 @@
-"""Quarter markets: where does one quarter's total and margin finish?
+"""Quarter markets (and full-game spreads): where does one quarter's total and margin finish?
 
 Same idea as the full-game model, one quarter at a time:
 
@@ -92,7 +92,7 @@ def project_quarter(game: Game, q: int) -> Optional[dict[str, float]]:
 
 
 def p_no(rung: Rung, game: Game, q: int, proj: Optional[dict[str, float]]) -> float:
-    """Probability the NO side of a quarter market wins (under, or 'does not cover')."""
+    """Probability the NO side of a quarter market (or a full-game spread) wins (under, or 'does not cover')."""
     if proj is None:
         value = game.settle_value(rung.segment, rung.kind, rung.team)
         return 1.0 if value is not None and value < rung.strike else 0.0
@@ -103,6 +103,33 @@ def p_no(rung: Rung, game: Game, q: int, proj: Optional[dict[str, float]]) -> fl
         return _phi((rung.strike - proj["total_mean"]) / proj["total_sd"])
     sign = 1.0 if rung.team == game.home.abbr else -1.0
     return _phi((rung.strike - sign * proj["margin_mean"]) / proj["margin_sd"])
+
+
+def project_game_margin(game: Game) -> Optional[dict[str, float]]:
+    """Mean and spread of the full game's final home-minus-away margin. None once final.
+
+    Kalshi's full-game spreads count overtime, so in overtime the margin keeps
+    moving over the overtime clock; at the end of a tied fourth the bell curve
+    is centred on zero and simply waits for overtime to pull it apart.
+    """
+    if game.state == "final":
+        return None
+    secs = game.seconds_remaining if game.period <= 4 else max(game.clock_seconds, 0.0)
+    now = game.home.score - game.away.score if game.state == "live" else 0
+    return {
+        "margin_mean": round(now + _home_edge_per_second(game) * secs, 2),
+        "margin_sd": round(max(math.sqrt(MARGIN_VAR_PER_SEC * secs), MIN_SD), 2),
+    }
+
+
+def price_game_spreads(game: Game) -> None:
+    """Reprice the full-game spread markets in place."""
+    proj = project_game_margin(game)
+    game.margin_projection = proj
+    for r in game.spreads:
+        r.p_under = round(p_no(r, game, 0, proj), 4)
+        r.edge_under = round(r.p_under - r.no_ask / 100.0, 4) if r.no_ask else None
+        r.edge_over = round((1 - r.p_under) - r.yes_ask / 100.0, 4) if r.yes_ask else None
 
 
 def refresh_quarters(game: Game) -> None:

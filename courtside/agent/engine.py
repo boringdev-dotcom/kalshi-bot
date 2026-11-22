@@ -699,7 +699,7 @@ class Engine:
         patterns = [f"pattern:{k}" for k in ctx.get("patterns") or []]
         if not row["arm_key"]:
             tags = ["nba", home.lower(), away.lower(), "manual", row["kind"]]
-            return tags + (["quarter", row["segment"]] if row["segment"] != "game" else []) + patterns
+            return tags + (["quarter", row["segment"]] if row["segment"] != "game" else ["full_game"]) + patterns
         return situation_tags(arm=row["arm_key"], home=home, away=away, p_ot=ctx.get("p_ot") or 0.0, pace_gap=pace_gap, extra=patterns)
 
     def _describe(self, row: dict[str, Any]) -> str:
@@ -945,8 +945,8 @@ class Engine:
         if not self.playbook.enabled(Q4_UNDER):
             return
         p = self.playbook.params(Q4_UNDER)
-        # A quarter bet of yours does not stop the agent making its own full-game play.
-        held = {r["game_id"] for r in self.open_rows() if r["segment"] == "game"}
+        # A quarter or spread bet of yours does not stop the agent making its own full-game total play.
+        held = {r["game_id"] for r in self.open_rows() if r["segment"] == "game" and r["kind"] == "total"}
         for game in self.games:
             if game.id in held or game.id in self._reviewing or game.id in self._cooldown:
                 continue
@@ -1128,6 +1128,9 @@ class Engine:
         }
         if game.state == "pre":
             ctx["when"] = "before tip-off"
+        elif rung.segment == "game" and rung.kind == "spread":
+            lead = f"{game.home.abbr} {game.home.score}-{game.away.score} {game.away.abbr}"
+            ctx["when"] = f"Q{game.period} {game.clock}, {lead}" if game.period <= 4 else f"OT, {lead}"
         elif rung.segment == "game":
             ctx["when"] = f"Q{game.period} {game.clock}, total {game.total}" if game.period <= 4 else f"OT, total {game.total}"
         else:
@@ -1143,7 +1146,7 @@ class Engine:
     def learning_state(self) -> dict[str, Any]:
         rows = self.db.query(
             "SELECT p_win_entry, strike, side, final_total, pnl, cost, exit_verdict, simulated, training "
-            "FROM positions WHERE status='closed' AND segment='game'"
+            "FROM positions WHERE status='closed' AND segment='game' AND kind='total'"
         )
         real = [r for r in rows if not r["training"]]
         buckets = [(0.0, 0.85, "<85%"), (0.85, 0.90, "85-90%"), (0.90, 0.93, "90-93%"), (0.93, 0.96, "93-96%"), (0.96, 1.01, "96%+")]

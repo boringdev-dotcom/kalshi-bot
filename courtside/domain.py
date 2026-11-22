@@ -128,6 +128,10 @@ class Game:
     projection: Optional[Projection] = None
     fanduel: Optional[FanDuelOdds] = None
     ladder: list[Rung] = field(default_factory=list)
+    # Full-game spreads (YES = `team` wins the game by more than the strike, overtime included).
+    spreads: list[Rung] = field(default_factory=list)
+    # Where the model has the full-game margin finishing: {"margin_mean", "margin_sd"} (home minus away).
+    margin_projection: Optional[dict[str, float]] = None
     # Quarter markets by segment: {"q1": {"total": [...], "spread": [...]}, ...}
     quarter_markets: dict[str, dict[str, list[Rung]]] = field(default_factory=dict)
     quarter_view: list[dict[str, Any]] = field(default_factory=list)  # filled by the model each tick
@@ -190,6 +194,7 @@ class Game:
 
     def all_rungs(self):
         yield from self.ladder
+        yield from self.spreads
         for kinds in self.quarter_markets.values():
             for rungs in kinds.values():
                 yield from rungs
@@ -256,6 +261,7 @@ class Game:
             self.plays = plays
         d.pop("plays")
         d.pop("clock_seconds")
+        d.pop("spreads")  # served with the game detail, like the quarter markets
         d.pop("quarter_markets")  # heavy: served with the game detail, not on every tick
         d["quarters"] = d.pop("quarter_view")
         ctx = d.pop("context")

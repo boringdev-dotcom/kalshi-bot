@@ -23,7 +23,7 @@ import random
 from typing import Any, Callable, Optional
 
 from ..domain import OT_SECONDS, QUARTER_SECONDS, FanDuelOdds, Game, Rung, Team, fmt_clock, now_iso
-from ..model.quarters import QUARTER_SHARE, p_no, project_quarter
+from ..model.quarters import QUARTER_SHARE, p_no, project_game_margin, project_quarter
 from ..model.totals import LINE_EXTRAS, _phi, distribution
 from .patterns import build_context
 
@@ -243,8 +243,18 @@ class SimGame:
         self._quote_book(dist.mean)
 
     def _quote_quarters(self) -> None:
-        """Synthetic quarter totals and spreads, priced off the quarter model plus noise."""
+        """Synthetic full-game spreads, quarter totals and quarter spreads, priced off the model plus noise."""
         g = self.game
+        if not g.spreads:
+            for team, other in ((g.away, g.home), (g.home, g.away)):
+                g.spreads += [
+                    Rung(ticker=f"{g.event_ticker}-S{team.abbr}{math.ceil(line)}", strike=line, kind="spread",
+                         team=team.abbr, other_team=other.abbr)
+                    for line in (1.5, 3.5, 5.5, 7.5, 9.5, 12.5, 15.5, 18.5)
+                ]
+        # Their own random stream, so adding them leaves the quarter prices exactly as they were.
+        self._spread_rng = getattr(self, "_spread_rng", None) or random.Random(g.event_ticker or g.id)
+        self._quote_rungs(g.spreads, 0, project_game_margin(g), self._spread_rng)
         if not g.quarter_markets:
             for q in (1, 2, 3, 4):
                 centre = math.floor(QUARTER_SHARE[q] * (g.pregame_total or 229)) + 0.5
@@ -266,23 +276,27 @@ class SimGame:
         for q in (1, 2, 3, 4):
             proj = project_quarter(g, q)
             for rungs in g.quarter_markets[f"q{q}"].values():
-                for r in rungs:
-                    if proj is None:
-                        value = g.settle_value(r.segment, r.kind, r.team)
-                        r.yes_bid = r.yes_ask = r.no_bid = r.no_ask = None
-                        r.result = "yes" if value is not None and value > r.strike else "no"
-                        continue
-                    noise = 0.9 * self._rung_noise.get(r.ticker, 0.0) + self.rng.gauss(0, 0.004)
-                    self._rung_noise[r.ticker] = noise
-                    p_yes = 1 - p_no(r, g, q, proj)
-                    mid = 100 * min(0.995, max(0.005, p_yes + noise + self._mm_bias))
-                    spread = self._rung_spread.setdefault(r.ticker, self.rng.choice([2, 2, 3, 4]))
-                    bid = min(max(int(math.floor(mid - spread / 2 + 0.5)), 0), 99 - spread)
-                    r.yes_bid = bid if bid >= 1 else None
-                    r.yes_ask = bid + spread
-                    r.no_bid = 100 - (bid + spread)
-                    r.no_ask = 100 - bid if bid >= 1 else None
-                    r.volume += self.rng.random()
+                self._quote_rungs(rungs, q, proj, self.rng)
+
+    def _quote_rungs(self, rungs: list[Rung], q: int, proj: Optional[dict[str, float]], rng: random.Random) -> None:
+        g = self.game
+        for r in rungs:
+            if proj is None:
+                value = g.settle_value(r.segment, r.kind, r.team)
+                r.yes_bid = r.yes_ask = r.no_bid = r.no_ask = None
+                r.result = "yes" if value is not None and value > r.strike else "no"
+                continue
+            noise = 0.9 * self._rung_noise.get(r.ticker, 0.0) + rng.gauss(0, 0.004)
+            self._rung_noise[r.ticker] = noise
+            p_yes = 1 - p_no(r, g, q, proj)
+            mid = 100 * min(0.995, max(0.005, p_yes + noise + self._mm_bias))
+            spread = self._rung_spread.setdefault(r.ticker, rng.choice([2, 2, 3, 4]))
+            bid = min(max(int(math.floor(mid - spread / 2 + 0.5)), 0), 99 - spread)
+            r.yes_bid = bid if bid >= 1 else None
+            r.yes_ask = bid + spread
+            r.no_bid = 100 - (bid + spread)
+            r.no_ask = 100 - bid if bid >= 1 else None
+            r.volume += rng.random()
 
     def _ensure_ladder(self, mean: float) -> None:
         g = self.game

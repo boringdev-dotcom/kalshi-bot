@@ -193,6 +193,7 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
         decisions = db.query("SELECT * FROM decisions WHERE game_id=? ORDER BY id DESC LIMIT 50", [game_id])
         return {
             "game": game.to_dict(),
+            "game_spreads": [rung_dict(r) for r in game.spreads],
             "quarter_markets": [
                 {
                     "segment": seg,

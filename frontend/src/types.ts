@@ -231,6 +231,8 @@ export interface Game {
   fanduel: FanDuelOdds | null
   /** Full-game total ladder. */
   ladder: LadderRung[]
+  /** Where the model has the full-game margin (home minus away) ending. null once final. */
+  margin_projection?: { margin_mean: number; margin_sd: number } | null
   /** Always four entries, Q1-Q4. */
   quarters: QuarterSummary[]
   risk: GameRisk
@@ -269,6 +271,8 @@ export interface QuarterPoint {
 
 export interface GameDetail {
   game: Game
+  /** Full-game spreads (overtime counts). Empty when Kalshi has no market. */
+  game_spreads?: LadderRung[]
   /** Quarter totals and spreads, Q1-Q4. Lists are empty when Kalshi has no market. */
   quarter_markets: QuarterMarkets[]
   timeline: TimelinePoint[]
