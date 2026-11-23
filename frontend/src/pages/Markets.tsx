@@ -15,7 +15,7 @@ function TeamRow({ team, show, lead }: { team: TeamSide; show: boolean; lead: bo
     <div className="flex items-center gap-3">
       <span className="h-6 w-1 shrink-0 rounded-full" style={{ background: teamColor(team.color) }} />
       <span className="w-12 text-[17px] font-semibold text-white">{team.abbr}</span>
-      <span className="min-w-0 flex-1 truncate text-[13px] text-dim">{team.name}</span>
+      <span className="min-w-0 flex-1 break-words text-[13px] text-dim">{team.name}</span>
       {show && <span className={clsx('num text-2xl font-semibold', lead ? 'text-white' : 'text-mute')}>{team.score}</span>}
     </div>
   )
@@ -99,10 +99,10 @@ function AgentLine() {
         <LiveDot color={tone.color} size={9} pulse={agent.state === 'acting'} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-white">
+        <div className="break-words text-sm font-medium text-white">
           Agent: {agent.state === 'paused' ? 'paused' : agent.focus || tone.label}
         </div>
-        <div className="mt-0.5 truncate text-[13px] text-mute">
+        <div className="mt-0.5 break-words text-[13px] text-mute">
           {last ? `Last move: ${last.headline} · ${relTime(last.ts)}` : 'No trades yet. It buys the under late in games when the price is right.'}
         </div>
       </div>

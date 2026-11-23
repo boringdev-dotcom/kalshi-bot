@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -310,6 +311,19 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
         return {"ok": True}
 
     # ---------------------------------------------------------------- learning
+    @app.get("/api/account/history")
+    async def account_history(since: Optional[str] = None) -> dict[str, Any]:
+        """Account value from `since` (ISO time; omit for all of it), deposits and withdrawals taken out."""
+        when = None
+        if since:
+            try:
+                when = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(422, "since must be an ISO time")
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+        return engine.account_history(when)
+
     @app.get("/api/learning")
     async def get_learning() -> dict[str, Any]:
         return engine.learning_state()
@@ -343,6 +357,11 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
         except Exception as exc:
             log.exception("favs failed")
             raise HTTPException(502, f"The agent could not pick right now: {type(exc).__name__}")
+
+    @app.get("/api/favs/{game_id}")
+    async def favs_state(game_id: str) -> dict[str, Any]:
+        """The last favs picked on this game, and whether a pick is running, for a page coming back."""
+        return brain.favs_state(game_id)
 
     @app.post("/api/chat")
     async def chat(body: ChatBody) -> StreamingResponse:

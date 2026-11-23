@@ -22,6 +22,7 @@ import base64
 import math
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
@@ -221,6 +222,31 @@ class KalshiClient:
                 "order_id": row.get("order_id"),
             })
         return out
+
+    async def cash_flows(self) -> list[dict[str, Any]]:
+        """Deposits (+) and withdrawals (-) that reached the balance, in dollars, newest first."""
+        out: list[dict[str, Any]] = []
+        for path, key, sign in (("/portfolio/deposits", "deposits", 1), ("/portfolio/withdrawals", "withdrawals", -1)):
+            cursor: Optional[str] = None
+            for _ in range(10):
+                params: dict[str, Any] = {"limit": 500, **({"cursor": cursor} if cursor else {})}
+                data = await self._request("GET", path, params=params, signed=True)
+                for row in data.get(key) or []:
+                    if row.get("status") != "applied":
+                        continue
+                    stamp = float(row.get("finalized_ts") or row.get("created_ts") or 0)
+                    stamp = stamp / 1000.0 if stamp > 1e12 else stamp
+                    # A deposit's fee never reaches the balance; a withdrawal's fee leaves with it.
+                    cents = float(row.get("amount_cents") or 0) + (-1 if sign > 0 else 1) * float(row.get("fee_cents") or 0)
+                    out.append({
+                        "id": f"{key[:3]}-{row['id']}",
+                        "ts": datetime.fromtimestamp(stamp, timezone.utc).isoformat(timespec="seconds"),
+                        "amount": sign * cents / 100.0,
+                    })
+                cursor = data.get("cursor")
+                if not cursor:
+                    break
+        return sorted(out, key=lambda f: f["ts"], reverse=True)
 
     async def shard_balances(self) -> dict[int, float]:
         """Cash in each exchange shard, in dollars."""

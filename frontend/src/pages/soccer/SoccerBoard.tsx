@@ -20,7 +20,7 @@ function TeamLine({ team, show, lead }: { team: STeam; show: boolean; lead: bool
       <span className="flex w-6 justify-center">
         <Crest team={team} />
       </span>
-      <span className={clsx('min-w-0 flex-1 truncate text-[15px] font-semibold', lead || !show ? 'text-white' : 'text-mute')}>{team.short}</span>
+      <span className={clsx('min-w-0 flex-1 break-words text-[15px] font-semibold', lead || !show ? 'text-white' : 'text-mute')}>{team.short}</span>
       {team.red_cards > 0 && <span className="h-3.5 w-2.5 shrink-0 rounded-[2px] bg-coral" title={`${team.red_cards} red card${team.red_cards > 1 ? 's' : ''}`} />}
       {show && <span className={clsx('num w-6 text-right text-xl font-semibold', lead ? 'text-white' : 'text-mute')}>{team.score}</span>}
     </div>
@@ -41,7 +41,7 @@ function ResultPrices({ m }: { m: SMatch }) {
         const mk = m.winner?.[c.key]
         return (
           <div key={c.key} className="rounded-xl bg-ink-800 px-2.5 py-2 text-center">
-            <div className="truncate text-[11px] text-dim">{c.label}</div>
+            <div className="break-words text-[11px] text-dim">{c.label}</div>
             <div className="num text-[15px] font-semibold text-white">{cents(mk?.yes_ask)}</div>
             <div className="num text-[11px] text-dim">model {c.p != null ? pct(c.p) : '—'}</div>
           </div>
@@ -59,7 +59,7 @@ function MatchCard({ m, mine }: { m: SMatch; mine: SPosition[] }) {
       <div className="mb-3 flex items-center gap-2 text-[13px]">
         {m.state === 'live' && <LiveDot size={7} />}
         <span className={clsx('font-medium', m.state === 'live' ? 'text-mint' : 'text-mute')}>{matchStatus(m)}</span>
-        <span className="truncate text-dim">· {m.league_name}</span>
+        <span className="break-words text-dim">· {m.league_name}</span>
         <ChevronRight size={16} className="ml-auto shrink-0 text-dim transition-transform group-hover:translate-x-0.5 group-hover:text-white" />
       </div>
       <div className="space-y-1.5">
@@ -91,7 +91,7 @@ function MatchCard({ m, mine }: { m: SMatch; mine: SPosition[] }) {
         )}
       </div>
       {m.state === 'live' && m.last_goal && (
-        <p className="mt-2 truncate text-xs text-dim">
+        <p className="mt-2 break-words text-xs text-dim">
           Last goal {m.last_goal.minute}: {m.last_goal.text.replace(/^Goal!\s*/, '')}
         </p>
       )}
@@ -141,7 +141,7 @@ function Account({ positions, account }: { positions: SPosition[]; account: impo
         <div className="mt-4 border-t border-hair pt-2">
           {positions.map((p) => (
             <Link key={p.id} to={`/soccer/${p.match_id}`} className="flex items-baseline justify-between gap-3 py-1.5 text-[13px] hover:text-white">
-              <span className="min-w-0 truncate text-slate-200">
+              <span className="min-w-0 break-words text-slate-200">
                 {p.label} <span className="text-dim">· {p.match_label}</span>
               </span>
               <span className={clsx('num shrink-0 font-semibold', pnlColor(p.pnl))}>{money(p.pnl, { sign: true })}</span>

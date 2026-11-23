@@ -161,7 +161,7 @@ export default function OrderPanel({
           <div className="text-xs text-mute">
             {game.label} · {where}
           </div>
-          <div className="mt-0.5 truncate text-xl font-semibold text-white">Buy {sideLabel(rung, side)}</div>
+          <div className="mt-0.5 break-words text-xl font-semibold text-white">Buy {sideLabel(rung, side)}</div>
         </div>
         <button onClick={() => onPick(null)} className="-mr-2 rounded-full p-2 text-dim hover:bg-white/[0.06] hover:text-white" aria-label="Clear">
           <X size={16} />
@@ -183,7 +183,7 @@ export default function OrderPanel({
                   s === side ? 'bg-white text-ink-950' : 'bg-ink-800 text-slate-200 hover:bg-ink-700',
                 )}
               >
-                <span className="truncate">{sideLabel(rung, s)}</span>
+                <span className="break-words">{sideLabel(rung, s)}</span>
                 <span className="num font-semibold">{cents(price)}</span>
               </button>
             )

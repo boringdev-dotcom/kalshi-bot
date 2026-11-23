@@ -169,7 +169,7 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
         {positions.map((p) => (
           <div key={p.id} className="row !px-0">
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-white">{tradeLabel(p)}</div>
+              <div className="break-words text-sm font-medium text-white">{tradeLabel(p)}</div>
               <div className="num mt-0.5 text-xs text-dim">
                 {p.contracts} at {cents(p.entry_price)} · {pct(p.p_win)} chance now · {p.opened_by === 'agent' ? 'Agent' : 'You'}
               </div>

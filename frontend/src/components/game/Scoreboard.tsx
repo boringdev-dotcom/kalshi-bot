@@ -16,7 +16,7 @@ function TeamLine({ team, lead, big }: { team: TeamSide; lead: boolean; big: boo
       <span className="h-9 w-1.5 shrink-0 rounded-full" style={{ background: teamColor(team.color) }} />
       <div className="min-w-0 flex-1">
         <div className="text-xl font-semibold leading-tight text-white">{team.abbr}</div>
-        <div className="truncate text-[13px] text-mute">{team.name}</div>
+        <div className="break-words text-[13px] text-mute">{team.name}</div>
       </div>
       {big && (
         <div className={clsx('num text-[40px] font-semibold leading-none tracking-tight', lead ? 'text-white' : 'text-mute')}>{team.score}</div>

@@ -533,8 +533,8 @@ export function Stat({
   return (
     <div className={clsx('min-w-0', className)}>
       <div className="label">{label}</div>
-      <div className="num mt-1 truncate text-xl font-semibold text-white">{children}</div>
-      {sub && <div className="mt-0.5 truncate text-xs text-dim">{sub}</div>}
+      <div className="num mt-1 break-words text-xl font-semibold text-white">{children}</div>
+      {sub && <div className="mt-0.5 break-words text-xs text-dim">{sub}</div>}
     </div>
   )
 }

@@ -29,6 +29,17 @@ export interface FavPick {
   reason: string
 }
 
+export interface AccountHistory {
+  points: { ts: string; value: number }[]
+  start: number | null
+  end: number
+  change: number
+  change_pct: number
+  /** Deposits minus withdrawals in the range: left out of `change`. */
+  net_deposits: number
+  simulated: boolean
+}
+
 export interface FavsResult {
   game: string
   generated_at: string
@@ -113,10 +124,15 @@ export const api = {
   deleteMemory: (id: number) => req<{ ok: true }>(`/memory/${id}`, json('DELETE')),
 
   learning: () => req<LearningState>('/learning'),
+  /** Account value from `since` (ISO; omit for all of it), with deposits and withdrawals taken out. */
+  accountHistory: (since?: string) =>
+    req<AccountHistory>(`/account/history${since ? `?since=${encodeURIComponent(since)}` : ''}`),
   train: (episodes: number) => req<TrainResult>('/sim/train', json('POST', { episodes })),
   resetSim: () => req<AppState>('/sim/reset', json('POST')),
 
   favs: (gameId: string) => req<FavsResult>('/favs', json('POST', { game_id: gameId })),
+  /** The last favs the server kept for a game, and whether a pick is running there now. */
+  favsState: (gameId: string) => req<{ result: FavsResult | null; picking: boolean }>(`/favs/${encodeURIComponent(gameId)}`),
 
   chatHistory: () => req<ChatMessage[]>('/chat/history'),
   clearChat: () => req<{ ok: true }>('/chat/history', json('DELETE')),

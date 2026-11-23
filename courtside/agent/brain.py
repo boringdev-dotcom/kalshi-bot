@@ -245,6 +245,9 @@ class Brain:
                 api_key=cfg.anthropic_api_key or None, auth_token=cfg.anthropic_auth_token or None
             )
         self._chat_lock = asyncio.Lock()
+        # Each game's last favs, and picks still running, so they survive the phone leaving the page.
+        self._favs_last: dict[str, dict[str, Any]] = {}
+        self._favs_running: dict[str, asyncio.Task] = {}
 
     @property
     def available(self) -> bool:
@@ -454,7 +457,31 @@ class Brain:
         return game.label, "\n\n".join(context), out
 
     async def favs(self, game_id: str) -> dict[str, Any]:
-        """The agent's favourite bets on one game right now: confidence 85-90%, priced below it, with a reason each."""
+        """The agent's favourite bets on one game right now: confidence 85-90%, priced below it, with a reason each.
+
+        A pick keeps running if the asker goes away, and joining one already running waits for it.
+        The answer is kept so the page can show it again later (see `favs_state`).
+        """
+        task = self._favs_running.get(game_id)
+        if task is None:
+            task = asyncio.create_task(self._pick_favs(game_id))
+            self._favs_running[game_id] = task
+
+            def done(t: asyncio.Task, gid: str = game_id) -> None:
+                self._favs_running.pop(gid, None)
+                if not t.cancelled() and t.exception() is None:
+                    self._favs_last[gid] = t.result()
+                    while len(self._favs_last) > 200:
+                        self._favs_last.pop(next(iter(self._favs_last)))
+
+            task.add_done_callback(done)
+        return await asyncio.shield(task)
+
+    def favs_state(self, game_id: str) -> dict[str, Any]:
+        """The last favs on this game (or None) and whether a pick is running now."""
+        return {"result": self._favs_last.get(game_id), "picking": game_id in self._favs_running}
+
+    async def _pick_favs(self, game_id: str) -> dict[str, Any]:
         if not self.available:
             raise ValueError("Claude is not connected. Add ANTHROPIC_API_KEY to the server.")
         label, context, candidates = self._fav_candidates(game_id)

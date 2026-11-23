@@ -184,6 +184,14 @@ CREATE TABLE IF NOT EXISTS equity (
   book TEXT NOT NULL,
   equity REAL NOT NULL
 );
+
+-- Money moved in or out of the Kalshi account (deposits +, withdrawals -), so the chart can leave it out.
+CREATE TABLE IF NOT EXISTS cash_flows (
+  id TEXT PRIMARY KEY,
+  book TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  amount REAL NOT NULL
+);
 """
 
 # Columns added after a database may already exist: (table, column, definition).

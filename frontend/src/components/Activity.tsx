@@ -114,8 +114,8 @@ function Row({ d, compact }: { d: Decision; compact?: boolean }) {
                     <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3">
                       {facts.map(([k, v]) => (
                         <div key={k} className="min-w-0">
-                          <dt className="truncate text-[11px] text-dim">{prettyKey(k)}</dt>
-                          <dd className="num truncate text-[13px] text-slate-200">{prettyValue(v)}</dd>
+                          <dt className="break-words text-[11px] text-dim">{prettyKey(k)}</dt>
+                          <dd className="num break-words text-[13px] text-slate-200">{prettyValue(v)}</dd>
                         </div>
                       ))}
                     </dl>

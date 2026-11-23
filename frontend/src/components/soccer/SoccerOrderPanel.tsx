@@ -135,7 +135,7 @@ export default function SoccerOrderPanel({
     <div className={bare ? '' : 'surface overflow-hidden'}>
       <div className="flex items-start justify-between gap-3 px-5 pt-4 sm:px-6 sm:pt-5">
         <div className="min-w-0">
-          <div className="truncate text-xs text-mute">
+          <div className="break-words text-xs text-mute">
             {label} · {where(market)}
           </div>
           <div className="mt-0.5 text-xl font-semibold leading-tight text-white">Buy {labelOf(market, side)}</div>
