@@ -71,9 +71,16 @@ Keep it tight: short paragraphs or a few bullets, real numbers, no boilerplate c
 SOCCER_ANALYSIS_ASK = """The owner pressed "Agent analysis" on this soccer match. Be their thinking partner, not a signal service. Use the match briefing and the full commentary above (fresh as of now); call tools only if something is missing.
 
 1. Lead with your read in one or two sentences: how the match is likely to finish (result and goals) against what Kalshi is pricing, and how sure you are.
-2. What in the play matters and which way it pushes: who is on top (shots, shots on target, possession, corners), chances in the commentary, cards and a red card's effect, substitutions, a team chasing the game, the minute. Say plainly what you know and what you are inferring.
+2. What in the play matters and which way it pushes. Look at:
+   - who is on top now, not just overall: run_of_play compares the last 15 minutes with the 15 before (shots, on target, corners, fouls, cards);
+   - chances in the commentary, and cards and a red card's effect;
+   - substitutions and the lineups: an attacker on or a defender on to protect a lead, who has been taken off, the formations;
+   - standout players in players_who_did_something: shots, a keeper making saves, a defender on a yellow;
+   - a team chasing the game, and the minute;
+   - form_last_5, league_table and head_to_head, for how these sides usually play and what each needs from the match.
+   Say plainly what you know and what you are inferring.
 3. If they hold positions in this match, how each one looks now and what would make you want out.
-4. Where prices look off to you against the model and the run of play, with the numbers, and the best case against your view. Remember the model only knows the score, the minute, red cards and the pre-match odds; it does not see who is dominating. If nothing looks off, say so.
+4. Where prices look off to you against the model and the run of play, with the numbers, and the best case against your view. Remember the model only knows the score, the minute, red cards and the pre-match odds; it does not see who is dominating, the lineups, the players or form. If nothing looks off, say so.
 5. What to watch over the next ten minutes that would change the read.
 
 Keep it tight: short paragraphs or a few bullets, real numbers, no boilerplate caveats. End with one question back to them if their read would sharpen yours. Do not place or close any orders unless they ask."""
@@ -85,7 +92,7 @@ FAVS_ASK = """The owner pressed "Show favs" on this game. Go through every candi
 A pick must meet all of these:
 - Your confidence that the side wins is between 85% and 90%. Not higher: above 90% the price leaves almost nothing to win. Not lower: the owner wants likely winners.
 - Its ask is below your confidence in cents (confidence 88% means you would pay at most 87c), so it is profitable at the current price.
-- Your confidence is your own judgement from everything in the briefing: the model's probability, the price, the score and clock, the play-by-play or commentary, fouls, cards, who is on the floor, pace, how a close finish plays out. Do not just copy the model; say so in the reason when you differ from it by more than a few points.
+- Your confidence is your own judgement from everything in the briefing: the model's probability, the price, the score and clock, the play-by-play or commentary, fouls, cards, who is on the floor, pace, how a close finish plays out. In soccer also weigh run_of_play (who has been on top in the last 15 minutes against the 15 before), substitutions and lineups, standout players, and form, table position and head-to-head; the soccer model sees none of these. Do not just copy the model; say so in the reason when you differ from it by more than a few points.
 
 Pick only from the candidate ids given. Several picks are fine (aim for up to 6, best first); none is a fine answer when nothing honestly fits the band. Avoid near-duplicates (two strikes on the same total) unless both are genuinely good, and say which you prefer. Each reason is one short sentence (under 25 words) a trader can act on. The summary is one or two sentences on the game state and what drove the picks."""
 
@@ -175,7 +182,7 @@ TOOLS = [
           {"game": {"type": "string", "description": "Team abbreviation or game label, e.g. 'CLE' or 'MEM @ CLE'"},
            "quarter": {"type": "integer", "description": "Optional: only this period (5 = first overtime)"}},
           ["game"]),
-    _tool("get_soccer", "The soccer desk: with no match, every match on the board (league, score, minute, Kalshi winner prices and the model's result probabilities); with a match, its full briefing (stats, goals and cards, every Kalshi line with the model's probability, positions).",
+    _tool("get_soccer", "The soccer desk: with no match, every match on the board (league, score, minute, Kalshi winner prices and the model's result probabilities); with a match, its full briefing (stats, goals and cards, who has been on top in the last 15 minutes, lineups and substitutions, player stats, recent form, league table, head-to-head, every Kalshi line with the model's probability, positions).",
           {"match": {"type": "string", "description": "Optional team name or match label, e.g. 'Arsenal' or 'Newcastle vs Arsenal'"}}),
     _tool("get_positions", "Open positions with live mark, P&L, current win probability and risk flags."),
     _tool("get_trades", "Closed trades, newest first, with exit reason and (for early exits on finished games) whether selling beat holding.",

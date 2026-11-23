@@ -18,6 +18,7 @@ from ..config import Config
 from ..db import DB
 from ..domain import now_iso
 from ..kalshi.client import KalshiError
+from .context import run_of_play
 from .domain import LEAGUE_BY_KEY, LEAGUES, Match, SMarket
 from .feed import SoccerFeed
 
@@ -351,6 +352,7 @@ class SoccerDesk:
     # ---------------------------------------------------------------- the agent
     def briefing(self, m: Match) -> dict[str, Any]:
         """Everything about one match, for Agent analysis."""
+        by_name = lambda d: {(m.home.short if k == "home" else m.away.short): v for k, v in d.items()} or None  # noqa: E731
         return {
             "match": f"{m.home.name} (home) vs {m.away.name} (away)", "league": LEAGUE_BY_KEY[m.league].name,
             "state": m.state, "minute": m.clock, "status": m.status, "kickoff": m.start_time,
@@ -359,6 +361,12 @@ class SoccerDesk:
             "red_cards": {m.home.short: m.home.red_cards, m.away.short: m.away.red_cards},
             "stats": {k: {m.home.short: v.get("home"), m.away.short: v.get("away")} for k, v in m.stats.items()},
             "events": [f"{e['minute']} {({'home': m.home.short, 'away': m.away.short}).get(e['team'] or '', '')} {e['type']}: {e['text']}" for e in m.events],
+            "run_of_play": run_of_play(m),
+            "lineups": by_name(m.lineups),
+            "players_who_did_something": by_name(m.players),
+            "form_last_5": by_name(m.form),
+            "league_table": by_name(m.table),
+            "head_to_head": m.head_to_head,
             "pre_match_expected_goals": {m.home.short: m.lam_home, m.away.short: m.lam_away, "source": m.prior_source},
             "model_projection": m.projection,
             "kalshi_total_line": implied_line([x for x in m.markets if x.segment == "match"]),

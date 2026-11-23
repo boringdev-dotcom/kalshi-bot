@@ -115,6 +115,12 @@ class Match:
     stats: dict[str, dict[str, float]] = field(default_factory=dict)  # by stat name: {home, away}
     commentary: list[dict[str, Any]] = field(default_factory=list)
     projection: Optional[dict[str, Any]] = None
+    # From the match summary, for the agent (see soccer/context.py); keyed 'home' / 'away'.
+    lineups: dict[str, Any] = field(default_factory=dict)
+    players: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    form: dict[str, list[str]] = field(default_factory=dict)
+    table: dict[str, Any] = field(default_factory=dict)
+    head_to_head: Optional[dict[str, Any]] = None
     summary_final: bool = False  # the summary has been read after full time
 
     @property
