@@ -28,6 +28,8 @@ log = logging.getLogger(__name__)
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/soccer/{code}/{what}"
 EASTERN = ZoneInfo("America/New_York")
 MONTHS = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split()
+LEAGUES_PER_ROUND = 2  # leagues whose Kalshi prices are fetched in one round (every couple of seconds)
+RETRY_S = 8.0  # a league turned away by Kalshi tries again this soon
 DAYS_AHEAD = 6  # fixtures on the board: yesterday through a week out
 KEEP_FINAL_HOURS = 14  # finished matches stay on the board this long after kickoff
 STATS = {
@@ -54,6 +56,16 @@ EVENT_KINDS = ("goal", "penalty", "own goal", "red card", "yellow card", "substi
 
 def _status(ok: bool, detail: str) -> dict[str, Any]:
     return {"ok": ok, "detail": detail, "updated_at": now_iso()}
+
+
+def regulation_goals(lines: Any) -> Optional[int]:
+    """Goals in the first two halves from ESPN linescores, or None if they are not there."""
+    if not lines or len(lines) < 2:
+        return None
+    try:
+        return sum(int(float(x.get("displayValue") or x.get("value") or 0)) for x in lines[:2])
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def minute_of(display: str, period: int) -> float:
@@ -192,7 +204,15 @@ class SoccerFeed:
         m.state = {"pre": "pre", "in": "live", "post": "final"}.get(kind.get("state", "pre"), "pre")
         if kind.get("name") in ("STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_ABANDONED"):
             m.state = "final" if kind.get("name") == "STATUS_ABANDONED" else "pre"
+        before = m.period
         m.period = int(status.get("period") or 0)
+        if m.period >= 3:  # extra time: keep the score at 90 minutes, which is what Kalshi settles on
+            for key, side in (("home", m.home), ("away", m.away)):
+                reg = regulation_goals(sides[key].get("linescores"))
+                if reg is not None:
+                    side.reg_score = reg
+                elif side.reg_score is None and before == 2:
+                    side.reg_score = side.score  # not yet updated this round: the last score seen in the 90
         m.clock = status.get("displayClock") or ""
         m.status = kind.get("shortDetail") or kind.get("description") or ""
         m.halftime = kind.get("name") == "STATUS_HALFTIME"
@@ -230,11 +250,12 @@ class SoccerFeed:
     async def _refresh_kalshi(self, now: float) -> None:
         live = {m.league for m in self.matches.values() if m.state == "live"}
         on_board = {m.league for m in self.matches.values()}
-        due = []
-        for lg in LEAGUES:
-            if lg.key in on_board and now >= self._next_kalshi.get(lg.key, 0.0):
-                self._next_kalshi[lg.key] = now + (5 if lg.key in live else 60)
-                due.append(lg)
+        # A couple of leagues per round (live ones first), so seven leagues' six series each do not
+        # hit Kalshi in one burst and get turned away.
+        due = sorted((lg for lg in LEAGUES if lg.key in on_board and now >= self._next_kalshi.get(lg.key, 0.0)),
+                     key=lambda lg: (lg.key not in live, self._next_kalshi.get(lg.key, 0.0)))[:LEAGUES_PER_ROUND]
+        for lg in due:
+            self._next_kalshi[lg.key] = now + (5 if lg.key in live else 60)
         if not due:
             return
         try:
@@ -247,6 +268,7 @@ class SoccerFeed:
             for (lg, suffix), res in zip(jobs, results):
                 if isinstance(res, Exception):
                     failed += 1
+                    self._next_kalshi[lg.key] = min(self._next_kalshi[lg.key], now + RETRY_S)  # try again soon
                     continue
                 by_league.setdefault(lg.key, {})[suffix] = res
             if failed == len(jobs):
@@ -395,6 +417,8 @@ def apply_summary(m: Match, data: dict[str, Any]) -> None:
         side = m.home if c.get("homeAway") == "home" else m.away
         teams[str((c.get("team") or {}).get("id"))] = "home" if side is m.home else "away"
         lines = c.get("linescores") or []
+        if m.extra_time and regulation_goals(lines) is not None:
+            side.reg_score = regulation_goals(lines)
         if lines and m.first_half_over:
             try:
                 side.half_score = int(float(lines[0].get("displayValue") or lines[0].get("value") or 0))

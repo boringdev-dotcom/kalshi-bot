@@ -316,6 +316,10 @@ export interface Position {
   simulated: boolean
   strategy_id: string | null
   exit_profile: string | null
+  /** Your bet only: the agent may sell it if it goes badly wrong. */
+  watch: boolean
+  /** Claude's latest read on a watched bet. */
+  watch_note: WatchNote | null
   risk: GameRisk
 }
 
@@ -548,6 +552,8 @@ export interface OrderRequest {
   contracts: number
   /** Limit price in cents for the side being bought. */
   price: number
+  /** Let the agent sell it if it goes badly wrong. */
+  watch?: boolean
 }
 
 export interface TrainResult {
@@ -556,4 +562,13 @@ export interface TrainResult {
   win_rate: number
   pnl: number
   lessons: number
+}
+
+export interface WatchNote {
+  action: 'sell' | 'hold'
+  reason: string
+  concern: 'low' | 'medium' | 'high'
+  /** Claude's own chance this bet wins, 0-1. */
+  win_chance: number
+  at: string
 }

@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from './api'
+import type { WatchNote } from './types'
 
 export type SSide = 'yes' | 'no'
 export type SSegment = 'match' | '1h'
@@ -100,6 +101,9 @@ export interface SPosition {
   mode: string
   opened_at: string
   can_sell: boolean
+  /** The agent may sell it if it goes badly wrong. */
+  watch: boolean
+  watch_note: WatchNote | null
 }
 
 export interface STrade {
@@ -174,9 +178,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const soccerApi = {
   board: () => req<SBoard>(''),
   match: (id: string) => req<SDetail>(`/matches/${encodeURIComponent(id)}`),
-  order: (o: { ticker: string; side: SSide; contracts: number; price: number }) =>
+  order: (o: { ticker: string; side: SSide; contracts: number; price: number; watch?: boolean }) =>
     req<SPosition>('/orders', { method: 'POST', body: JSON.stringify(o) }),
   close: (id: number) => req<STrade>(`/positions/${id}/close`, { method: 'POST' }),
+  watch: (id: number, on: boolean) => req<SPosition>(`/positions/${id}/watch`, { method: 'POST', body: JSON.stringify({ on }) }),
   trades: (limit = 30) => req<STrade[]>(`/trades?limit=${limit}`),
 }
 

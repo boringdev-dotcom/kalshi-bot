@@ -200,10 +200,12 @@ MIGRATIONS = [
     ("positions", "kind", "TEXT NOT NULL DEFAULT 'total'"),
     ("positions", "team", "TEXT"),
     ("positions", "label", "TEXT"),
+    ("positions", "watch", "INTEGER NOT NULL DEFAULT 0"),
+    ("soccer_positions", "watch", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 JSON_COLUMNS = {"context", "memory_ids", "data", "tags", "tools", "plays", "by_quarter"}
-BOOL_COLUMNS = {"simulated", "training", "pinned"}
+BOOL_COLUMNS = {"simulated", "training", "pinned", "watch"}
 
 
 class DB:

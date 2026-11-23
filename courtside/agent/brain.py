@@ -42,7 +42,7 @@ How the desk works
 - A learner tracks results by situation (cushion, time left, how close the game is) and by exit style, and shifts behaviour toward what has actually made money.
 - Memory holds the owner's standing guidance, lessons from past trades, and a record of each trade.
 - Each game also carries what is happening on the floor, read from ESPN's play-by-play (made-up players in practice games): who is on the court, team fouls and who is in the bonus, players in foul trouble, hot shooters, runs, scoring bursts and droughts, benches in, and who is out tonight. get_games has the headline notes; get_players has the full box; get_plays has every play of a game, live or finished (finished real games are archived with their play-by-play and box score, so you can go back to them). Every trade, the owner's and the agent's, saves the patterns that were showing when it was placed, and get_learning groups results by pattern. The owner trades partly so the agent can learn from their reads: when they ask what to make of a pattern, answer from that record and the game in front of them.
-- A separate soccer desk covers Europe's top five leagues (Premier League, LaLiga, Serie A, Bundesliga, Ligue 1): match winner (home / draw / away), total goals, goal spreads, and the same three for the first half. The owner trades soccer by hand only; the automated loop never touches it, and it has its own positions and P&L. A Poisson goals model, fitted before kickoff to the bookmaker's odds (or Kalshi's own prices), prices every line in play from the score, the minute and red cards. get_soccer lists the board or briefs one match. In soccer market data "yes" is the outcome named and "no" is everything else.
+- A separate soccer desk covers Europe's top five leagues (Premier League, LaLiga, Serie A, Bundesliga, Ligue 1) plus the Champions League and Europa League: match winner (home / draw / away), total goals, goal spreads, and the same three for the first half. Every match market settles on 90 minutes plus stoppage time; in a cup knockout, extra time and penalties do not count. In the cups, the table is the league phase's single 36-team table, and a team may play to its qualifying position rather than to win. The owner trades soccer by hand only; the automated loop never touches it, and it has its own positions and P&L. A Poisson goals model, fitted before kickoff to the bookmaker's odds (or Kalshi's own prices), prices every line in play from the score, the minute and red cards. get_soccer lists the board or briefs one match. In soccer market data "yes" is the outcome named and "no" is everything else.
 - Quarter markets (total and spread for each of Q1-Q4; Q4 excludes overtime) are the owner's to trade by hand. The automated loop places no orders there. It keeps a shadow book instead: early in each quarter and again with about six minutes left it records what every quarter market cost and what the model thought, then scores them when the quarter ends. get_learning returns that book and the owner's own quarter record. If they ask whether to let the agent trade quarters, answer from those numbers and say plainly when there are too few to judge. In market data "over" always means the YES side and "under" the NO side; for a spread, YES is the named team winning the quarter by more than the line. Use the labels the tools give you.
 
 Your tools read and change that real system. Use them: never state a position, price, result or setting from memory of this conversation when a tool can tell you the current truth. The desk snapshot at the top of each message is fresh as of that message.
@@ -115,6 +115,28 @@ FAVS_SCHEMA = {
         },
     },
     "required": ["summary", "picks"],
+    "additionalProperties": False,
+}
+
+WATCH_ASK = """The owner placed the bet below themselves and asked you to watch it while they are away. They cannot see the game; you are their eyes. Decide one thing: sell it now at the bid, or hold.
+
+Think in money, not feelings. Selling now gets the bid (`sell_now` says what that pays back). Holding is worth your honest chance that this side wins, times 100 cents. Sell when your honest chance is clearly below the bid, meaning what is left is better taken than gambled. Hold when it is clearly above. When it is close, lean towards holding unless the game is still moving against the bet.
+
+Your honest chance is your own judgement, not the model's number. The model sees the score, the clock and the pace; you can see what it cannot. In basketball: runs and who answered them, foul trouble and the bonus, who is on the floor, a starter hurt or benched, garbage time, a team that has stopped defending, late fouling to extend a close game, overtime risk. In soccer: the run of play (who has had the shots and corners lately), a team chasing the game, red cards, substitutions, tired legs, a keeper making saves. Read the recent plays or commentary, not just the summary numbers.
+
+Do not sell on noise. One basket, one quiet stretch or one price twitch is not a reason. The owner chose this bet and wants it held unless it has truly turned. Do not sell a bet you still rate well above the bid just to lock in a small profit or limit a small loss.
+
+concern says how soon you want to look again: high if the next few minutes could decide it, medium if it is worth keeping an eye on, low if it looks safe. reason is one or two plain sentences naming the specific things that decided it."""
+
+WATCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["sell", "hold"]},
+        "win_chance": {"type": "number"},
+        "concern": {"type": "string", "enum": ["low", "medium", "high"]},
+        "reason": {"type": "string"},
+    },
+    "required": ["action", "win_chance", "concern", "reason"],
     "additionalProperties": False,
 }
 
@@ -435,16 +457,14 @@ class Brain:
 
         match = self.soccer.by_id.get(game_id) if self.soccer is not None else None
         if match is not None:
+            label, context = self.context(game_id)
             for m in match.markets:
                 if match.settles_yes(m) is not None or m.p_yes is None:
                     continue
                 where = f"{'1st half' if m.segment == '1h' else 'full match'} {m.kind}"
                 add(m.ticker, "yes", m.label("yes", match), where, m.yes_ask, m.yes_bid, m.p_yes, m.volume)
                 add(m.ticker, "no", m.label("no", match), where, m.no_ask, m.no_bid, 1 - m.p_yes, m.volume)
-            context = [f"[soccer match briefing: {match.label}]\n{json.dumps(self.soccer.briefing(match), default=str)}"]
-            if match.commentary:
-                context.append(f"[commentary: {match.label}, all {len(match.commentary)} lines, oldest first]\n{self.soccer.commentary_text(match)}")
-            return match.label, "\n\n".join(context), out
+            return label, context, out
 
         game = self.engine.by_id.get(game_id)
         if game is None:
@@ -458,10 +478,65 @@ class Brain:
         for r, where in rungs:
             add(r.ticker, "under", r.label("under"), where, r.no_ask, r.no_bid, r.p_under, r.volume)
             add(r.ticker, "over", r.label("over"), where, r.yes_ask, r.yes_bid, 1 - r.p_under, r.volume)
-        context = [f"[game briefing: {game.label}]\n{json.dumps(self.game_briefing(game), default=str)}"]
-        if game.plays:
-            context.append(f"[play-by-play: {game.label}, all {len(game.plays)} plays, oldest first; score is {game.away.abbr}-{game.home.abbr}]\n{play_lines(game.plays)}")
-        return game.label, "\n\n".join(context), out
+        label, context = self.context(game_id)
+        return label, context, out
+
+    def context(self, game_id: str, tail: Optional[int] = None) -> tuple[str, str]:
+        """(label, text): the briefing plus the play-by-play or commentary for one game or match.
+        `tail` keeps only the latest lines, for quick looks."""
+        match = self.soccer.by_id.get(game_id) if self.soccer is not None else None
+        if match is not None:
+            parts = [f"[soccer match briefing: {match.label}]\n{json.dumps(self.soccer.briefing(match), default=str)}"]
+            lines = match.commentary[-tail:] if tail else match.commentary
+            if lines:
+                text = "\n".join(f"{c['minute'] or '-'} {c['text']}" for c in lines)
+                parts.append(f"[commentary: {match.label}, {'latest ' if tail else 'all '}{len(lines)} lines, oldest first]\n{text}")
+            return match.label, "\n\n".join(parts)
+        game = self.engine.by_id.get(game_id)
+        if game is None:
+            raise ValueError("No such game on the board")
+        parts = [f"[game briefing: {game.label}]\n{json.dumps(self.game_briefing(game), default=str)}"]
+        plays = game.plays[-tail:] if tail else game.plays
+        if plays:
+            parts.append(f"[play-by-play: {game.label}, {'latest ' if tail else 'all '}{len(plays)} plays, oldest first; "
+                         f"score is {game.away.abbr}-{game.home.abbr}]\n{play_lines(plays)}")
+        return game.label, "\n\n".join(parts)
+
+    # ------------------------------------------------------------ watching
+    async def review_watched(self, game_id: str, bet: dict[str, Any], why: str) -> Optional[dict[str, Any]]:
+        """Sell or hold on a bet the owner asked the agent to watch. None means no answer (the rule
+        takes over until the next look)."""
+        if not self.available:
+            return None
+        try:
+            _, context = self.context(game_id, tail=150)
+            content = (f"{context}\n\n[the bet you are watching]\n{json.dumps(bet, default=str)}\n\n"
+                       f"[why you are looking now] {why}\n\n{WATCH_ASK}")
+            resp = await asyncio.wait_for(
+                self.client.beta.messages.create(
+                    model=self.cfg.claude_model,
+                    max_tokens=4000,
+                    betas=[FALLBACK_BETA],
+                    fallbacks="default",
+                    system=[{"type": "text", "text": CHAT_SYSTEM, "cache_control": {"type": "ephemeral"}}],
+                    output_config={"effort": "medium", "format": {"type": "json_schema", "schema": WATCH_SCHEMA}},
+                    messages=[{"role": "user", "content": content}],
+                ),
+                timeout=90,
+            )
+            if resp.stop_reason != "end_turn":
+                log.warning("watch review stopped: %s", resp.stop_reason)
+                return None
+            out = json.loads(next(b.text for b in resp.content if b.type == "text"))
+            if validate(WATCH_SCHEMA, out) is not None:
+                return None
+        except (asyncio.TimeoutError, anthropic.APIError, StopIteration, json.JSONDecodeError, ValueError) as exc:
+            log.warning("watch review unavailable (%s); the fixed rule covers this bet", type(exc).__name__)
+            return None
+        chance = float(out["win_chance"])
+        out["win_chance"] = round(min(max(chance / 100.0 if chance > 1 else chance, 0.0), 1.0), 3)
+        out["reason"] = " ".join(out["reason"].split())
+        return out
 
     async def favs(self, game_id: str) -> dict[str, Any]:
         """The agent's favourite bets on one game right now: confidence 85-90%, priced below it, with a reason each.

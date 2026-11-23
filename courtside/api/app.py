@@ -48,6 +48,11 @@ class OrderBody(BaseModel):
     side: str = Field(pattern="^(under|over)$")
     contracts: int = Field(ge=1, le=100000)
     price: int = Field(ge=1, le=99)
+    watch: bool = False
+
+
+class WatchBody(BaseModel):
+    on: bool
 
 
 class PlaybookPatch(BaseModel):
@@ -70,6 +75,7 @@ class SoccerOrderBody(BaseModel):
     side: str = Field(pattern="^(yes|no)$")
     contracts: int = Field(ge=1, le=100000)
     price: int = Field(ge=1, le=99)
+    watch: bool = False
 
 
 class FavsBody(BaseModel):
@@ -222,6 +228,13 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
         except TradeError as exc:
             raise guard(exc)
 
+    @app.post("/api/positions/{position_id}/watch")
+    async def watch_position(position_id: int, body: WatchBody) -> dict[str, Any]:
+        try:
+            return engine.set_watch(position_id, body.on)
+        except TradeError as exc:
+            raise guard(exc)
+
     @app.get("/api/trades")
     async def get_trades(limit: int = 100) -> list[dict[str, Any]]:
         return engine.trades_api(min(max(limit, 1), 500))
@@ -236,7 +249,7 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
     @app.post("/api/orders")
     async def post_order(body: OrderBody) -> dict[str, Any]:
         try:
-            return await engine.manual_order(body.ticker, body.side, body.contracts, body.price)
+            return await engine.manual_order(body.ticker, body.side, body.contracts, body.price, watch=body.watch)
         except TradeError as exc:
             raise guard(exc)
 
@@ -255,7 +268,7 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
     @app.post("/api/soccer/orders")
     async def soccer_order(body: SoccerOrderBody) -> dict[str, Any]:
         try:
-            return await soccer.order(body.ticker, body.side, body.contracts, body.price)
+            return await soccer.order(body.ticker, body.side, body.contracts, body.price, watch=body.watch)
         except SoccerTradeError as exc:
             raise HTTPException(400, str(exc))
 
@@ -263,6 +276,13 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
     async def soccer_close(position_id: int) -> dict[str, Any]:
         try:
             return await soccer.close(position_id)
+        except SoccerTradeError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.post("/api/soccer/positions/{position_id}/watch")
+    async def soccer_watch(position_id: int, body: WatchBody) -> dict[str, Any]:
+        try:
+            return soccer.set_watch(position_id, body.on)
         except SoccerTradeError as exc:
             raise HTTPException(400, str(exc))
 

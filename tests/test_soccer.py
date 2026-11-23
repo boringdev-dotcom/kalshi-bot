@@ -282,7 +282,7 @@ def test_soccer_api_routes(tmp_path, monkeypatch):
     desk.matches, desk.by_id = [m], {m.id: m}
     with TestClient(app) as client:
         board = client.get("/api/soccer").json()
-        assert [lg["key"] for lg in board["leagues"]] == ["epl", "laliga", "seriea", "bundesliga", "ligue1"]
+        assert [lg["key"] for lg in board["leagues"]] == ["epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "uel"]
         assert board["matches"][0]["winner"]["home"]["yes_ask"] == 45 and board["account"]["mode"] == "paper"
         detail = client.get(f"/api/soccer/matches/{m.id}").json()
         assert {"markets", "events", "stats", "commentary", "prior", "positions", "account"} <= set(detail)
@@ -529,3 +529,66 @@ def test_summary_gives_the_agent_lineups_players_form_table_and_run_of_play():
     assert b["lineups"]["Augsburg"]["formation"] == "4-3-3" and b["league_table"]["Mainz"]["position"] == "4"
     assert b["run_of_play"]["last_window"]["Mainz"]["shots"] == 2
     assert list(b["form_last_5"]) == ["Augsburg"] and b["players_who_did_something"]["Mainz"][0]["yellow"] == 1
+
+
+def test_cups_are_on_the_board_and_knockouts_settle_on_90_minutes():
+    from courtside.soccer.domain import LEAGUE_BY_KEY
+    from courtside.soccer.feed import regulation_goals
+
+    assert (LEAGUE_BY_KEY["ucl"].espn, LEAGUE_BY_KEY["ucl"].kalshi) == ("uefa.champions", "KXUCL")
+    assert (LEAGUE_BY_KEY["uel"].espn, LEAGUE_BY_KEY["uel"].kalshi) == ("uefa.europa", "KXUEL")
+
+    desk, _ = make_desk()
+    m = with_markets(a_match(league="ucl", lam_home=1.6, lam_away=1.1))
+    model.price(m)
+    desk.matches, desk.by_id = [m], {m.id: m}
+    home = next(x for x in m.markets if x.kind == "winner" and x.outcome == "home")
+    draw = next(x for x in m.markets if x.kind == "winner" and x.outcome == "tie")
+    over = next(x for x in m.markets if x.kind == "total" and x.strike == 2.5)
+    for mk in (home, draw, over):
+        asyncio.run(desk.order(mk.ticker, "yes", 10, 60))
+
+    # 1-1 after 90 minutes, then Augsburg score twice in extra time.
+    m.state, m.period, m.halftime = "live", 3, False
+    m.home.half_score, m.away.half_score = 0, 1
+    assert not m.segment_done("match")  # extra time, but the score at 90 is not known yet
+    m.home.reg_score, m.away.reg_score = regulation_goals([{"value": 0}, {"value": 1}]), regulation_goals([{"value": 1}, {"value": 0}])
+    m.home.score, m.away.score = 3, 1
+    desk._settle()
+    trades = {t["label"]: t for t in desk.trades_api()}
+    assert trades["Draw"]["exit_reason"] == "settled_win"  # 1-1 at 90 is what Kalshi pays on
+    assert trades["Augsburg to win"]["exit_reason"] == "settled_loss"
+    assert trades["Over 2.5 goals"]["exit_reason"] == "settled_loss"
+    assert regulation_goals([{"value": 2}]) is None and regulation_goals(None) is None
+
+
+def test_kalshi_prices_are_fetched_a_couple_of_leagues_at_a_time_and_refusals_retry_soon():
+    from courtside.soccer.domain import LEAGUES
+    from courtside.soccer.feed import LEAGUES_PER_ROUND, RETRY_S, SoccerFeed
+
+    class Kalshi:
+        calls: list[str] = []
+
+        async def events(self, ticker):
+            self.calls.append(ticker)
+            if ticker.startswith("KXEPL"):
+                raise RuntimeError("429 too many requests")
+            return []
+
+    k = Kalshi()
+    feed = SoccerFeed(k)
+    for i, lg in enumerate(LEAGUES):
+        m = a_match(league=lg.key)
+        m.id = f"soccer-{i}"
+        feed.matches[m.id] = m
+
+    asyncio.run(feed._refresh_kalshi(1000.0))
+    leagues = {next(lg.key for lg in LEAGUES if t.startswith(lg.kalshi) and t[len(lg.kalshi):] in {"GAME", "TOTAL", "SPREAD", "1H", "1HTOTAL", "1HSPREAD"}) for t in k.calls}
+    assert len(leagues) == LEAGUES_PER_ROUND and "epl" in leagues
+    assert feed._next_kalshi["epl"] == 1000.0 + RETRY_S  # turned away: back soon
+    assert all(v == 1060.0 for key, v in feed._next_kalshi.items() if key != "epl")
+
+    k.calls.clear()
+    asyncio.run(feed._refresh_kalshi(1002.0))  # the next round takes the next leagues
+    assert k.calls and not any(t.startswith("KXEPL") for t in k.calls)
+    asyncio.run(feed.aclose())

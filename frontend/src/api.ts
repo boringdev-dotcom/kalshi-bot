@@ -109,6 +109,7 @@ export const api = {
 
   positions: () => req<Position[]>('/positions'),
   closePosition: (id: number) => req<Trade>(`/positions/${id}/close`, json('POST')),
+  watchPosition: (id: number, on: boolean) => req<Position>(`/positions/${id}/watch`, json('POST', { on })),
   trades: (limit = 100) => req<Trade[]>(`/trades${qs({ limit })}`),
   decisions: (limit = 100, gameId?: string) => req<Decision[]>(`/decisions${qs({ limit, game_id: gameId })}`),
   placeOrder: (order: OrderRequest) => req<Position>('/orders', json('POST', order)),

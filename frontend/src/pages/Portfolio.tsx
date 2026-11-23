@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import { api, ApiError, type AccountHistory } from '../api'
 import { Badge, Button, Dialog, Empty, Segmented, SimTag, Skeleton, Stat, Ticker } from '../components/ui'
+import { WatchPill } from '../components/Watch'
 import { cents, money, pct, pnlColor, relTime, segmentLabel, shortDate, tradeLabel } from '../format'
 import { soccerApi, usePoll, type SPosition } from '../soccer'
 import { useStore } from '../store'
@@ -144,7 +145,7 @@ function AccountChart({ h, range, onRange }: { h: AccountHistory | null; range: 
 
 const who = (by: 'agent' | 'user') => (by === 'agent' ? 'Agent' : 'You')
 
-function PositionRow({ p, onSell }: { p: Position; onSell: (p: Position) => void }) {
+function PositionRow({ p, onSell, onWatch }: { p: Position; onSell: (p: Position) => void; onWatch: (p: Position, on: boolean) => Promise<void> }) {
   const worry = p.risk?.level && p.risk.level !== 'low' ? (p.risk.flags?.[0] ?? (p.risk.level === 'high' ? 'High risk' : 'Caution')) : null
   return (
     <motion.li layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="row">
@@ -163,6 +164,11 @@ function PositionRow({ p, onSell }: { p: Position; onSell: (p: Position) => void
           {p.simulated && <SimTag />}
           {p.mode === 'live' && <Badge tone="coral">Live</Badge>}
         </div>
+        {p.opened_by === 'user' && (
+          <div className="mt-1.5">
+            <WatchPill on={p.watch} note={p.watch_note} onChange={(on) => onWatch(p, on)} />
+          </div>
+        )}
       </div>
       <div className="hidden w-[200px] shrink-0 sm:block">
         <div className="num text-[13px] text-slate-200" title={`${pct(p.p_win_entry)} when it was bought`}>
@@ -188,7 +194,7 @@ function PositionRow({ p, onSell }: { p: Position; onSell: (p: Position) => void
 /* ───────────────────────── Soccer ───────────────────────── */
 
 /** Soccer keeps its own book; it is listed here so every open bet is in one place. Tap to manage it on its match page. */
-function SoccerRow({ p }: { p: SPosition }) {
+function SoccerRow({ p, onWatch }: { p: SPosition; onWatch: (on: boolean) => Promise<void> }) {
   return (
     <li className="border-b border-hair last:border-b-0">
       <Link to={`/soccer/${p.match_id}`} className="row row-hover group !border-b-0">
@@ -203,6 +209,9 @@ function SoccerRow({ p }: { p: SPosition }) {
             <span>·</span>
             <span>{relTime(p.opened_at)}</span>
             {p.mode === 'live' && <Badge tone="coral">Live</Badge>}
+          </div>
+          <div className="mt-1.5">
+            <WatchPill on={p.watch} note={p.watch_note} onChange={onWatch} />
           </div>
         </div>
         <div className="hidden w-[200px] shrink-0 sm:block">
@@ -219,7 +228,16 @@ function SoccerRow({ p }: { p: SPosition }) {
 }
 
 function SoccerPositions() {
-  const { data } = usePoll(soccerApi.board, 10000, 'portfolio-soccer')
+  const { data, reload } = usePoll(soccerApi.board, 10000, 'portfolio-soccer')
+  const toast = useStore((s) => s.toast)
+  const watch = async (id: number, on: boolean) => {
+    try {
+      await soccerApi.watch(id, on)
+      reload()
+    } catch (e) {
+      toast({ level: 'error', title: 'Could not change that', body: e instanceof ApiError ? e.message : '' })
+    }
+  }
   if (!data) return null
   const { positions, account } = data
   const record = account.wins + account.losses
@@ -245,7 +263,7 @@ function SoccerPositions() {
       ) : (
         <ul className="mt-2">
           {positions.map((p) => (
-            <SoccerRow key={p.id} p={p} />
+            <SoccerRow key={p.id} p={p} onWatch={(on) => watch(p.id, on)} />
           ))}
         </ul>
       )}
@@ -265,10 +283,12 @@ function outcome(t: Trade): { text: string; className: string } {
       return { text: 'Took profit', className: 'text-mint' }
     case 'manual':
       return { text: 'Closed by you', className: 'text-mute' }
-    default:
-      if (t.exit_verdict === 'saved') return { text: 'Sold early: avoided a loss', className: 'text-mint' }
-      if (t.exit_verdict === 'shaken_out') return { text: 'Sold early: would have won', className: 'text-gold' }
-      return { text: 'Sold early', className: 'text-mute' }
+    default: {
+      const who = t.opened_by === 'user' ? 'Agent sold it' : 'Sold early' // your bet, sold because you had it watched
+      if (t.exit_verdict === 'saved') return { text: `${who}: avoided a loss`, className: 'text-mint' }
+      if (t.exit_verdict === 'shaken_out') return { text: `${who}: would have won`, className: 'text-gold' }
+      return { text: who, className: 'text-mute' }
+    }
   }
 }
 
@@ -355,6 +375,7 @@ export default function Portfolio() {
   const trades = useStore((s) => s.trades)
   const tradeTick = useStore((s) => s.tradeTick)
   const addTrade = useStore((s) => s.addTrade)
+  const upsertPosition = useStore((s) => s.upsertPosition)
   const toast = useStore((s) => s.toast)
   const [range, setRangeState] = useState<Range>(() => {
     try {
@@ -385,6 +406,14 @@ export default function Portfolio() {
   )
   // Keep the dialog's numbers live while it is open.
   const closingLive = closing ? positions.find((p) => p.id === closing.id) ?? closing : null
+
+  const watchBet = async (p: Position, on: boolean) => {
+    try {
+      upsertPosition(await api.watchPosition(p.id, on))
+    } catch (e) {
+      toast({ level: 'error', title: 'Could not change that', body: e instanceof ApiError ? e.message : '' })
+    }
+  }
 
   const confirmClose = async () => {
     if (!closing) return
@@ -453,7 +482,7 @@ export default function Portfolio() {
           <ul className="mt-2">
             <AnimatePresence initial={false}>
               {positions.map((p) => (
-                <PositionRow key={p.id} p={p} onSell={setClosing} />
+                <PositionRow key={p.id} p={p} onSell={setClosing} onWatch={watchBet} />
               ))}
             </AnimatePresence>
           </ul>

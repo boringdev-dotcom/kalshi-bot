@@ -174,7 +174,7 @@ export default function SoccerBoard() {
   return (
     <div className="page">
       <h1 className="h-page">Soccer</h1>
-      <p className="hint mb-6 mt-1">Europe's top five leagues on Kalshi: who wins, how many goals, by how much, and the first half. Separate from the NBA desk, with its own positions and P&L.</p>
+      <p className="hint mb-6 mt-1">Europe's top five leagues, the Champions League and the Europa League on Kalshi: who wins, how many goals, by how much, and the first half. Separate from the NBA desk, with its own positions and P&L.</p>
 
       {data && <Account positions={data.positions} account={data.account} />}
 

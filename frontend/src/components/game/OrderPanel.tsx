@@ -8,6 +8,7 @@ import { askOf, bidOf, modelChance, sizeOrder, type Pick } from '../../lib'
 import { useStore } from '../../store'
 import type { Game, LadderRung, Side } from '../../types'
 import { Button } from '../ui'
+import { useWatchNewBets, WatchSwitch } from '../Watch'
 
 const QUICK = [25, 100, 300]
 const SLIPPAGE = 2 // cents above the current price we will still accept, so a moving price does not bounce the order
@@ -71,6 +72,7 @@ export default function OrderPanel({
   const [fixedLimit, setFixedLimit] = useState<number | null>(null)
   const [advanced, setAdvanced] = useState(false)
   const [reviewing, setReviewing] = useState(false)
+  const [watch, setWatch] = useWatchNewBets()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
@@ -141,7 +143,7 @@ export default function OrderPanel({
     setBusy(true)
     setError(null)
     try {
-      const pos = await api.placeOrder({ ticker: rung.ticker, side, contracts: order.contracts, price: limit })
+      const pos = await api.placeOrder({ ticker: rung.ticker, side, contracts: order.contracts, price: limit, watch })
       upsertPosition(pos)
       const text = `${pos.contracts} of ${pos.label ?? sideLabel(rung, side)} at ${cents(pos.entry_price)}. You paid ${money(pos.cost)} and win ${money(pos.max_profit)} if it comes in.`
       setDone(text)
@@ -269,6 +271,8 @@ export default function OrderPanel({
             </p>
           </div>
         )}
+
+        <WatchSwitch on={watch} onChange={setWatch} />
 
         {(problem || error) && <div className={clsx('mt-4 text-[13px]', error ? 'text-coral' : 'text-gold')}>{error ?? problem}</div>}
 

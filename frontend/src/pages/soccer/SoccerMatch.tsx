@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom'
 import GameAnalysis from '../../components/game/GameAnalysis'
 import SoccerOrderPanel, { type SPick } from '../../components/soccer/SoccerOrderPanel'
 import { Button, Empty, LiveDot, Segmented, Skeleton } from '../../components/ui'
+import { WatchPill } from '../../components/Watch'
 import { cents, money, pct, pnlColor, teamColor } from '../../format'
 import { useMediaQuery } from '../../lib'
 import { matchStatus, soccerApi, usePoll, type SDetail, type SEvent, type SMarket, type SMatch, type SPosition, type SSegment, type SSide } from '../../soccer'
@@ -220,6 +221,15 @@ function Positions({ positions, reload }: { positions: SPosition[]; reload: () =
   const [busy, setBusy] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   if (!positions.length) return null
+  const watch = async (id: number, on: boolean) => {
+    setError(null)
+    try {
+      await soccerApi.watch(id, on)
+      reload()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not change that')
+    }
+  }
   const sell = async (id: number) => {
     setBusy(id)
     setError(null)
@@ -242,6 +252,9 @@ function Positions({ positions, reload }: { positions: SPosition[]; reload: () =
               <div className="break-words text-[14px] font-medium text-white">{p.label}</div>
               <div className="num text-xs text-dim">
                 {p.contracts} at {cents(p.entry_price)} · now {cents(p.mark_price)} · model {p.p_win != null ? pct(p.p_win) : '—'}
+              </div>
+              <div className="mt-1.5">
+                <WatchPill on={p.watch} note={p.watch_note} onChange={(on) => watch(p.id, on)} />
               </div>
             </div>
             <div className={clsx('num text-sm font-semibold', pnlColor(p.pnl))}>{money(p.pnl, { sign: true })}</div>

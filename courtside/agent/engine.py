@@ -40,11 +40,18 @@ from .policy import (
     exit_signal,
     find_entries,
     kalshi_fee,
+    WATCH_CONFIRM_S,
     position_p_win,
     size_order,
+    watch_signal,
 )
+from .watch import BetWatcher, checked
 
 log = logging.getLogger(__name__)
+
+WATCHING = ("The agent is watching it: Claude keeps reading the game and sells if it judges the bet has turned "
+            "against you. Without Claude it sells only if the win chance halves or the price does.")
+NOT_WATCHING = "The agent will not sell it; it is recording the bet and how it ends."
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "trading_mode": "paper",
@@ -88,6 +95,8 @@ class Engine:
         self._reviewing: set[str] = set()
         self._vetoed: dict[str, float] = {}
         self._hold_noted: dict[int, str] = {}
+        self._watch_seen: dict[int, float] = {}  # watched bet id -> when its trouble started (fixed rule)
+        self.watcher = BetWatcher()  # Claude's looks at your watched bets
         self._marks: dict[int, int] = {}
         self._acted_at = 0.0
         self._live_balance: dict[str, float] = {"cash": 0.0, "portfolio_value": 0.0}
@@ -156,6 +165,7 @@ class Engine:
         self.observer.observe(self.games)  # quarter markets: watched, never traded by the agent
         await self._settle_finished()
         self._archive_finished()
+        await self._watch_user_bets()  # your say-so per bet, so it runs even with the agent off
         if self.settings["agent_enabled"]:
             await self._manage_exits()
             await self._scan_entries()
@@ -303,6 +313,8 @@ class Engine:
                     "simulated": row["simulated"],
                     "strategy_id": row["strategy_id"],
                     "exit_profile": row["exit_profile"],
+                    "watch": bool(row.get("watch")),
+                    "watch_note": self.watcher.note(row["id"]) if row.get("watch") else None,
                     "risk": {"level": game.risk.level, "flags": game.risk.flags} if game else {"level": "low", "flags": []},
                 }
             )
@@ -610,6 +622,7 @@ class Engine:
         arm: Optional[str] = None,
         context: Optional[dict[str, Any]] = None,
         memory_ids: Optional[list[int]] = None,
+        watch: bool = False,
     ) -> dict[str, Any]:
         if contracts <= 0:
             raise TradeError("Order size is zero.")
@@ -653,6 +666,7 @@ class Engine:
                 # What was happening on the floor, so the agent can learn which patterns matter.
                 "context": {**(context or {}), "patterns": pattern_keys(game), "on_floor": pattern_texts(game, 4)},
                 "memory_ids": memory_ids or [],
+                "watch": bool(watch),
             },
         )
         self._acted_at = time.monotonic()
@@ -711,6 +725,8 @@ class Engine:
         row = {**row, **fields}
         self._marks.pop(row["id"], None)
         self._hold_noted.pop(row["id"], None)
+        self._watch_seen.pop(row["id"], None)
+        self.watcher.forget(row["id"])
 
         ret = pnl / row["cost"] if row["cost"] else 0.0
         if row["opened_by"] == "agent":
@@ -1142,20 +1158,146 @@ class Engine:
             },
         )
 
+    # ------------------------------------------------------- watching your bets
+    def set_watch(self, position_id: int, on: bool) -> dict[str, Any]:
+        """Let the agent sell one of your bets if it goes badly wrong, or stop it doing so."""
+        row = self.db.one("SELECT * FROM positions WHERE id=? AND status='open'", [position_id])
+        if row is None:
+            raise TradeError("That position is not open.")
+        if row["opened_by"] != "user":
+            raise TradeError("The agent already manages the bets it opened.")
+        self.db.update("positions", row["id"], {"watch": bool(on)})
+        self._watch_seen.pop(row["id"], None)
+        self.watcher.forget(row["id"])  # a fresh first look if it is switched back on
+        game = self.by_id.get(row["game_id"])
+        self.decide(
+            "note", f"{'Watching' if on else 'Stopped watching'} your {row['game_label']} {self._label(row)}",
+            WATCHING if on else NOT_WATCHING, game=game, ticker=row["ticker"], source="rules",
+        )
+        positions = self.positions_api()
+        self.hub.emit("positions", positions)
+        return next(p for p in positions if p["id"] == row["id"])
+
+    async def _watch_user_bets(self) -> None:
+        """Your watched bets: Claude reads the game and says sell or hold. The fixed rule only acts
+        when Claude is not connected, the game is a practice one, or its last look got no answer."""
+        claude = bool(self.brain and self.brain.available)
+        now = time.monotonic()
+        for row in self.db.query("SELECT * FROM positions WHERE status='open' AND training=0 AND opened_by='user' AND watch=1"):
+            game = self.by_id.get(row["game_id"])
+            rung = game.rung(row["ticker"]) if game else None
+            if not game or not rung or game.state != "live":
+                self._watch_seen.pop(row["id"], None)
+                continue
+            p_now = position_p_win(row["side"], rung)
+            bid = rung.bid(row["side"])
+            signal = watch_signal(entry_price=row["entry_price"], p_entry=row["p_win_entry"], p_now=p_now, bid=bid)
+            if claude and not game.simulated:
+                where = f"Q{game.period}" if game.period <= 4 else "overtime"
+                signature = f"{where}, risk {game.risk.level}"
+                why = self.watcher.why_now(row["id"], p_now=p_now, signature=signature, alarm=signal is not None, now=now)
+                if why:
+                    self.watcher.start(row["id"], self._ask_about_bet(row["id"], why), p_now=p_now, signature=signature, now=now)
+                if not self.watcher.failed(row["id"]):
+                    self._watch_seen.pop(row["id"], None)
+                    continue
+            # The fixed rule: sell when the bet has clearly gone wrong and stayed that way.
+            if signal is None:
+                self._watch_seen.pop(row["id"], None)
+                continue
+            first = self._watch_seen.setdefault(row["id"], now)
+            if now - first < WATCH_CONFIRM_S:
+                continue  # wait to be sure it is not one bad quote
+            reason, why = signal
+            try:
+                trade = await self.close_position(row["id"], reason=reason)
+            except TradeError as exc:
+                log.warning("watch: could not sell %s: %s", row["ticker"], exc)
+                continue
+            self.decide(
+                "exit", f"Sold your {row['game_label']} {self._label(row)} at {trade['exit_price']}c",
+                f"{why} You asked the agent to watch this bet, so it sold to keep what was left: "
+                f"{trade['pnl']:+,.2f} on the trade.",
+                game=game, ticker=row["ticker"], confidence=0.8, source="rules",
+                data={"entry": f"{row['entry_price']}c", "sold": f"{trade['exit_price']}c", "win_chance": f"{p_now:.0%}"},
+            )
+
+    def _watched_bet(self, row: dict[str, Any], game: Game, rung: Rung) -> dict[str, Any]:
+        """The bet as Claude sees it when deciding whether to sell."""
+        bid = rung.bid(row["side"])
+        sell_now = None
+        if bid is not None:
+            back = row["contracts"] * bid / 100.0 - kalshi_fee(row["contracts"], bid)
+            sell_now = {"bid_cents": bid, "you_get_back": round(back, 2), "profit_or_loss": round(back - row["cost"], 2)}
+        return {
+            "bet": self._label(row), "market": f"{rung.segment} {rung.kind}", "wins_if": self._wins_if(row, game),
+            "contracts": row["contracts"], "paid_cents": row["entry_price"], "cost": row["cost"],
+            "pays_if_it_wins": row["contracts"], "loses_if_wrong": row["cost"], "sell_now": sell_now,
+            "model_win_chance_now": round(position_p_win(row["side"], rung), 3),
+            "model_win_chance_when_bought": row["p_win_entry"],
+            "bought": (row["context"] or {}).get("when") or row["opened_at"],
+        }
+
+    @staticmethod
+    def _wins_if(row: dict[str, Any], game: Game) -> str:
+        seg = "the game" if row["segment"] == "game" else f"Q{row['segment'][1:]}"
+        if row["kind"] == "spread":
+            other = game.home.abbr if row["team"] == game.away.abbr else game.away.abbr
+            if row["side"] == "over":
+                return f"{row['team']} win {seg} by more than {row['strike']:g}"
+            return f"{row['team']} do not win {seg} by more than {row['strike']:g} ({other} cover +{row['strike']:g})"
+        return f"the total points in {seg} finish {'under' if row['side'] == 'under' else 'over'} {row['strike']:g}"
+
+    async def _ask_about_bet(self, bet_id: int, why: str) -> None:
+        row = self.db.one("SELECT * FROM positions WHERE id=? AND status='open'", [bet_id])
+        game = self.by_id.get(row["game_id"]) if row else None
+        rung = game.rung(row["ticker"]) if game else None
+        if not row or not game or not rung:
+            return
+        verdict = await self.brain.review_watched(game.id, self._watched_bet(row, game, rung), why)
+        row = self.db.one("SELECT * FROM positions WHERE id=? AND status='open'", [bet_id])
+        if not row:
+            return  # sold or settled while Claude was thinking
+        bid = rung.bid(row["side"])
+        if verdict is not None:
+            verdict = checked(verdict, bid)
+        self.watcher.record(bet_id, verdict, now_iso())
+        self.hub.emit("positions", self.positions_api())
+        if verdict is None or not row["watch"]:
+            return  # no answer (the rule covers it), or you switched watching off meanwhile
+        label = f"{row['game_label']} {self._label(row)}"
+        if verdict["action"] == "sell":
+            try:
+                trade = await self.close_position(row["id"], reason="risk_exit")
+            except TradeError as exc:
+                log.warning("watch: could not sell %s: %s", row["ticker"], exc)
+                return
+            self.decide(
+                "exit", f"Sold your {label} at {trade['exit_price']}c", f"{verdict['reason']} {trade['pnl']:+,.2f} on the trade.",
+                game=game, ticker=row["ticker"], confidence=1 - verdict["win_chance"], source="claude",
+                data={"its_read": f"{verdict['win_chance']:.0%}", "sold": f"{trade['exit_price']}c", "paid": f"{row['entry_price']}c"},
+            )
+        elif why != "Routine check." or verdict["concern"] == "high":
+            self.decide(
+                "hold", f"Holding your {label}", verdict["reason"],
+                game=game, ticker=row["ticker"], confidence=verdict["win_chance"], source="claude",
+                data={"its_read": f"{verdict['win_chance']:.0%}", "bid": f"{bid}c" if bid is not None else "none", "concern": verdict["concern"]},
+            )
+
     # ------------------------------------------------------------ manual orders
-    async def manual_order(self, ticker: str, side: str, contracts: int, price: int) -> dict[str, Any]:
+    async def manual_order(self, ticker: str, side: str, contracts: int, price: int, watch: bool = False) -> dict[str, Any]:
         if side not in ("under", "over"):
             raise TradeError("Side must be 'under' or 'over'.")
         for game in self.games:
             rung = game.rung(ticker)
             if rung:
                 pos = await self.open_position(
-                    game, rung, side, int(contracts), int(price), opened_by="user", context=self._manual_context(game, rung, side)
+                    game, rung, side, int(contracts), int(price), opened_by="user",
+                    context=self._manual_context(game, rung, side), watch=watch,
                 )
                 self.decide(
                     "note", f"You bought {game.label} {pos['label']} at {pos['entry_price']}c",
-                    "Your order. The agent does not trade quarter markets; it is recording this one and how it ends."
-                    if rung.segment != "game" else "Manual order. The agent will not auto-exit positions you open yourself.",
+                    f"Your order. {WATCHING if watch else NOT_WATCHING}",
                     game=game, ticker=ticker, source="rules", confidence=pos["p_win"],
                     data={"contracts": pos["contracts"], "cost": f"${pos['cost']:,.2f}"},
                 )
