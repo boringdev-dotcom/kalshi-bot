@@ -19,6 +19,7 @@ import httpx
 from ..domain import now_iso
 from ..kalshi.client import KalshiClient, cents
 from . import model
+from .context import apply_context
 from .domain import LEAGUE_BY_KEY, LEAGUES, SERIES, League, Match, Side, SMarket
 from .names import pair_score, similarity, split_title
 
@@ -39,6 +40,14 @@ STATS = {
     "redCards": "Red cards",
     "offsides": "Offsides",
     "saves": "Saves",
+    # Not drawn on the page; there for the agent.
+    "passPct": "Pass accuracy",
+    "totalPasses": "Passes",
+    "totalCrosses": "Crosses",
+    "blockedShots": "Blocked shots",
+    "totalTackles": "Tackles",
+    "interceptions": "Interceptions",
+    "totalClearance": "Clearances",
 }
 EVENT_KINDS = ("goal", "penalty", "own goal", "red card", "yellow card", "substitution", "halftime", "kickoff", "start 2nd half", "end regular time", "var")
 
@@ -195,12 +204,15 @@ class SoccerFeed:
             m.odds = odds
 
     async def _refresh_summaries(self, now: float) -> None:
+        soon = datetime.now(EASTERN) + timedelta(hours=3)
         due = [
             m for m in self.matches.values()
-            if (m.state == "live" or (m.state == "final" and not m.summary_final)) and now >= self._next_summary.get(m.id, 0.0)
+            if (m.state == "live" or (m.state == "final" and not m.summary_final) or (m.state == "pre" and _when(m.start_time) <= soon))
+            and now >= self._next_summary.get(m.id, 0.0)
         ]
         for m in due[:10]:
-            self._next_summary[m.id] = now + 15
+            # Before kickoff only the lineups, form and table are new, so look less often.
+            self._next_summary[m.id] = now + (600 if m.state == "pre" else 15)
         if due:
             await asyncio.gather(*(self._load_summary(m) for m in due[:10]))
 
@@ -405,9 +417,11 @@ def apply_summary(m: Match, data: dict[str, Any]) -> None:
     if events:
         m.events = events
 
+    apply_context(m, data)
+
     stats: dict[str, dict[str, float]] = {}
     reds = {"home": 0, "away": 0}
-    for t in (data.get("boxscore") or {}).get("teams") or []:
+    for t in (data.get("boxscore") or {}).get("teams") or [] if m.state != "pre" else []:
         side = teams.get(str((t.get("team") or {}).get("id")))
         if side is None:
             continue

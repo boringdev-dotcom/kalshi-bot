@@ -453,3 +453,79 @@ def test_sync_leaves_settled_held_and_fresh_positions_alone():
                                                    "created_time": "2026-11-21T09:59:59Z"}])
     assert asyncio.run(desk.sync_with_kalshi()) == []
     assert len(desk.positions_api()) == 3
+
+
+def test_summary_gives_the_agent_lineups_players_form_table_and_run_of_play():
+    from courtside.soccer.context import run_of_play
+
+    aug, mai = {"id": "1", "displayName": "FC Augsburg"}, {"id": "2", "displayName": "Mainz"}
+    stat = lambda **kw: [{"name": k, "displayValue": str(v)} for k, v in kw.items()]  # noqa: E731
+    player = lambda name, pos, starter=True, sub_in=False, sub_out=False, **kw: {  # noqa: E731
+        "athlete": {"displayName": name}, "position": {"abbreviation": pos}, "starter": starter,
+        "subbedIn": sub_in, "subbedOut": sub_out, "stats": stat(**kw)}
+    data = {
+        "header": {"competitions": [{"competitors": [{"homeAway": "home", "team": aug}, {"homeAway": "away", "team": mai}]}]},
+        "rosters": [
+            {"homeAway": "home", "team": aug, "formation": "4-3-3", "roster": [
+                player("Keeper A", "G", saves=3, totalGoals=0), player("Striker A", "F", sub_out=True, totalShots=4, shotsOnTarget=2, totalGoals=1),
+                player("Quiet A", "CD"), player("Sub A", "F", starter=False, sub_in=True), player("Bench A", "D", starter=False)]},
+            {"homeAway": "away", "team": mai, "formation": "3-5-2", "roster": [player("Defender M", "CD", foulsCommitted=3, yellowCards=1)]},
+        ],
+        "lastFiveGames": [{"team": aug, "events": [
+            {"gameDate": "2026-11-01T14:30Z", "homeTeamId": "1", "homeTeamScore": "2", "awayTeamScore": "0", "gameResult": "W", "opponent": {"displayName": "Bochum"}, "leagueName": "Bundesliga"},
+            {"gameDate": "2026-11-08T14:30Z", "homeTeamId": "9", "homeTeamScore": "3", "awayTeamScore": "1", "gameResult": "L", "opponent": {"displayName": "Leipzig"}, "leagueName": "Bundesliga"},
+        ]}],
+        "standings": {"groups": [{"standings": {"entries": [
+            {"id": "2", "team": "Mainz", "stats": stat(rank=4, gamesPlayed=11, wins=6, ties=3, losses=2, pointDifferential="+8", points=21)},
+            {"id": "1", "team": "FC Augsburg", "stats": stat(rank=12, gamesPlayed=11, wins=3, ties=3, losses=5, pointDifferential="-4", points=12)},
+            {"id": "7", "team": "Someone Else", "stats": stat(rank=1)},
+        ]}}]},
+        "seasonseries": [{"type": "head-to-head", "summary": "Mainz lead 2-1", "events": [{"date": "2026-03-01T14:30Z", "competitors": [
+            {"homeAway": "home", "score": "1", "team": {"abbreviation": "M05"}}, {"homeAway": "away", "score": "1", "team": {"abbreviation": "FCA"}}]}]}],
+        "boxscore": {"teams": [{"team": aug, "statistics": stat(totalShots=9, passPct=0.8)}]},
+        "commentary": [
+            {"time": {"displayValue": "20'"}, "text": "Attempt saved. Striker A (FC Augsburg) right footed shot is saved."},
+            {"time": {"displayValue": "45'+2'"}, "text": "Corner, FC Augsburg. Conceded by Defender M."},
+            {"time": {"displayValue": "50'"}, "text": "Attempt missed. Mid M (Mainz) header misses to the left."},
+            {"time": {"displayValue": "55'"}, "text": "Attempt saved. Mid M (Mainz) left footed shot is saved."},
+            {"time": {"displayValue": "56'"}, "text": "Corner, Mainz. Conceded by Keeper A."},
+            {"time": {"displayValue": "57'"}, "text": "Foul by Quiet A (FC Augsburg)."},
+            {"time": {"displayValue": "58'"}, "text": "Defender M (Mainz) is shown the yellow card for a bad foul."},
+            {"time": {"displayValue": "59'"}, "text": "Delay in match because of an injury."},
+        ],
+    }
+
+    pre = a_match(state="pre")
+    apply_summary(pre, data)
+    assert pre.stats == {}  # no all-zero stat bars before kickoff
+    assert pre.lineups["home"]["formation"] == "4-3-3" and run_of_play(pre) is None
+
+    m = a_match(state="live", period=2, minute=60.0, clock="60'")
+    apply_summary(m, data)
+    home = m.lineups["home"]
+    assert home["starting_xi"] == ["Keeper A (G)", "Striker A (F)", "Quiet A (CD)"]
+    assert home["came_on"] == ["Sub A"] and home["went_off"] == ["Striker A"]
+    # Only players who did something, zeros left out; the unused sub is not there.
+    assert m.players["home"] == [
+        {"name": "Keeper A", "pos": "G", "saves": 3},
+        {"name": "Striker A", "pos": "F", "went_off": True, "shots": 4, "on_target": 2, "goals": 1},
+        {"name": "Sub A", "pos": "F", "came_on": True},
+    ]
+    assert m.players["away"] == [{"name": "Defender M", "pos": "CD", "fouls": 3, "yellow": 1}]
+    assert m.form["home"] == ["L 1-3 at Leipzig (Bundesliga, 2026-11-08)", "W 2-0 vs Bochum (Bundesliga, 2026-11-01)"]
+    assert m.table["home"]["position"] == "12" and m.table["away"]["points"] == "21" and m.table["home"]["of"] == 3
+    assert m.head_to_head == {"summary": "Mainz lead 2-1", "games": ["2026-03-01 M05 1-1 FCA"]}
+    assert m.stats["Pass accuracy"]["home"] == 0.8
+
+    trend = run_of_play(m)
+    assert trend["window"] == "45'-60'"
+    assert trend["last_window"]["Mainz"] == {"shots": 2, "on_target": 1, "corners": 1, "fouls": 0, "cards": 1, "offsides": 0, "goals": 0}
+    assert trend["last_window"]["Augsburg"]["fouls"] == 1
+    # The window before is 30'-45': first-half stoppage (45'+2', counted as 45') is in it, 20' is too early.
+    assert trend["window_before"]["Augsburg"] == {"shots": 0, "on_target": 0, "corners": 1, "fouls": 0, "cards": 0, "offsides": 0, "goals": 0}
+
+    desk, _ = make_desk()
+    b = desk.briefing(m)
+    assert b["lineups"]["Augsburg"]["formation"] == "4-3-3" and b["league_table"]["Mainz"]["position"] == "4"
+    assert b["run_of_play"]["last_window"]["Mainz"]["shots"] == 2
+    assert list(b["form_last_5"]) == ["Augsburg"] and b["players_who_did_something"]["Mainz"][0]["yellow"] == 1
