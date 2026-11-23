@@ -144,7 +144,7 @@ function Lineup({ team, floor, players, period }: { team: TeamSide; floor: TeamF
       </div>
       {on.map((p) => (
         <div key={p.id} className="flex items-baseline justify-between gap-2 py-1 text-[13px]">
-          <span className={clsx('min-w-0 truncate', p.starter ? 'text-slate-200' : 'text-mute')} title={p.name}>
+          <span className={clsx('min-w-0 break-words', p.starter ? 'text-slate-200' : 'text-mute')} title={p.name}>
             {p.short}
           </span>
           <span className="num shrink-0 text-right">
@@ -185,7 +185,7 @@ function BoxScore({ game, players }: { game: Game; players: PlayerLine[] }) {
               <tbody>
                 {rows.map((p) => (
                   <tr key={p.id} className="border-b border-hair last:border-b-0">
-                    <td className="max-w-[150px] truncate py-1.5 pr-2 text-left">
+                    <td className="break-words py-1.5 pr-2 text-left">
                       {p.on_court && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-mint align-middle" title="On the floor" />}
                       <span className={p.starter ? 'text-slate-200' : 'text-mute'}>{p.name}</span>
                     </td>

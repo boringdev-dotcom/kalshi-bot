@@ -69,7 +69,7 @@ function StatusRow({ ok, name, detail, right }: { ok: boolean; name: string; det
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ok ? GREEN : RED }} />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-white">{name}</div>
-        <div className="truncate text-xs text-dim" title={detail}>
+        <div className="break-words text-xs text-dim" title={detail}>
           {detail}
         </div>
       </div>

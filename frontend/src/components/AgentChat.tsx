@@ -96,7 +96,7 @@ export function ToolLines({ tools, live }: { tools: Tool[]; live?: boolean }) {
         return (
           <div key={`${t.name}-${i}`} className="flex items-center gap-1.5 text-xs text-dim">
             {working ? <Spinner size={10} /> : <Check size={11} />}
-            <span className="truncate">{text.charAt(0).toUpperCase() + text.slice(1)}</span>
+            <span className="break-words">{text.charAt(0).toUpperCase() + text.slice(1)}</span>
           </div>
         )
       })}

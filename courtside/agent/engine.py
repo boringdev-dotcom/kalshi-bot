@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from ..config import Config
@@ -24,6 +25,7 @@ from ..events import Hub
 from ..feeds.live import LiveFeed
 from ..feeds.patterns import PATTERN_LABELS, pattern_keys, pattern_texts
 from ..feeds.sim import SimFeed
+from ..history import adjusted_history
 from ..kalshi.client import KalshiClient, KalshiError
 from ..model.quarters import implied_margin, implied_quarter_total
 from ..model.totals import refresh_game
@@ -90,6 +92,8 @@ class Engine:
         self._acted_at = 0.0
         self._live_balance: dict[str, float] = {"cash": 0.0, "portfolio_value": 0.0}
         self._live_balance_at = 0.0
+        self._cash_flows_at = -1e9
+        self._live_balance_ok = False
         self._last_state_sig = ""
         self._last_equity_at = 0.0
         self._limit_noted = ""
@@ -157,6 +161,8 @@ class Engine:
             await self._scan_entries()
         if self.book == "live" and now - self._live_balance_at > 15:
             await self._refresh_live_balance()
+        if self.book == "live" and now - self._cash_flows_at > 300:
+            await self._refresh_cash_flows()
 
         self.ticks += 1
         self.last_tick = now_iso()
@@ -425,15 +431,52 @@ class Engine:
 
     def _snapshot_equity(self) -> None:
         self._last_equity_at = time.monotonic()
+        if self.book == "live" and not self._live_balance_ok:
+            return  # Kalshi's balance not read yet: the account would look empty
         equity = self.account()["equity"]
         last = self.db.one("SELECT equity FROM equity WHERE book=? ORDER BY id DESC LIMIT 1", [self.book])
         if last is None or abs(last["equity"] - equity) >= 0.01:
             self.db.insert("equity", {"ts": now_iso(), "book": self.book, "equity": equity})
 
+    async def _refresh_cash_flows(self) -> None:
+        """Note deposits and withdrawals, so the account chart does not count them as gains."""
+        self._cash_flows_at = time.monotonic()
+        try:
+            flows = await self.kalshi.cash_flows()
+        except Exception as exc:
+            log.warning("Kalshi deposits/withdrawals failed: %s", exc)
+            return
+        for f in flows:
+            self.db.execute(
+                "INSERT INTO cash_flows (id, book, ts, amount) VALUES (?, 'live', ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET ts=excluded.ts, amount=excluded.amount",
+                [f["id"], f["ts"], f["amount"]],
+            )
+
+    def account_history(self, since: Optional[datetime] = None) -> dict[str, Any]:
+        """The account chart from `since` (or the start), with deposits and withdrawals taken out."""
+        book = self.book
+        if since is None:
+            rows = self.db.query("SELECT ts, equity FROM equity WHERE book=? ORDER BY id", [book])
+        else:
+            cut = since.astimezone(timezone.utc).isoformat(timespec="seconds")
+            first = self.db.one("SELECT ts, equity FROM equity WHERE book=? AND ts<? ORDER BY id DESC LIMIT 1", [book, cut])
+            rows = ([first] if first else []) + self.db.query(
+                "SELECT ts, equity FROM equity WHERE book=? AND ts>=? ORDER BY id", [book, cut]
+            )
+        flows = self.db.query("SELECT ts, amount FROM cash_flows WHERE book=?", [book]) if rows else []
+        now = {"ts": now_iso(), "equity": self.account()["equity"]}
+        if book == "live" and not self._live_balance_ok and rows:
+            now = {**rows[-1], "ts": now["ts"]}  # Kalshi's balance not read yet: don't draw a drop to zero
+        out = adjusted_history(rows, flows, now, since)
+        out["simulated"] = book == "sim"
+        return out
+
     async def _refresh_live_balance(self) -> None:
         self._live_balance_at = time.monotonic()
         try:
             self._live_balance = await self.kalshi.balance()
+            self._live_balance_ok = True
         except Exception as exc:
             log.warning("Kalshi balance failed: %s", exc)
 
@@ -450,6 +493,7 @@ class Engine:
             try:
                 self._live_balance = await self.kalshi.balance()
                 self._live_balance_at = time.monotonic()
+                self._live_balance_ok = True
             except Exception as exc:
                 raise TradeError(f"Could not reach your Kalshi account, staying in paper mode. {exc}") from exc
             new["agent_enabled"] = False  # arming real money never also starts the agent

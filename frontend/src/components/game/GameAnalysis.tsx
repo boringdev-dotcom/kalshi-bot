@@ -14,15 +14,35 @@ import FavsView from './Favs'
 type Tool = { name: string; summary: string }
 type Turn = { id: number; role: 'user' | 'assistant'; text: string; tools: Tool[] }
 
-// Each game's conversation survives moving between pages for this visit. It is also saved in Agent chat.
-const threads = new Map<string, Turn[]>()
+// Each game's conversation survives moving between pages, and a phone reloading the tab. It is also saved in Agent chat.
+const THREADS_KEY = 'courtside.game-threads'
+const threads = new Map<string, Turn[]>(
+  (() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(THREADS_KEY) ?? '[]') as [string, Turn[]][]
+    } catch {
+      return []
+    }
+  })(),
+)
+const saveThreads = () => {
+  try {
+    sessionStorage.setItem(THREADS_KEY, JSON.stringify([...threads].slice(-20)))
+  } catch {
+    // storage full or blocked: the thread still lasts for this visit
+  }
+}
 // Which games have the panel minimized, for this visit.
 const minimized = new Set<string>()
 // Each game's last favs and which answer was showing, for this visit.
+// The server keeps them too, so they come back after a reload.
 const favsCache = new Map<string, FavsResult>()
+// Picks still running, so coming back to the page mid-pick keeps waiting for it.
+const favsPending = new Map<string, Promise<FavsResult>>()
+const favsFail = (e: unknown) => (e instanceof ApiError ? e.message : 'The agent could not pick right now.')
 type View = 'read' | 'favs'
 const views = new Map<string, View>()
-let nextId = 1
+let nextId = Math.max(0, ...[...threads.values()].flat().map((t) => t.id)) + 1
 
 /**
  * "Agent analysis": the agent's read on this game, with everything on the page handed to it
@@ -66,7 +86,42 @@ export default function GameAnalysis({
     setFavsError(null)
     setFavsBusy(false)
     setError(null)
-    return () => abortRef.current?.abort()
+    let live = true
+    const id = game.id
+    const running = favsPending.get(id)
+    if (running) {
+      setFavsBusy(true)
+      running
+        .then((r) => live && setFavs(r))
+        .catch((e) => live && setFavsError(favsFail(e)))
+        .finally(() => live && setFavsBusy(false))
+    } else {
+      // Ask the server for the last favs here, and follow a pick it is still running (say the phone reloaded the page).
+      void (async () => {
+        for (;;) {
+          let s: Awaited<ReturnType<typeof api.favsState>>
+          try {
+            s = await api.favsState(id)
+          } catch {
+            return
+          }
+          if (!live) return
+          const had = favsCache.get(id)
+          if (s.result && (!had || s.result.generated_at > had.generated_at)) {
+            favsCache.set(id, s.result)
+            setFavs(s.result)
+          }
+          setFavsBusy(s.picking)
+          if (!s.picking) return
+          await new Promise((r) => setTimeout(r, 3000))
+          if (!live) return
+        }
+      })()
+    }
+    return () => {
+      live = false
+      abortRef.current?.abort()
+    }
   }, [game.id])
 
   const push = useCallback(
@@ -74,6 +129,7 @@ export default function GameAnalysis({
       setTurns((prev) => {
         const next = [...prev, t]
         threads.set(game.id, next)
+        saveThreads()
         return next
       }),
     [game.id],
@@ -148,13 +204,16 @@ export default function GameAnalysis({
     show('favs')
     setFavsBusy(true)
     setFavsError(null)
+    const p = api.favs(id)
+    favsPending.set(id, p)
     try {
-      const r = await api.favs(id)
+      const r = await p
       favsCache.set(id, r)
       if (gameRef.current === id) setFavs(r) // you may have moved to another game meanwhile
     } catch (e) {
-      if (gameRef.current === id) setFavsError(e instanceof ApiError ? e.message : 'The agent could not pick right now.')
+      if (gameRef.current === id) setFavsError(favsFail(e))
     } finally {
+      favsPending.delete(id)
       if (gameRef.current === id) setFavsBusy(false)
     }
   }
@@ -200,7 +259,7 @@ export default function GameAnalysis({
             Agent
             {started && <ChevronDown size={15} className={clsx('text-mute transition-transform', open && 'rotate-180')} />}
           </span>
-          <span className={clsx('mt-0.5 block text-[13px] leading-snug text-mute', !open && preview && 'truncate')}>
+          <span className={clsx('mt-0.5 block text-[13px] leading-snug text-mute', !open && preview && 'line-clamp-2')}>
             {!open && preview ? (
               <>
                 {(streaming || favsBusy) && <Spinner size={11} className="mr-1.5 inline-block align-[-1px]" />}
@@ -358,12 +417,12 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       className={clsx(
-        'flex h-11 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed',
+        'flex min-h-11 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed',
         primary ? 'bg-white text-ink-950 hover:bg-slate-200 disabled:bg-white/[0.08] disabled:text-dim' : 'bg-ink-800 text-slate-200 hover:bg-ink-700 disabled:text-dim',
       )}
     >
       {busy ? <Spinner size={13} /> : icon}
-      <span className="truncate">{children}</span>
+      <span className="text-center leading-tight">{children}</span>
     </button>
   )
 }

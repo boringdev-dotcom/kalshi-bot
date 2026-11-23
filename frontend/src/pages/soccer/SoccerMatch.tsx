@@ -25,7 +25,7 @@ function Scoreboard({ m }: { m: SMatch }) {
         {[m.home, m.away].map((t, i) => (
           <div key={t.abbr} className={clsx('flex min-w-0 flex-col items-center gap-2 text-center', i === 1 && 'order-3')}>
             <Crest team={t} size={44} />
-            <div className="w-full truncate text-[15px] font-semibold text-white">{t.short}</div>
+            <div className="w-full break-words text-[15px] font-semibold text-white">{t.short}</div>
             <div className="text-xs text-dim">
               {i === 0 ? 'Home' : 'Away'}
               {t.red_cards > 0 && <span className="ml-1.5 text-coral">· {t.red_cards} red</span>}
@@ -62,7 +62,7 @@ function ModelLine({ d, segment }: { d: SDetail; segment: SSegment }) {
     <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
       {cells.map((c) => (
         <div key={c.label} className="rounded-xl bg-ink-800 px-3 py-2.5">
-          <div className="truncate text-[11px] text-dim">{c.label}</div>
+          <div className="break-words text-[11px] text-dim">{c.label}</div>
           <div className="num mt-0.5 text-[15px] font-semibold text-white">{c.value}</div>
         </div>
       ))}
@@ -93,7 +93,7 @@ function MarketRow({ m, pick, onPick, closed }: { m: SMarket; pick: SPick | null
   return (
     <div className="flex items-center gap-3 border-b border-hair py-2.5 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[14px] font-medium text-white">{m.yes_label.replace(/^1st half: /, '')}</div>
+        <div className="break-words text-[14px] font-medium text-white">{m.yes_label.replace(/^1st half: /, '')}</div>
         <div className="num text-xs text-dim">
           Model {m.p_yes != null ? pct(m.p_yes) : '—'}
           {edge && !closed && <span className="ml-1.5 text-gold">· {edge === 'yes' ? 'Yes' : 'No'} looks cheap</span>}
@@ -239,7 +239,7 @@ function Positions({ positions, reload }: { positions: SPosition[]; reload: () =
         {positions.map((p) => (
           <div key={p.id} className="flex items-center gap-3 border-b border-hair py-3 last:border-b-0">
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[14px] font-medium text-white">{p.label}</div>
+              <div className="break-words text-[14px] font-medium text-white">{p.label}</div>
               <div className="num text-xs text-dim">
                 {p.contracts} at {cents(p.entry_price)} · now {cents(p.mark_price)} · model {p.p_win != null ? pct(p.p_win) : '—'}
               </div>

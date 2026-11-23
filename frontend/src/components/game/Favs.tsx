@@ -50,7 +50,7 @@ export default function FavsView({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-[14px] font-semibold text-white">{p.label}</span>
+                    <span className="break-words text-[14px] font-semibold text-white">{p.label}</span>
                     <span className="num shrink-0 text-[13px] font-medium text-white">
                       {cents(p.ask)}
                       <span className="ml-1.5 text-mint">+{Math.round(p.edge * 100)}¢</span>

@@ -40,7 +40,7 @@ function PriceButton({
         off && 'cursor-not-allowed opacity-35 hover:bg-ink-800',
       )}
     >
-      <span className={clsx('max-w-full truncate text-[11px] leading-tight sm:text-[13px]', !selected && 'text-mute sm:text-slate-200')}>{label}</span>
+      <span className={clsx('max-w-full break-words text-[11px] leading-tight sm:text-[13px]', !selected && 'text-mute sm:text-slate-200')}>{label}</span>
       <span className="num text-[15px] font-semibold leading-tight sm:text-[13px]">{price == null ? '–' : cents(price)}</span>
     </button>
   )
@@ -85,7 +85,7 @@ function Row({
       </div>
       <div className="hidden min-w-0 flex-1 xl:block">
         <div className="mb-1.5 flex items-center gap-2 text-[13px] text-mute">
-          <span className="truncate">{chanceText}</span>
+          <span className="break-words">{chanceText}</span>
           {tag && <Badge tone="mint">{tag}</Badge>}
           {owned && <Badge tone="slate">You own this</Badge>}
         </div>

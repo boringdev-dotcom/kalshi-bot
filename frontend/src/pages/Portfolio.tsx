@@ -4,48 +4,138 @@ import { Briefcase, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
-import { api, ApiError } from '../api'
+import { api, ApiError, type AccountHistory } from '../api'
 import { Badge, Button, Dialog, Empty, Segmented, SimTag, Skeleton, Stat, Ticker } from '../components/ui'
 import { cents, money, pct, pnlColor, relTime, segmentLabel, shortDate, tradeLabel } from '../format'
 import { soccerApi, usePoll, type SPosition } from '../soccer'
 import { useStore } from '../store'
-import type { LearningState, Position, Trade } from '../types'
+import type { Position, Trade } from '../types'
 
 const GREEN = '#19c37d'
 const RED = '#f2594b'
 
 /* ───────────────────────── Account chart ───────────────────────── */
 
-function ChartTip({ active, payload }: { active?: boolean; payload?: { payload: { ts: string; equity: number } }[] }) {
+function ChartTip({ active, payload, range }: { active?: boolean; payload?: { payload: { ts: string; value: number } }[]; range: Range }) {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
+  const d = new Date(p.ts)
+  const when =
+    range === '1D'
+      ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : range === '1W' || range === '1M'
+        ? shortDate(p.ts)
+        : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
   return (
     <div className="rounded-xl bg-ink-800 px-3 py-2 shadow-lift">
-      <div className="num text-sm font-semibold text-white">{money(p.equity)}</div>
-      <div className="num text-xs text-dim">{shortDate(p.ts)}</div>
+      <div className="num text-sm font-semibold text-white">{money(p.value)}</div>
+      <div className="num text-xs text-dim">{when}</div>
     </div>
   )
 }
 
-function AccountChart({ learning }: { learning: LearningState | null }) {
-  const data = useMemo(() => (learning?.equity_curve ?? []).map((p, i) => ({ ...p, i })), [learning])
-  if (!learning) return <Skeleton className="h-[200px] w-full !rounded-xl2" />
-  if (data.length < 2)
-    return (
-      <div className="flex h-[120px] items-center border-y border-hair">
-        <p className="hint">Your account chart appears here after the first few trades.</p>
-      </div>
-    )
-  const up = data[data.length - 1].equity >= data[0].equity
+const RANGES = ['1D', '1W', '1M', '1Y', 'YTD', 'MAX'] as const
+type Range = (typeof RANGES)[number]
+const RANGE_KEY = 'courtside.chart-range'
+const RANGE_WORDS: Record<Range, string> = { '1D': 'past day', '1W': 'past week', '1M': 'past month', '1Y': 'past year', YTD: 'this year', MAX: 'all time' }
+
+function sinceFor(r: Range): string | undefined {
+  const now = new Date()
+  const day = 86_400_000
+  switch (r) {
+    case '1D':
+      return new Date(now.getTime() - day).toISOString()
+    case '1W':
+      return new Date(now.getTime() - 7 * day).toISOString()
+    case '1M':
+      return new Date(new Date(now).setMonth(now.getMonth() - 1)).toISOString()
+    case '1Y':
+      return new Date(new Date(now).setFullYear(now.getFullYear() - 1)).toISOString()
+    case 'YTD':
+      return new Date(now.getFullYear(), 0, 1).toISOString()
+    default:
+      return undefined
+  }
+}
+
+/** The account's value over a range, Robinhood style: deposits and withdrawals are not gains. */
+function useAccountHistory(range: Range, refresh: unknown) {
+  const [data, setData] = useState<{ range: Range; h: AccountHistory } | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      api
+        .accountHistory(sinceFor(range))
+        .then((h) => alive && setData({ range, h }))
+        .catch(() => undefined)
+    void load()
+    const t = window.setInterval(load, 30_000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
+  }, [range, refresh])
+  return data
+}
+
+function RangeChange({ h, range }: { h: AccountHistory | null; range: Range }) {
+  if (!h || h.start == null) return <span className="text-dim">No history for the {RANGE_WORDS[range]} yet</span>
+  const moved = h.net_deposits
   return (
-    <div className="h-[200px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: 0, bottom: 8, left: 0 }}>
-          <YAxis hide domain={['dataMin', 'dataMax']} />
-          <Tooltip content={<ChartTip />} cursor={{ stroke: 'rgba(255,255,255,0.18)' }} />
-          <Line dataKey="equity" type="monotone" stroke={up ? GREEN : RED} strokeWidth={2} dot={false} isAnimationActive={false} />
-        </LineChart>
-      </ResponsiveContainer>
+    <>
+      <span className={clsx('num font-medium', pnlColor(h.change))}>
+        {money(h.change, { sign: true })} ({h.change >= 0 ? '+' : ''}
+        {(h.change_pct * 100).toFixed(2)}%)
+      </span>
+      <span className="text-mute"> {RANGE_WORDS[range]}</span>
+      {Math.abs(moved) >= 0.01 && (
+        <span className="num block text-xs text-dim">
+          Leaves out {money(Math.abs(moved))} {moved > 0 ? 'deposited' : 'withdrawn'}
+        </span>
+      )}
+    </>
+  )
+}
+
+function AccountChart({ h, range, onRange }: { h: AccountHistory | null; range: Range; onRange: (r: Range) => void }) {
+  const data = useMemo(() => (h?.points ?? []).map((p, i) => ({ ...p, i })), [h])
+  const up = !h || h.change >= 0
+  return (
+    <div>
+      {!h ? (
+        <Skeleton className="h-[200px] w-full !rounded-xl2" />
+      ) : data.length < 2 ? (
+        <div className="flex h-[200px] items-center">
+          <p className="hint">Nothing to chart for the {RANGE_WORDS[range]} yet.</p>
+        </div>
+      ) : (
+        <div className="h-[200px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 8, right: 0, bottom: 8, left: 0 }}>
+              <YAxis hide domain={['dataMin', 'dataMax']} />
+              <Tooltip content={<ChartTip range={range} />} cursor={{ stroke: 'rgba(255,255,255,0.18)' }} />
+              <Line dataKey="value" type="linear" stroke={up ? GREEN : RED} strokeWidth={2} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      <div className="mt-2 flex justify-between border-b border-hair pb-3" role="tablist" aria-label="Chart range">
+        {RANGES.map((r) => (
+          <button
+            key={r}
+            type="button"
+            role="tab"
+            aria-selected={r === range}
+            onClick={() => onRange(r)}
+            className={clsx(
+              'num rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors',
+              r === range ? (up ? 'bg-mint/[0.14] text-mint' : 'bg-coral/[0.14] text-coral') : 'text-mute hover:text-white',
+            )}
+          >
+            {r === 'MAX' ? 'Max' : r}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -59,7 +149,7 @@ function PositionRow({ p, onSell }: { p: Position; onSell: (p: Position) => void
   return (
     <motion.li layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="row">
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-white">
+        <div className="break-words text-sm font-semibold text-white">
           {tradeLabel(p)} <span className="font-normal text-mute">· {p.game_label}</span>
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-dim">
@@ -79,7 +169,7 @@ function PositionRow({ p, onSell }: { p: Position; onSell: (p: Position) => void
           {pct(p.p_win)} chance now
         </div>
         {worry && (
-          <div className={clsx('truncate text-xs', p.risk.level === 'high' ? 'text-coral' : 'text-gold')} title={p.risk.flags?.join(' · ')}>
+          <div className={clsx('break-words text-xs', p.risk.level === 'high' ? 'text-coral' : 'text-gold')} title={p.risk.flags?.join(' · ')}>
             {worry}
           </div>
         )}
@@ -103,7 +193,7 @@ function SoccerRow({ p }: { p: SPosition }) {
     <li className="border-b border-hair last:border-b-0">
       <Link to={`/soccer/${p.match_id}`} className="row row-hover group !border-b-0">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-white">
+          <div className="break-words text-sm font-semibold text-white">
             {p.label} <span className="font-normal text-mute">· {p.match_label}</span>
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-dim">
@@ -209,7 +299,7 @@ function TradeRow({ t }: { t: Trade }) {
         className="flex w-full items-center gap-4 rounded-xl px-1 py-3.5 text-left transition-colors hover:bg-white/[0.035]"
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-white">
+          <span className="block break-words text-sm font-semibold text-white">
             {tradeLabel(t)} <span className="font-normal text-mute">· {t.game_label}</span>
           </span>
           <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-dim">
@@ -266,21 +356,28 @@ export default function Portfolio() {
   const tradeTick = useStore((s) => s.tradeTick)
   const addTrade = useStore((s) => s.addTrade)
   const toast = useStore((s) => s.toast)
-  const [learning, setLearning] = useState<LearningState | null>(null)
+  const [range, setRangeState] = useState<Range>(() => {
+    try {
+      const r = localStorage.getItem(RANGE_KEY) as Range | null
+      return r && RANGES.includes(r) ? r : '1D'
+    } catch {
+      return '1D'
+    }
+  })
+  const setRange = (r: Range) => {
+    setRangeState(r)
+    try {
+      localStorage.setItem(RANGE_KEY, r)
+    } catch {
+      // the choice just won't be remembered
+    }
+  }
+  const loaded = useAccountHistory(range, tradeTick)
+  // Keep the last range's chart up while the new one loads, rather than flashing empty.
+  const history = loaded?.h ?? null
   const [closing, setClosing] = useState<Position | null>(null)
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState<'all' | 'agent' | 'user'>('all')
-
-  useEffect(() => {
-    let alive = true
-    api
-      .learning()
-      .then((l) => alive && l && setLearning(l))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [tradeTick])
 
   const shownTrades = useMemo(
     () => (filter === 'all' ? trades : trades.filter((t) => t.opened_by === filter)),
@@ -321,21 +418,15 @@ export default function Portfolio() {
         <div className="mt-1 text-[40px] font-semibold leading-none tracking-tight text-white">
           {account ? <Ticker value={account.equity} format={(n) => money(n)} flash={false} /> : <Skeleton className="h-10 w-48" />}
         </div>
-        <div className="mt-2 h-5 text-sm">
-          {account && (
-            <span className={clsx('num font-medium', pnlColor(account.pnl_today))}>
-              {money(account.pnl_today, { sign: true })} today
-            </span>
-          )}
-          {account && (
-            <span className="num ml-3 text-dim">
-              {money(account.pnl_total, { sign: true })} from finished trades
-            </span>
-          )}
+        <div className="mt-2 min-h-5 text-sm">
+          {loaded?.range === range ? <RangeChange h={loaded.h} range={range} /> : <Skeleton className="h-5 w-40" />}
         </div>
+        {account && record > 0 && (
+          <div className="num mt-1 text-xs text-dim">{money(account.pnl_total, { sign: true })} from finished trades, all time</div>
+        )}
       </div>
       <div className="mt-3">
-        <AccountChart learning={learning} />
+        <AccountChart h={history} range={range} onRange={setRange} />
       </div>
 
       <div className="mt-5 grid grid-cols-3 gap-4 border-y border-hair py-4">

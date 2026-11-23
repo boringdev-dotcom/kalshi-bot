@@ -350,6 +350,32 @@ def test_favs_keep_only_85_to_90_confidence_priced_below_it():
     pick = out["picks"][0]
     assert pick["confidence"] == 0.88 and pick["side"] == cheap["side"] and pick["edge"] == round(0.88 - cheap["ask"] / 100, 3)
     assert out["summary"] == "Augsburg pressing."
+    # Kept for the page to show again after the phone leaves and comes back.
+    assert brain.favs_state(m.id) == {"result": out, "picking": False}
+    assert brain.favs_state("other") == {"result": None, "picking": False}
+
+    # Two asks at once share one pick, and it is shown as running meanwhile.
+    calls = []
+    gate = asyncio.Event()
+
+    async def slow(game_id):
+        calls.append(game_id)
+        await gate.wait()
+        return {"picks": [], "summary": "later"}
+
+    async def both():
+        brain._pick_favs = slow
+        a = asyncio.create_task(brain.favs(m.id))
+        b = asyncio.create_task(brain.favs(m.id))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert brain.favs_state(m.id)["picking"] is True
+        gate.set()
+        return await a, await b
+
+    ra, rb = asyncio.run(both())
+    assert calls == [m.id] and ra == rb and brain.favs_state(m.id) == {"result": ra, "picking": False}
+    del brain._pick_favs
 
     brain.cfg.anthropic_api_key = ""
     brain.client = None
