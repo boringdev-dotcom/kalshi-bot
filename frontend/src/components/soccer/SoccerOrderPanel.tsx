@@ -7,6 +7,7 @@ import { sizeOrder } from '../../lib'
 import { askOf, bidOf, chanceOf, labelOf, soccerApi, type SAccount, type SMarket, type SSide } from '../../soccer'
 import { useStore } from '../../store'
 import { Button } from '../ui'
+import { useWatchNewBets, WatchSwitch } from '../Watch'
 
 const QUICK = [25, 100, 300]
 const SLIPPAGE = 2 // cents above the current price still accepted, so a moving price does not bounce the order
@@ -52,6 +53,7 @@ export default function SoccerOrderPanel({
 }) {
   const [amount, setAmount] = useState('100')
   const [reviewing, setReviewing] = useState(false)
+  const [watch, setWatch] = useWatchNewBets()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
@@ -117,7 +119,7 @@ export default function SoccerOrderPanel({
     setBusy(true)
     setError(null)
     try {
-      const pos = await soccerApi.order({ ticker: market.ticker, side, contracts: order.contracts, price: limit })
+      const pos = await soccerApi.order({ ticker: market.ticker, side, contracts: order.contracts, price: limit, watch })
       const text = `${pos.contracts} of ${pos.label} at ${cents(pos.entry_price)}. You paid ${money(pos.cost)} and win ${money(pos.max_profit)} if it comes in.`
       setDone(text)
       if (bare) toast({ level: 'success', title: 'Order placed', body: text }) // the phone sheet closes, so say it here
@@ -215,6 +217,8 @@ export default function SoccerOrderPanel({
           </span>
           . It knows the score, the minute and red cards, not who is on top. You could sell right now for {cents(bid)}.
         </div>
+
+        <WatchSwitch on={watch} onChange={setWatch} />
 
         {(problem || error) && <div className={clsx('mt-4 text-[13px]', error ? 'text-coral' : 'text-gold')}>{error ?? problem}</div>}
 

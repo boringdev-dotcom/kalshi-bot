@@ -21,11 +21,13 @@ LEAGUES = [
     League("seriea", "Serie A", "ita.1", "KXSERIEA", 2.65),
     League("bundesliga", "Bundesliga", "ger.1", "KXBUNDESLIGA", 3.1),
     League("ligue1", "Ligue 1", "fra.1", "KXLIGUE1", 2.75),
+    League("ucl", "Champions League", "uefa.champions", "KXUCL", 3.1),
+    League("uel", "Europa League", "uefa.europa", "KXUEL", 2.8),
 ]
 LEAGUE_BY_KEY = {lg.key: lg for lg in LEAGUES}
 
 # Kalshi series per league: (suffix, segment, kind). Segment "match" is the full 90 minutes
-# plus stoppage time (no extra time in league play); "1h" is the first half.
+# plus stoppage time, never extra time or penalties, even in a cup knockout; "1h" is the first half.
 SERIES = [
     ("GAME", "match", "winner"),
     ("TOTAL", "match", "total"),
@@ -47,6 +49,7 @@ class Side:
     score: int = 0
     half_score: Optional[int] = None  # goals in the first half, once known
     red_cards: int = 0
+    reg_score: Optional[int] = None  # goals after 90 minutes, once a cup knockout goes to extra time
     code: str = ""  # Kalshi's code for the team, once matched
 
 
@@ -141,11 +144,20 @@ class Match:
             if self.home.half_score is not None and self.away.half_score is not None:
                 return self.home.half_score, self.away.half_score
             return self.home.score, self.away.score  # best guess until the summary says
+        if self.extra_time and self.home.reg_score is not None and self.away.reg_score is not None:
+            return self.home.reg_score, self.away.reg_score  # Kalshi settles on 90 minutes, not extra time
         return self.home.score, self.away.score
+
+    @property
+    def extra_time(self) -> bool:
+        """A cup knockout went past 90 minutes (ESPN periods 3-4 are extra time, 5 penalties)."""
+        return self.period >= 3
 
     def segment_done(self, segment: str) -> bool:
         if segment == "1h":
             return self.first_half_over and (self.home.half_score is not None or self.state == "final")
+        if self.extra_time:  # the 90 minutes are over; settle once we know the score at 90
+            return self.home.reg_score is not None and self.away.reg_score is not None
         return self.state == "final"
 
     def settles_yes(self, m: SMarket) -> Optional[bool]:

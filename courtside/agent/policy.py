@@ -182,6 +182,30 @@ class ExitSignal:
     data: dict[str, Any] = field(default_factory=dict)
 
 
+# Watching a bet you placed yourself. Your bets are not the agent's 90%-chance unders, so they
+# get their own rule: sell when the bet has clearly gone wrong, not when it merely wobbles.
+WATCH_CONFIRM_S = 20.0  # the trouble has to last this long, so one bad quote cannot sell you out
+WATCH_MIN_BID = 3  # below this, selling saves almost nothing; ride it out
+
+
+def watch_signal(*, entry_price: int, p_entry: Optional[float], p_now: Optional[float], bid: Optional[int]) -> Optional[tuple[str, str]]:
+    """(reason, why) if a watched bet of yours should be sold now, else None.
+
+    Sells when the model's win chance has fallen to under half of what it was when you bought
+    (and under 40%) while the price is also below your entry, or when the price itself has
+    halved and the model agrees it is in trouble.
+    """
+    if bid is None or bid < WATCH_MIN_BID:
+        return None
+    start = p_entry if p_entry else entry_price / 100.0
+    if p_now is not None and p_now < start / 2 and p_now < 0.40 and bid < entry_price:
+        return "risk_exit", f"The win chance fell to {p_now:.0%}, from {start:.0%} when you bought."
+    if bid * 2 <= entry_price and (p_now is None or p_now < start * 0.75):
+        chance = f" and the win chance is {p_now:.0%}" if p_now is not None else ""
+        return "stop_loss", f"The price halved, from {entry_price}c to {bid}c{chance}."
+    return None
+
+
 def position_p_win(side: str, rung: Rung) -> float:
     return rung.p_under if side == "under" else 1.0 - rung.p_under
 

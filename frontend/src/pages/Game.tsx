@@ -13,6 +13,7 @@ import OrderPanel from '../components/game/OrderPanel'
 import Scoreboard from '../components/game/Scoreboard'
 import SpreadBar from '../components/game/SpreadBar'
 import TotalChart from '../components/TotalChart'
+import { WatchPill } from '../components/Watch'
 import { Button, Dialog, Empty, LiveDot, Segmented, Skeleton } from '../components/ui'
 import { cents, mmss, money, pct, periodLabel, pnlColor, tradeLabel } from '../format'
 import { bidOf, fee, gameLine, impliedLine, impliedSpread, marginText, quarterNumber, spreadWinZone, useGameDetail, useMediaQuery, type Pick } from '../lib'
@@ -136,6 +137,7 @@ export function OrderSheet({ open, onClose, children }: { open: boolean; onClose
 
 function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRung[] }) {
   const addTrade = useStore((s) => s.addTrade)
+  const upsertPosition = useStore((s) => s.upsertPosition)
   const toast = useStore((s) => s.toast)
   const [selling, setSelling] = useState<Position | null>(null)
   const [busy, setBusy] = useState(false)
@@ -146,6 +148,14 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
     return r ? bidOf(r, selling.side) : null
   })() : null
   const proceeds = selling && bid != null ? (selling.contracts * bid) / 100 - fee(selling.contracts, bid) : null
+
+  const watchBet = async (p: Position, on: boolean) => {
+    try {
+      upsertPosition(await api.watchPosition(p.id, on))
+    } catch (e) {
+      toast({ level: 'error', title: 'Could not change that', body: e instanceof ApiError ? e.message : '' })
+    }
+  }
 
   const sell = async () => {
     if (!selling) return
@@ -173,6 +183,11 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
               <div className="num mt-0.5 text-xs text-dim">
                 {p.contracts} at {cents(p.entry_price)} · {pct(p.p_win)} chance now · {p.opened_by === 'agent' ? 'Agent' : 'You'}
               </div>
+              {p.opened_by === 'user' && (
+                <div className="mt-1.5">
+                  <WatchPill on={p.watch} note={p.watch_note} onChange={(on) => watchBet(p, on)} />
+                </div>
+              )}
             </div>
             <div className="text-right">
               <div className={clsx('num text-sm font-semibold', pnlColor(p.pnl))}>{money(p.pnl, { sign: true })}</div>

@@ -13,7 +13,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
-from ..agent.policy import kalshi_fee
+from ..agent.policy import WATCH_CONFIRM_S, kalshi_fee, watch_signal
+from ..agent.watch import BetWatcher, checked
 from ..config import Config
 from ..db import DB
 from ..domain import now_iso
@@ -69,6 +70,8 @@ class SoccerDesk:
         self.by_id: dict[str, Match] = {}
         self.last_tick: Optional[str] = None
         self._last_sync = 0.0
+        self._watch_seen: dict[int, float] = {}  # watched bet id -> when its trouble started (fixed rule)
+        self.watcher = BetWatcher()  # Claude's looks at your watched bets
 
     @property
     def mode(self) -> str:
@@ -87,6 +90,7 @@ class SoccerDesk:
         self.matches = await self.feed.refresh()
         self.by_id = {m.id: m for m in self.matches}
         self._settle()
+        await self._watch_bets()
         if self.mode == "live" and time.monotonic() - self._last_sync > SYNC_EVERY_S:
             self._last_sync = time.monotonic()
             try:
@@ -106,7 +110,7 @@ class SoccerDesk:
                 return match, market
         raise SoccerTradeError(f"No soccer market with ticker {ticker}.")
 
-    async def order(self, ticker: str, side: str, contracts: int, price: int) -> dict[str, Any]:
+    async def order(self, ticker: str, side: str, contracts: int, price: int, watch: bool = False) -> dict[str, Any]:
         if side not in ("yes", "no"):
             raise SoccerTradeError("Side must be 'yes' or 'no'.")
         contracts, price = int(contracts), int(price)
@@ -145,12 +149,12 @@ class SoccerDesk:
             "side": side, "label": market.label(side, match), "contracts": filled, "entry_price": px,
             "cost": round(filled * px / 100.0 + fees, 2), "fees": fees, "mode": mode, "status": "open",
             "p_entry": None if p_yes is None else round(p_yes if side == "yes" else 1 - p_yes, 4),
-            "context": self._context(match), "opened_at": now_iso(),
+            "context": self._context(match), "opened_at": now_iso(), "watch": bool(watch),
         }
         row["id"] = self.db.insert("soccer_positions", row)
         return self._position(row)
 
-    async def close(self, position_id: int) -> dict[str, Any]:
+    async def close(self, position_id: int, reason: str = "sold") -> dict[str, Any]:
         row = self.db.one("SELECT * FROM soccer_positions WHERE id=? AND status='open'", [position_id])
         if row is None:
             raise SoccerTradeError("No open soccer position with that id.")
@@ -170,7 +174,94 @@ class SoccerDesk:
             fees = fill["fees"] or kalshi_fee(fill["filled"], px)
         else:
             px, fees = bid, kalshi_fee(row["contracts"], bid)
-        return self._finish(row, px, "sold", fees)
+        return self._finish(row, px, reason, fees)
+
+    # ------------------------------------------------------- watching your bets
+    def set_watch(self, position_id: int, on: bool) -> dict[str, Any]:
+        """Let the agent sell this bet if it goes badly wrong, or stop it doing so."""
+        row = self.db.one("SELECT * FROM soccer_positions WHERE id=? AND status='open'", [position_id])
+        if row is None:
+            raise SoccerTradeError("No open soccer position with that id.")
+        self.db.update("soccer_positions", row["id"], {"watch": bool(on)})
+        self._watch_seen.pop(row["id"], None)
+        self.watcher.forget(row["id"])  # a fresh first look if it is switched back on
+        return self._position({**row, "watch": bool(on)})
+
+    async def _watch_bets(self) -> None:
+        """Watched bets: Claude reads the match and says sell or hold. The fixed rule only acts when
+        Claude is not connected or its last look got no answer."""
+        brain = self.engine.brain
+        claude = bool(brain and brain.available)
+        now = time.monotonic()
+        rows = self.db.query("SELECT * FROM soccer_positions WHERE status='open' AND mode=? AND watch=1", [self.mode])
+        for row in rows:
+            match = self.by_id.get(row["match_id"])
+            market = match.market(row["ticker"]) if match else None
+            if not match or not market or match.state != "live":
+                self._watch_seen.pop(row["id"], None)
+                continue
+            p_now = None if market.p_yes is None else (market.p_yes if row["side"] == "yes" else 1 - market.p_yes)
+            signal = watch_signal(entry_price=row["entry_price"], p_entry=row["p_entry"], p_now=p_now, bid=market.bid(row["side"]))
+            if claude:
+                signature = (f"{match.home.short} {match.home.score}-{match.away.score} {match.away.short}, "
+                             f"red cards {match.home.red_cards}-{match.away.red_cards}")
+                why = self.watcher.why_now(row["id"], p_now=p_now, signature=signature, alarm=signal is not None, now=now)
+                if why:
+                    self.watcher.start(row["id"], self._ask_about_bet(row["id"], why), p_now=p_now, signature=signature, now=now)
+                if not self.watcher.failed(row["id"]):
+                    self._watch_seen.pop(row["id"], None)
+                    continue
+            if signal is None:
+                self._watch_seen.pop(row["id"], None)
+                continue
+            first = self._watch_seen.setdefault(row["id"], now)
+            if now - first < WATCH_CONFIRM_S:
+                continue  # wait to be sure it is not one bad quote
+            await self._sell_watched(row, signal[0], signal[1])
+
+    async def _ask_about_bet(self, bet_id: int, why: str) -> None:
+        row = self.db.one("SELECT * FROM soccer_positions WHERE id=? AND status='open'", [bet_id])
+        match = self.by_id.get(row["match_id"]) if row else None
+        market = match.market(row["ticker"]) if match else None
+        if not row or not match or not market:
+            return
+        bid = market.bid(row["side"])
+        sell_now = None
+        if bid is not None:
+            back = row["contracts"] * bid / 100.0 - kalshi_fee(row["contracts"], bid)
+            sell_now = {"bid_cents": bid, "you_get_back": round(back, 2), "profit_or_loss": round(back - row["cost"], 2)}
+        p_now = None if market.p_yes is None else (market.p_yes if row["side"] == "yes" else 1 - market.p_yes)
+        bet = {
+            "bet": row["label"], "market": f"{'1st half' if row['segment'] == '1h' else 'full match'} {row['kind']}",
+            "contracts": row["contracts"], "paid_cents": row["entry_price"], "cost": row["cost"],
+            "pays_if_it_wins": row["contracts"], "loses_if_wrong": row["cost"], "sell_now": sell_now,
+            "goals_model_win_chance_now": None if p_now is None else round(p_now, 3),
+            "goals_model_win_chance_when_bought": row["p_entry"],
+            "bought_at": f"{(row['context'] or {}).get('minute') or 'before kickoff'}, score then {(row['context'] or {}).get('score')}",
+        }
+        verdict = await self.engine.brain.review_watched(match.id, bet, why)
+        row = self.db.one("SELECT * FROM soccer_positions WHERE id=? AND status='open'", [bet_id])
+        if not row:
+            return  # sold or settled while Claude was thinking
+        bid = market.bid(row["side"])
+        if verdict is not None:
+            verdict = checked(verdict, bid)
+        self.watcher.record(bet_id, verdict, now_iso())
+        if verdict is None or not row["watch"] or verdict["action"] != "sell":
+            return
+        await self._sell_watched(row, "risk_exit", verdict["reason"])
+
+    async def _sell_watched(self, row: dict[str, Any], reason: str, why: str) -> None:
+        try:
+            trade = await self.close(row["id"], reason=reason)
+        except SoccerTradeError as exc:
+            log.warning("soccer watch: could not sell %s: %s", row["ticker"], exc)
+            return
+        self._watch_seen.pop(row["id"], None)
+        self.watcher.forget(row["id"])
+        log.info("soccer watch: sold %s %s at %sc (%s)", row["match_label"], row["label"], trade["exit_price"], why)
+        self.engine.hub.toast("warn", f"Agent sold {row['match_label']}: {row['label']}",
+                              f"{why} {trade['pnl']:+,.2f} at {trade['exit_price']}c.")
 
     def _finish(self, row: dict[str, Any], exit_price: int, reason: str, exit_fees: float = 0.0) -> dict[str, Any]:
         pnl = round(row["contracts"] * exit_price / 100.0 - row["cost"] - exit_fees, 2)  # cost includes the entry fee
@@ -278,6 +369,8 @@ class SoccerDesk:
             "max_profit": round(row["contracts"] - row["cost"], 2),
             "p_win": None if p_yes is None else round(p_yes if row["side"] == "yes" else 1 - p_yes, 4),
             "p_entry": row["p_entry"], "mode": row["mode"], "opened_at": row["opened_at"], "can_sell": bid is not None,
+            "watch": bool(row.get("watch")),
+            "watch_note": self.watcher.note(row["id"]) if row.get("watch") else None,
         }
 
     @staticmethod
