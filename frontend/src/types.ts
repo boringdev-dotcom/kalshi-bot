@@ -332,6 +332,7 @@ export type ExitReason =
   | 'stop_loss'
   | 'take_profit'
   | 'manual'
+  | 'sold_on_kalshi'
 
 export interface Trade {
   id: number

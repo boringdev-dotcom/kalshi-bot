@@ -284,6 +284,8 @@ function outcome(t: Trade): { text: string; className: string } {
       return { text: 'Took profit', className: 'text-mint' }
     case 'manual':
       return { text: 'Closed by you', className: 'text-mute' }
+    case 'sold_on_kalshi':
+      return { text: 'Sold on Kalshi', className: 'text-mute' }
     default: {
       const who = t.opened_by === 'user' ? 'Agent sold it' : 'Sold early' // your bet, sold because you had it watched
       if (t.exit_verdict === 'saved') return { text: `${who}: avoided a loss`, className: 'text-mint' }
