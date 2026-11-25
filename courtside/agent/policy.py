@@ -190,6 +190,9 @@ class ExitSignal:
     reasoning: str
     price: int
     data: dict[str, Any] = field(default_factory=dict)
+    # A warning fired but buyers pay less than the bet is worth to hold, so it is kept. Callers
+    # sell only when this is False.
+    hold: bool = False
 
 
 # Watching a bet you placed yourself. Your bets are not the agent's 90%-chance unders, so they
@@ -214,6 +217,18 @@ def watch_signal(*, entry_price: int, p_entry: Optional[float], p_now: Optional[
         chance = f" and the win chance is {p_now:.0%}" if p_now is not None else ""
         return "stop_loss", f"The price halved, from {entry_price}c to {bid}c{chance}."
     return None
+
+
+# Selling early only pays when buyers offer more than the bet is worth held to the end. Kalshi's
+# fee and this margin come off the bid first, so a sale at about what the bet is worth (which
+# then "sells a winner" most of the time) is not made.
+SELL_EDGE_C = 2.0
+
+
+def worth_selling(bid: float, p_win: float) -> bool:
+    """True when the bid, after Kalshi's fee, beats what the model thinks holding is worth."""
+    fee_c = 7.0 * (bid / 100.0) * (1 - bid / 100.0)
+    return bid - fee_c >= p_win * 100 + SELL_EDGE_C
 
 
 def position_p_win(side: str, rung: Rung) -> float:
@@ -249,34 +264,52 @@ def exit_signal(
             bid,
             data,
         )
+    warning: Optional[ExitSignal] = None
     if p_win < floor:
-        return ExitSignal(
+        warning = ExitSignal(
             "risk_exit",
             f"Getting out of {label}: win chance down to {p_win:.0%}",
             f"The model's chance of this finishing {side} {strike:g} fell to {p_win:.0%}, under the {floor:.0%} floor "
-            f"({profile} exit). Total is {game.total} with {game.q4_clock} left in a {game.margin}-pt game. "
-            f"Selling at {bid}c against a {entry_price}c entry for a small loss instead of risking the whole stake.",
+            f"({profile} exit). Total is {game.total} with {game.q4_clock} left in a {game.margin}-pt game.",
             bid,
             data,
         )
-    if entry_price - bid >= stop:
-        return ExitSignal(
+    elif entry_price - bid >= stop:
+        warning = ExitSignal(
             "stop_loss",
             f"Stop hit on {label}: bid {bid}c",
             f"The market marked this down {entry_price - bid}c from the {entry_price}c entry, past the {stop:g}c stop "
-            f"({profile} exit). The market is seeing more danger than the model ({p_win:.0%}); respecting it.",
+            f"({profile} exit), and the model's win chance is {p_win:.0%}.",
             bid,
             data,
         )
-    proj = game.projection
-    if side == "under" and proj and game.period == 4 and proj.p_ot * 100 >= p["max_ot_risk"]:
-        if proj.mean + (1 - proj.p_ot) * OT_MEAN > strike:
-            return ExitSignal(
-                "risk_exit",
-                f"Getting out of {label}: overtime risk {proj.p_ot:.0%}",
-                f"A {game.margin}-pt game with {game.q4_clock} left has about a {proj.p_ot:.0%} chance of overtime, and an "
-                f"extra period (~{OT_MEAN:.0f} pts) would push the total past {strike:g}. Selling at {bid}c.",
-                bid,
-                {**data, "ot_chance": f"{proj.p_ot:.0%}"},
-            )
-    return None
+    else:
+        proj = game.projection
+        if side == "under" and proj and game.period == 4 and proj.p_ot * 100 >= p["max_ot_risk"]:
+            if proj.mean + (1 - proj.p_ot) * OT_MEAN > strike:
+                warning = ExitSignal(
+                    "risk_exit",
+                    f"Getting out of {label}: overtime risk {proj.p_ot:.0%}",
+                    f"A {game.margin}-pt game with {game.q4_clock} left has about a {proj.p_ot:.0%} chance of overtime, and an "
+                    f"extra period (~{OT_MEAN:.0f} pts) would push the total past {strike:g}.",
+                    bid,
+                    {**data, "ot_chance": f"{proj.p_ot:.0%}"},
+                )
+    if warning is None:
+        return None
+    worth = round(p_win * 100)
+    warning.data["worth"] = f"{worth}c"
+    if worth_selling(bid, p_win):
+        warning.reasoning += (
+            f" Buyers pay {bid}c and holding is worth about {worth}c, so selling now against a {entry_price}c entry "
+            "beats riding it out."
+        )
+        return warning
+    warning.hold = True
+    warning.headline = f"Holding {label}: a sale at {bid}c pays less than it is worth"
+    warning.reasoning += (
+        f" But buyers only pay {bid}c and the bet is worth about {worth}c held to the end, so selling would give "
+        "up money on average. Holding."
+    )
+    return warning
+

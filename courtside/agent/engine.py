@@ -37,6 +37,7 @@ from .playbook import Q4_UNDER, Playbook
 from .policy import (
     EXIT_PROFILES,
     Candidate,
+    ExitSignal,
     Skip,
     exit_signal,
     find_entries,
@@ -78,6 +79,10 @@ class Engine:
         self.settings: dict[str, Any] = {**DEFAULT_SETTINGS, **db.get("settings", {})}
         self.playbook = Playbook(db)
         self.learner = Learner(db, env="sim" if self.settings["data_source"] == "sim" else "real")
+        self.learner.rebuild_exit_grades(db.query(
+            "SELECT exit_profile, pnl, counterfactual_pnl, cost, simulated FROM positions WHERE status='closed' "
+            "AND opened_by='agent' AND counterfactual_pnl IS NOT NULL AND exit_reason NOT IN ('manual', 'sold_on_kalshi')"
+        ))
         self.memory = MemoryStore(db)
         self.observer = QuarterObserver(db)
         self.brain = None  # set by main once the Brain exists (it needs the engine)
@@ -97,6 +102,7 @@ class Engine:
         self._reviewing: set[str] = set()
         self._vetoed: dict[str, float] = {}
         self._hold_noted: dict[int, str] = {}
+        self._value_noted: dict[int, str] = {}  # position id -> the exit warning last held through
         self._watch_seen: dict[int, float] = {}  # watched bet id -> when its trouble started (fixed rule)
         self._last_sync = 0.0  # last check of live positions against what Kalshi holds
         self.watcher = BetWatcher()  # Claude's looks at your watched bets
@@ -776,6 +782,7 @@ class Engine:
         row = {**row, **fields}
         self._marks.pop(row["id"], None)
         self._hold_noted.pop(row["id"], None)
+        self._value_noted.pop(row["id"], None)
         self._watch_seen.pop(row["id"], None)
         self.watcher.forget(row["id"])
 
@@ -790,6 +797,8 @@ class Engine:
                 price_cents=row["entry_price"],
                 simulated=row["simulated"],
             )
+            if reason in ("settled_win", "settled_loss"):  # held to the end: its exits cost nothing
+                self.learner.grade_exit(row["exit_profile"], 0.0, row["simulated"])
             self.memory.reinforce(row["memory_ids"], positive=pnl > 0)
         self._remember_trade(row)
         trade = self.trade_api(row)
@@ -941,6 +950,8 @@ class Engine:
         if row["opened_by"] != "agent" or row["exit_reason"] == "manual":
             return
         self.learner.record_exit_verdict(row["exit_profile"], verdict)
+        if row["cost"]:
+            self.learner.grade_exit(row["exit_profile"], (row["pnl"] - held) / row["cost"], row["simulated"])
         if would_win:
             self.learner.credit_win(row["arm_key"], row["exit_profile"], row["simulated"])
         self._update_exit_scorecard(row["simulated"])
@@ -1008,6 +1019,9 @@ class Engine:
             if signal is None:
                 self._note_hold(row, game, rung, p)
                 continue
+            if signal.hold:
+                self._note_value_hold(row, game, signal)
+                continue
             try:
                 trade = await self.close_position(row["id"], reason=signal.reason)
             except TradeError as exc:
@@ -1020,6 +1034,17 @@ class Engine:
                 confidence=0.8, data={**signal.data, "pnl": f"{trade['pnl']:+.2f}"}, source="model",
                 memory_ids=row["memory_ids"],
             )
+
+    def _note_value_hold(self, row: dict[str, Any], game: Game, signal: ExitSignal) -> None:
+        """Say once per warning why a position is kept although an exit rule fired: buyers pay less
+        than it is worth held to the end."""
+        if self._value_noted.get(row["id"]) == signal.reason:
+            return
+        self._value_noted[row["id"]] = signal.reason
+        self.decide(
+            "hold", signal.headline, signal.reasoning, game=game, ticker=row["ticker"],
+            confidence=0.6, source="model", data=signal.data,
+        )
 
     def _note_hold(self, row: dict[str, Any], game: Game, rung: Rung, p: dict[str, float]) -> None:
         """Say something once when a held position's game turns risky but no exit has fired."""

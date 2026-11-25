@@ -49,7 +49,7 @@ def train(db: DB, playbook: Playbook, learner: Learner, memory: MemoryStore, epi
                     side="under", strike=position["strike"], entry_price=position["entry_price"],
                     game=game, rung=rung, p=p, profile=position["exit_profile"],
                 )
-                if signal:
+                if signal and not signal.hold:
                     fees = kalshi_fee(position["contracts"], signal.price)
                     position.update(
                         exit_price=signal.price, exit_reason=signal.reason,
@@ -90,6 +90,8 @@ def train(db: DB, playbook: Playbook, learner: Learner, memory: MemoryStore, epi
             done["counterfactual_pnl"] = held
             done["exit_verdict"] = "saved" if done["pnl"] > held else "shaken_out"
             learner.record_exit_verdict(done["exit_profile"], done["exit_verdict"])
+        if done["cost"]:
+            learner.grade_exit(done["exit_profile"], (done["pnl"] - done["counterfactual_pnl"]) / done["cost"], True)
         done["final_total"] = final
         learner.record(
             arm=done["arm_key"], exit_profile=done["exit_profile"], ret=done["pnl"] / done["cost"],

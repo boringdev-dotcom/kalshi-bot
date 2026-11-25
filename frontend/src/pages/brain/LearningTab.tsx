@@ -296,8 +296,9 @@ function ExitStyles({ arms }: { arms: ExitArm[] }) {
     <section>
       <h3 className="h-section">How quickly it sells</h3>
       <p className="hint mt-1">
-        Each trade gets one of three selling styles. Once the game ends, every early sale is compared with what holding would
-        have paid, and the styles that do better get used more.
+        Each trade gets one of three selling styles. None sells unless buyers pay more than the bet is worth held to the end.
+        Once the game ends, every early sale is compared with what holding would have paid, and the styles whose sales beat
+        holding get used more. A trade held to the end counts as even.
       </p>
       <Card className="mt-3 px-5">
         {arms.length === 0 ? (
@@ -318,7 +319,7 @@ function ExitStyles({ arms }: { arms: ExitArm[] }) {
                   {a.n ? signedPct(a.mean_return, 1) : '—'}
                 </div>
                 <div className="text-xs text-dim">
-                  per dollar · {a.n} {a.n === 1 ? 'trade' : 'trades'}
+                  vs holding, per dollar · {a.n} {a.n === 1 ? 'trade' : 'trades'}
                 </div>
               </div>
             </div>

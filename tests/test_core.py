@@ -151,7 +151,7 @@ def test_exit_fires_when_the_game_turns():
     rung2 = next(r for r in hot.ladder if r.strike == 241.5)
     signal = exit_signal(side="under", strike=241.5, entry_price=rung.no_ask, game=hot, rung=rung2, p=p)
     assert signal is not None and signal.reason in ("risk_exit", "stop_loss")
-    assert signal.price == rung2.no_bid
+    assert signal.price == rung2.no_bid and signal.hold  # quoted at what it is worth: no reason to sell
 
 
 # ----------------------------------------------------------------- learner

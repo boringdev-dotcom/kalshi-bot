@@ -45,9 +45,9 @@ STRATEGIES: dict[str, dict[str, Any]] = {
             Spec("min_edge", "Model veto", "Model win chance minus the price. At -1 the agent follows your rule unless the model thinks you are overpaying by more than a point; raise it to only take trades the model likes.", "entry", -1.0, -5, 8, 0.25, "%"),
             Spec("skip_close_margin", "Skip tight games", "With under 5:00 left, skip games within this many points (fouling and overtime risk).", "entry", 4, 0, 10, 1, "pts"),
             Spec("stake", "Stake per trade", "Dollars put down on each entry. $300 at 94¢ wins about $19.", "sizing", 300, 10, 2000, 10, "$"),
-            Spec("min_p_win", "Bail-out win chance", "Sell if the model's chance of winning drops below this.", "exit", 78, 50, 97, 1, "%"),
-            Spec("stop_loss", "Stop loss", "Sell if the price falls this many cents below the entry.", "exit", 12, 2, 40, 1, "¢"),
-            Spec("max_ot_risk", "Overtime guard", "Sell if overtime becomes this likely and an extra period would break the strike.", "exit", 22, 3, 50, 1, "%"),
+            Spec("min_p_win", "Bail-out win chance", "Consider selling if the model's chance of winning drops below this. It only sells if buyers pay more than the bet is worth held to the end.", "exit", 78, 50, 97, 1, "%"),
+            Spec("stop_loss", "Stop loss", "Consider selling if the price falls this many cents below the entry. It only sells if the model agrees, i.e. buyers pay more than the bet is worth.", "exit", 12, 2, 40, 1, "¢"),
+            Spec("max_ot_risk", "Overtime guard", "Consider selling if overtime becomes this likely and an extra period would break the strike, again only for more than the bet is worth.", "exit", 22, 3, 50, 1, "%"),
             Spec("take_profit", "Take profit at", "Sell early once the bid reaches this. 100 means always hold to settlement.", "exit", 99, 90, 100, 1, "¢"),
         ],
     }
@@ -134,5 +134,6 @@ class Playbook:
             f"{p['buffer_min']:g}-{p['buffer_max']:g} pts above the live line at {p['min_price']:g}-{p['max_price']:g}c, "
             f"${p['stake']:g} a trade, model veto at {p['min_edge']:g}% edge. Skip games within {p['skip_close_margin']:g} pts "
             f"under 5:00. Exit if win chance < {p['min_p_win']:g}%, price drops {p['stop_loss']:g}c, "
-            f"or OT chance > {p['max_ot_risk']:g}% would break the strike. Take profit at {p['take_profit']:g}c."
+            f"or OT chance > {p['max_ot_risk']:g}% would break the strike, and only when buyers pay more than the bet is worth. "
+            f"Take profit at {p['take_profit']:g}c."
         )
