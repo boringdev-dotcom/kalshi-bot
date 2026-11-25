@@ -27,6 +27,7 @@ from ..feeds.patterns import PATTERN_LABELS, pattern_keys, pattern_texts
 from ..feeds.sim import SimFeed
 from ..history import adjusted_history
 from ..kalshi.client import DUST, KalshiClient, KalshiError
+from ..kalshi.sync import SYNC_EVERY_S, outside_sales
 from ..model.quarters import implied_margin, implied_quarter_total
 from ..model.totals import refresh_game
 from .learner import Learner
@@ -97,6 +98,7 @@ class Engine:
         self._vetoed: dict[str, float] = {}
         self._hold_noted: dict[int, str] = {}
         self._watch_seen: dict[int, float] = {}  # watched bet id -> when its trouble started (fixed rule)
+        self._last_sync = 0.0  # last check of live positions against what Kalshi holds
         self.watcher = BetWatcher()  # Claude's looks at your watched bets
         self._marks: dict[int, int] = {}
         self._acted_at = 0.0
@@ -167,6 +169,12 @@ class Engine:
         await self._settle_finished()
         self._archive_finished()
         await self._watch_user_bets()  # your say-so per bet, so it runs even with the agent off
+        if self.settings["trading_mode"] == "live" and time.monotonic() - self._last_sync > SYNC_EVERY_S:
+            self._last_sync = time.monotonic()
+            try:
+                await self.sync_with_kalshi()
+            except KalshiError as exc:
+                log.warning("Kalshi position sync failed: %s", exc)
         if self.settings["agent_enabled"]:
             await self._manage_exits()
             await self._scan_entries()
@@ -704,12 +712,7 @@ class Engine:
         filled, price, fees = await self._sell(row, rung, limit)
         keep = round(row["contracts"] - filled, 2)
         if keep > DUST:
-            # Partly sold: the rest stays open (and watched, if it was) and the sold slice is booked.
-            share = filled / row["contracts"]
-            self.db.update("positions", row["id"], {"contracts": keep, "cost": round(row["cost"] * (1 - share), 2), "fees": round(row["fees"] * (1 - share), 2)})
-            sold = {k: v for k, v in row.items() if k != "id"}
-            sold.update(contracts=filled, cost=round(row["cost"] * share, 2), fees=round(row["fees"] * share, 2))
-            row = {**sold, "id": self.db.insert("positions", sold)}
+            row = self._split(row, filled)  # partly sold: the rest stays open (and watched, if it was)
         trade = self._finish(row, price, reason, exit_fees=fees, game=game)
         trade["left"] = keep if keep > DUST else 0
         if keep > DUST:
@@ -718,6 +721,32 @@ class Engine:
                 f"Kalshi ran out of buyers. {keep:g} contracts are still yours and still open in Courtside.",
             )
         return trade
+
+    def _split(self, row: dict[str, Any], take: float) -> dict[str, Any]:
+        """Carve `take` contracts off an open position into a row of their own; returns that row."""
+        share = take / row["contracts"]
+        part = {k: v for k, v in row.items() if k != "id"}
+        part.update(contracts=take, cost=round(row["cost"] * share, 2), fees=round(row["fees"] * share, 2))
+        part["id"] = self.db.insert("positions", part)
+        self.db.update("positions", row["id"], {
+            "contracts": round(row["contracts"] - take, 2),
+            "cost": round(row["cost"] - part["cost"], 2),
+            "fees": round(row["fees"] - part["fees"], 2),
+        })
+        return part
+
+    async def sync_with_kalshi(self) -> list[dict[str, Any]]:
+        """Close live positions you sold outside Courtside (on Kalshi's own app or site), at the
+        prices Kalshi filled them. See `kalshi.sync`."""
+        rows = self.db.query("SELECT * FROM positions WHERE status='open' AND mode='live'")
+        closed: list[dict[str, Any]] = []
+        for row, take, px, fees in await outside_sales(self.kalshi, rows, "over"):
+            if take < row["contracts"] - DUST:
+                row = self._split(row, take)
+            closed.append(self._finish(row, px, "sold_on_kalshi", exit_fees=fees, game=self.by_id.get(row["game_id"])))
+        for trade in closed:
+            log.info("%s %s closed, sold on Kalshi at %sc", trade["game_label"], trade["label"], trade["exit_price"])
+        return closed
 
     def _finish(
         self,
@@ -751,7 +780,7 @@ class Engine:
         self.watcher.forget(row["id"])
 
         ret = pnl / row["cost"] if row["cost"] else 0.0
-        if row["opened_by"] == "agent":
+        if row["opened_by"] == "agent" and reason != "sold_on_kalshi":  # your sale on Kalshi is not the agent's lesson
             self.learner.record(
                 arm=row["arm_key"],
                 exit_profile=row["exit_profile"],
@@ -769,7 +798,7 @@ class Engine:
         self.hub.emit("account", self.account())
         self._snapshot_equity()
         verb = {"settled_win": "Won", "settled_loss": "Lost", "risk_exit": "Risk exit", "stop_loss": "Stopped out",
-                "take_profit": "Took profit", "manual": "Closed"}[reason]
+                "take_profit": "Took profit", "manual": "Closed", "sold_on_kalshi": "Sold on Kalshi"}[reason]
         self.hub.toast("success" if pnl > 0 else "warn", f"{verb}: {row['game_label']} {self._label(row)}", f"{pnl:+,.2f} at {exit_price}c")
         return trade
 
@@ -805,6 +834,7 @@ class Engine:
             "stop_loss": f"stopped out at {row['exit_price']}c",
             "take_profit": f"took profit at {row['exit_price']}c",
             "manual": f"closed by hand at {row['exit_price']}c",
+            "sold_on_kalshi": f"sold by the owner on Kalshi's own app at {row['exit_price']}c",
         }[row["exit_reason"]]
         tags = self._tags_for(row)
         episode = self.memory.add(

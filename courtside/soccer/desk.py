@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..agent.policy import WATCH_CONFIRM_S, kalshi_fee, sell_floor, watch_signal
@@ -19,6 +18,7 @@ from ..config import Config
 from ..db import DB
 from ..domain import now_iso
 from ..kalshi.client import DUST, KalshiError
+from ..kalshi.sync import SYNC_EVERY_S, outside_sales
 from .context import run_of_play
 from .domain import LEAGUE_BY_KEY, LEAGUES, Match, SMarket
 from .feed import SoccerFeed
@@ -29,8 +29,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-SYNC_EVERY_S = 20.0  # how often live positions are checked against what Kalshi says you hold
-SYNC_GRACE_S = 30  # leave positions this fresh alone: Kalshi may not list the fill yet
 
 
 class SoccerTradeError(Exception):
@@ -290,45 +288,14 @@ class SoccerDesk:
         return self._trade({**row, **fields})
 
     async def sync_with_kalshi(self) -> list[dict[str, Any]]:
-        """Close live positions you sold outside Courtside (on Kalshi's own app or site).
-
-        Kalshi holding fewer contracts than the desk thinks means some were sold elsewhere.
-        They are closed at the prices of the sell fills Kalshi reports after the position
-        opened. Without such fills nothing is touched: a market Kalshi has settled also
-        empties the position, and settlement is `_settle`'s job.
-        """
-        rows = self.db.query("SELECT * FROM soccer_positions WHERE status='open' AND mode='live' ORDER BY id DESC")
-        if not rows:
-            return []
-        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=SYNC_GRACE_S)).isoformat()
-        held = await self.engine.kalshi.positions()
-        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for row in rows:
-            groups.setdefault((row["ticker"], row["side"]), []).append(row)
+        """Close live positions you sold outside Courtside (on Kalshi's own app or site), at the
+        prices Kalshi filled them. See `kalshi.sync`."""
+        rows = self.db.query("SELECT * FROM soccer_positions WHERE status='open' AND mode='live'")
         closed: list[dict[str, Any]] = []
-        for (ticker, side), group in groups.items():
-            if any(r["opened_at"] > cutoff for r in group):
-                continue
-            count = held.get(ticker, 0.0)
-            on_kalshi = round(max(count, 0) if side == "yes" else max(-count, 0), 2)
-            missing = round(sum(r["contracts"] for r in group) - on_kalshi, 2)
-            if missing <= DUST:
-                continue
-            first_open = min(r["opened_at"] for r in group)
-            sells = [f for f in await self.engine.kalshi.fills(ticker)
-                     if _iso(f["created_time"]) > first_open and not _is_entry(f, group)]
-            sold = sum(f["count"] for f in sells)
-            if sold + 1e-9 < missing:
-                continue  # no sale on record: likely settled, so leave it to settlement
-            for row in group:  # newest first, matching how the sells were most likely meant
-                if missing <= DUST:
-                    break
-                take = round(min(row["contracts"], missing), 2)
-                px, fees = _fill_price(sells, side, take)
-                if take < row["contracts"]:
-                    row = self._split(row, take)
-                closed.append(self._finish(row, px, "sold_on_kalshi", fees))
-                missing -= take
+        for row, take, px, fees in await outside_sales(self.engine.kalshi, rows, "yes"):
+            if take < row["contracts"] - DUST:
+                row = self._split(row, take)
+            closed.append(self._finish(row, px, "sold_on_kalshi", fees))
         for trade in closed:
             log.info("soccer: %s %s closed, sold on Kalshi at %sc", trade["match_label"], trade["label"], trade["exit_price"])
         return closed
@@ -504,33 +471,3 @@ class SoccerDesk:
             (m for m in self.matches if q in m.label.lower() or q in f"{m.home.name} {m.away.name}".lower()), None
         )
 
-
-def _iso(ts: str) -> str:
-    """Kalshi's '...Z' timestamps in the same form as `now_iso()`, so they compare as strings."""
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat(timespec="seconds")
-    except ValueError:
-        return ""
-
-
-def _is_entry(fill: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
-    """A fill from one of the desk's own buys: it lands just before that position's `opened_at`."""
-    t = _iso(fill["created_time"])
-    for r in rows:
-        opened = datetime.fromisoformat(r["opened_at"])
-        if (opened - timedelta(seconds=5)).isoformat(timespec="seconds") <= t <= r["opened_at"]:
-            return True
-    return False
-
-
-def _fill_price(fills: list[dict[str, Any]], side: str, contracts: int) -> tuple[int, float]:
-    """Average price (cents, for `side`) and fees of the most recent `contracts` sold."""
-    left, value, fees = float(contracts), 0.0, 0.0
-    for f in fills:  # newest first
-        if left <= 0:
-            break
-        n = min(f["count"], left)
-        value += n * (f["yes_price"] if side == "yes" else f["no_price"])
-        fees += f["fee"] * n / f["count"] if f["count"] else 0.0
-        left -= n
-    return round(value / contracts), round(fees, 2)

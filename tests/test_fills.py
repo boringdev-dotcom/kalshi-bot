@@ -130,3 +130,66 @@ def test_an_nba_sale_that_only_part_fills_keeps_the_rest_open():
     assert trade["contracts"] == 30 and trade["left"] == 70
     still = engine.positions_api()
     assert [(p["id"], p["contracts"], p["watch"]) for p in still] == [(pos["id"], 70, True)]
+
+
+class Holdings:
+    """What Kalshi reports holding and filling, for checking positions sold outside Courtside."""
+
+    def __init__(self, held: dict, fills: list):
+        self.held, self._fills = held, fills
+
+    async def positions(self):
+        return self.held
+
+    async def fills(self, ticker, limit=100):
+        return [f for f in self._fills if f.get("ticker", ticker) == ticker]
+
+
+def nba_live_bet(engine, game, rung, side: str, contracts: float, opened_at: str) -> int:
+    return engine.db.insert("positions", {
+        "game_id": game.id, "game_label": game.label, "ticker": rung.ticker, "strike": rung.strike, "side": side,
+        "segment": rung.segment, "kind": rung.kind, "team": rung.team, "label": rung.position_label(side),
+        "contracts": contracts, "entry_price": 60, "cost": round(contracts * 0.6 + 0.5, 2), "fees": 0.5,
+        "opened_at": opened_at, "opened_by": "user", "mode": "live", "simulated": False, "p_win_entry": 0.6,
+        "context": {}, "memory_ids": [], "watch": True,
+    })
+
+
+def test_an_nba_bet_sold_on_kalshis_own_app_is_closed_at_that_price():
+    engine = make_engine()
+    game = spread_game(home=50, away=48, state="live", period=3, clock=300.0)
+    game.simulated = False
+    engine.games, engine.by_id = [game], {game.id: game}
+    engine.settings["trading_mode"] = "live"
+    rung = game.spreads[0]
+    pid = nba_live_bet(engine, game, rung, "under", 45, "2026-11-24T23:10:00+00:00")
+    engine.kalshi = Holdings({}, [
+        {"count": 45, "yes_price": 30, "no_price": 70, "fee": 0.66, "created_time": "2026-11-24T23:40:00Z"},  # your sale
+        {"count": 45, "yes_price": 40, "no_price": 60, "fee": 0.76, "created_time": "2026-11-24T23:09:58Z"},  # the buy
+    ])
+    closed = asyncio.run(engine.sync_with_kalshi())
+    assert [t["id"] for t in closed] == [pid]
+    assert closed[0]["exit_price"] == 70 and closed[0]["exit_reason"] == "sold_on_kalshi"
+    assert engine.positions_api() == []
+
+
+def test_nba_sync_leaves_held_settled_and_part_sold_bets_right():
+    engine = make_engine()
+    game = spread_game(home=50, away=48, state="live", period=3, clock=300.0)
+    game.simulated = False
+    engine.games, engine.by_id = [game], {game.id: game}
+    engine.settings["trading_mode"] = "live"
+    held, gone, part = game.spreads[0], game.spreads[1], game.spreads[2]
+    a = nba_live_bet(engine, game, held, "under", 45, "2026-11-24T23:10:00+00:00")
+    nba_live_bet(engine, game, gone, "over", 10, "2026-11-24T23:10:00+00:00")
+    c = nba_live_bet(engine, game, part, "over", 100, "2026-11-24T23:10:00+00:00")
+    engine.kalshi = Holdings({held.ticker: -45.0, part.ticker: 60.0}, [
+        # Gone with no sale on record: settled, so settlement handles it.
+        {"ticker": gone.ticker, "count": 10, "yes_price": 60, "no_price": 40, "fee": 0.1, "created_time": "2026-11-24T23:09:59Z"},
+        # 40 of the 100 sold on Kalshi.
+        {"ticker": part.ticker, "count": 40, "yes_price": 75, "no_price": 25, "fee": 0.4, "created_time": "2026-11-24T23:30:00Z"},
+    ])
+    closed = asyncio.run(engine.sync_with_kalshi())
+    assert [(t["contracts"], t["exit_price"]) for t in closed] == [(40, 75)]
+    left = {p["id"]: p["contracts"] for p in engine.positions_api()}
+    assert left[a] == 45 and left[c] == 60 and len(left) == 3
