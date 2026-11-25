@@ -10,9 +10,11 @@ each trade is one decision in one context with one payoff.
   keeps paying the agent grows more willing. Thompson sampling picks among
   qualifying strikes so uncertain arms still get tried.
 * Exit arms. Each entry is assigned an exit profile (tight / balanced /
-  patient) by Thompson sampling on realised return, so the agent learns how
-  twitchy to be. Once the game is final every early exit is graded against
-  what holding would have paid.
+  patient) by Thompson sampling, so the agent learns how twitchy to be. A
+  profile is judged on what its exits did against holding: once a game is
+  final every early exit is graded by its P&L minus what holding would have
+  paid, and a trade held to the end scores zero. Profiles whose early sales
+  keep giving up winners fall behind and get used less.
 
 Real and simulated results are kept apart. On real markets (paper or live)
 only real trades count: practice in the sandbox never moves a real-money
@@ -88,9 +90,40 @@ class Learner:
         return self.rng.gauss(view["ev"], RETURN_SD / math.sqrt(PRIOR_STRENGTH + view["n"]))
 
     # -- exits -----------------------------------------------------------------
+    def _edge(self, row: dict[str, Any]) -> tuple[float, float]:
+        """(graded trades, sum of P&L minus holding per dollar) for the current environment."""
+        if self.env == "sim":
+            return row["sim_edge_n"], row["sim_sum_edge"]
+        return row["edge_n"], row["sum_edge"]
+
     def _exit_posterior(self, profile: str) -> tuple[float, float]:
-        n, _, total = self._effective(self._arm(profile, "exit"))
+        """Mean and sd of what this profile's exits beat holding by, per dollar. Starts at zero:
+        no style is assumed better than holding until results say so."""
+        n, total = self._edge(self._arm(profile, "exit"))
         return total / (EXIT_PRIOR_STRENGTH + n), RETURN_SD / math.sqrt(EXIT_PRIOR_STRENGTH + n)
+
+    def grade_exit(self, exit_profile: Optional[str], edge: float, simulated: bool) -> None:
+        """One finished trade's P&L minus what holding to the end would have paid, per dollar risked."""
+        if not exit_profile:
+            return
+        self._arm(exit_profile, "exit")
+        prefix = "sim_" if simulated else ""
+        self.db.execute(
+            f"UPDATE arms SET {prefix}edge_n={prefix}edge_n+1, {prefix}sum_edge={prefix}sum_edge+? WHERE key=? AND kind='exit'",
+            [edge, exit_profile],
+        )
+
+    def rebuild_exit_grades(self, rows: list[dict[str, Any]]) -> int:
+        """Grade past trades once, so the styles start from the record already made. Each row needs
+        exit_profile, pnl, counterfactual_pnl, cost and simulated."""
+        if self.db.one("SELECT 1 FROM arms WHERE kind='exit' AND (edge_n > 0 OR sim_edge_n > 0)"):
+            return 0
+        n = 0
+        for r in rows:
+            if r["exit_profile"] and r["cost"] and r["counterfactual_pnl"] is not None:
+                self.grade_exit(r["exit_profile"], (r["pnl"] - r["counterfactual_pnl"]) / r["cost"], bool(r["simulated"]))
+                n += 1
+        return n
 
     def choose_exit_profile(self) -> str:
         draws = {name: self.rng.gauss(*self._exit_posterior(name)) for name in EXIT_PROFILES}
@@ -188,7 +221,7 @@ class Learner:
         out = []
         for name, meta in EXIT_PROFILES.items():
             row = rows.get(name)
-            n_eff, _, total = self._effective(row) if row else (0.0, 0.0, 0.0)
+            n_eff, total = self._edge(row) if row else (0.0, 0.0)
             out.append(
                 {
                     "key": name,

@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS arms (
   sum_price REAL NOT NULL DEFAULT 0,
   saved INTEGER NOT NULL DEFAULT 0,
   shaken INTEGER NOT NULL DEFAULT 0,
+  -- Exit styles only: each finished trade's P&L minus what holding to the end would have paid,
+  -- per dollar risked (0 for a trade that was held).
+  edge_n INTEGER NOT NULL DEFAULT 0,
+  sum_edge REAL NOT NULL DEFAULT 0,
+  sim_edge_n INTEGER NOT NULL DEFAULT 0,
+  sim_sum_edge REAL NOT NULL DEFAULT 0,
   PRIMARY KEY (key, kind)
 );
 
@@ -202,6 +208,10 @@ MIGRATIONS = [
     ("positions", "label", "TEXT"),
     ("positions", "watch", "INTEGER NOT NULL DEFAULT 0"),
     ("soccer_positions", "watch", "INTEGER NOT NULL DEFAULT 0"),
+    ("arms", "edge_n", "INTEGER NOT NULL DEFAULT 0"),
+    ("arms", "sum_edge", "REAL NOT NULL DEFAULT 0"),
+    ("arms", "sim_edge_n", "INTEGER NOT NULL DEFAULT 0"),
+    ("arms", "sim_sum_edge", "REAL NOT NULL DEFAULT 0"),
 ]
 
 JSON_COLUMNS = {"context", "memory_ids", "data", "tags", "tools", "plays", "by_quarter"}
