@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Check, ChevronDown, Minus, Plus, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../../api'
+import { asksFor, bookSide, count, planBuy, useBook } from '../../book'
 import { cents, money, pct, segmentLabel, sideLabel, winsIf } from '../../format'
 import { askOf, bidOf, modelChance, sizeOrder, type Pick } from '../../lib'
 import { useStore } from '../../store'
@@ -11,7 +12,7 @@ import { Button } from '../ui'
 import { useWatchNewBets, WatchSwitch } from '../Watch'
 
 const QUICK = [25, 100, 300]
-const SLIPPAGE = 2 // cents above the current price we will still accept, so a moving price does not bounce the order
+const SLIPPAGE = 2 // cents above the last price the order needs, so a moving price does not bounce it
 
 function Line({ label, value, tone, strong }: { label: string; value: string; tone?: string; strong?: boolean }) {
   return (
@@ -76,8 +77,10 @@ export default function OrderPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  const [partial, setPartial] = useState(false)
 
   const rung = useMemo(() => (pick ? (rungs.find((r) => r.ticker === pick.ticker) ?? null) : null), [rungs, pick])
+  const book = useBook(rung?.ticker ?? null)
 
   // A new pick starts a clean order.
   useEffect(() => {
@@ -93,10 +96,10 @@ export default function OrderPanel({
         <AnimatePresence mode="wait">
           {done ? (
             <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center px-6 py-12 text-center">
-              <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-mint/15 text-mint">
+              <span className={clsx('mb-3 flex h-12 w-12 items-center justify-center rounded-full', partial ? 'bg-gold/15 text-gold' : 'bg-mint/15 text-mint')}>
                 <Check size={22} />
               </span>
-              <div className="h-section">Order placed</div>
+              <div className="h-section">{partial ? 'Only part of your order filled' : 'Order placed'}</div>
               <p className="hint mt-1">{done}</p>
               <Button variant="outline" className="mt-5" onClick={() => setDone(null)}>
                 Done
@@ -118,9 +121,13 @@ export default function OrderPanel({
   const bid = bidOf(rung, side)
   const closed = closedSegments.has(rung.segment ?? 'game')
   const dollars = Number(amount) || 0
-  const order = ask != null ? sizeOrder(dollars, ask) : { contracts: 0, cost: 0, fees: 0 }
+  // Sized from Kalshi's book when it has loaded: a big order works through several prices.
+  const asks = book ? asksFor(book, bookSide(side)) : []
+  const plan = asks.length ? planBuy(dollars, asks, fixedLimit ?? 99) : null
+  const order = plan ?? (ask != null ? sizeOrder(dollars, ask) : { contracts: 0, cost: 0, fees: 0 })
+  const avg = plan?.avg ?? ask
   const profit = order.contracts - order.cost
-  const limit = fixedLimit ?? (ask != null ? Math.min(99, ask + SLIPPAGE) : null)
+  const limit = fixedLimit ?? (plan?.worst != null ? Math.min(99, Math.ceil(plan.worst) + SLIPPAGE) : ask != null ? Math.min(99, ask + SLIPPAGE) : null)
   const model = modelChance(rung, side)
   const where = rung.segment && rung.segment !== 'game' ? `${segmentLabel(rung.segment)} ${rung.kind === 'spread' ? 'spread' : 'total'}` : `Full game ${rung.kind === 'spread' ? 'spread' : 'total'}`
 
@@ -130,12 +137,12 @@ export default function OrderPanel({
       ? 'No one is selling this side right now.'
       : dollars <= 0
         ? 'Enter an amount.'
-        : order.contracts === 0
-          ? `That is not enough for one contract at ${cents(ask)}.`
-          : !live && order.cost > cash + 0.005
-            ? `You only have ${money(cash)} to spend.`
-            : fixedLimit != null && fixedLimit < ask
-              ? `Your limit of ${cents(fixedLimit)} is below the current price, so this would not fill.`
+        : fixedLimit != null && fixedLimit < ask
+          ? `Your limit of ${cents(fixedLimit)} is below the current price, so this would not fill.`
+          : order.contracts === 0
+            ? `That is not enough for one contract at ${cents(ask)}.`
+            : !live && order.cost > cash + 0.005
+              ? `You only have ${money(cash)} to spend.`
               : null
 
   const place = async () => {
@@ -145,7 +152,11 @@ export default function OrderPanel({
     try {
       const pos = await api.placeOrder({ ticker: rung.ticker, side, contracts: order.contracts, price: limit, watch })
       upsertPosition(pos)
-      const text = `${pos.contracts} of ${pos.label ?? sideLabel(rung, side)} at ${cents(pos.entry_price)}. You paid ${money(pos.cost)} and win ${money(pos.max_profit)} if it comes in.`
+      const short = pos.asked != null && pos.contracts < pos.asked - 0.005
+      const text = short
+        ? `Kalshi ran out of sellers at ${cents(limit)} or less, so you got ${count(pos.contracts)} of the ${count(pos.asked!)} contracts, at ${cents(pos.entry_price)} each. You paid ${money(pos.cost)}; nothing was spent on the rest.`
+        : `${count(pos.contracts)} of ${pos.label ?? sideLabel(rung, side)} at ${cents(pos.entry_price)}. You paid ${money(pos.cost)} and win ${money(pos.max_profit)} if it comes in.`
+      setPartial(short)
       setDone(text)
       onPick(null)
     } catch (e) {
@@ -229,11 +240,19 @@ export default function OrderPanel({
 
         {/* what happens */}
         <div className="mt-5 border-t border-hair pt-3">
-          <Line label={order.contracts ? `You pay (${order.contracts} × ${cents(ask)}${order.fees ? ` + ${money(order.fees)} fee` : ''})` : 'You pay'} value={money(order.cost)} strong />
+          <Line label={order.contracts ? `You pay (${order.contracts} × ${plan && plan.levels > 1 ? `about ${avg!.toFixed(1)}¢` : cents(avg)}${order.fees ? ` + ${money(order.fees)} fee` : ''})` : 'You pay'} value={money(order.cost)} strong />
           <Line label="If you are right, you get" value={money(order.contracts)} />
           <Line label="Your profit if right" value={order.contracts ? `${money(profit, { sign: true })}  (${pct(order.cost ? profit / order.cost : 0)})` : '—'} tone="text-mint" />
           <Line label="If you are wrong, you lose" value={order.contracts ? money(order.cost) : '—'} tone="text-coral" />
         </div>
+
+        {plan && order.contracts > 0 && (plan.levels > 1 || plan.short) && (
+          <p className={clsx('mt-2 text-xs leading-relaxed', plan.short ? 'text-gold' : 'text-dim')}>
+            {plan.short
+              ? `Kalshi only has ${order.contracts} contracts on offer${fixedLimit != null ? ` at ${cents(fixedLimit)} or less` : ''} right now, so this buys ${order.contracts} for ${money(order.cost)}, not your full ${money(dollars)}.`
+              : `Not enough is offered at ${cents(ask)} alone, so the order also takes the next prices, up to ${cents(plan.worst)}.`}
+          </p>
+        )}
 
         <div className="mt-3 rounded-2xl bg-ink-800 px-4 py-3 text-[13px] leading-relaxed text-slate-300">
           The price says this happens about <span className="num font-semibold text-white">{ask != null ? `${ask}%` : '—'}</span> of the time. The model thinks{' '}
@@ -261,7 +280,7 @@ export default function OrderPanel({
             </div>
             <p className="mt-1.5 text-xs leading-relaxed text-dim">
               {fixedLimit == null
-                ? `Following the price: you pay the going rate (${cents(ask)} now), up to ${SLIPPAGE}¢ more if it moves as you tap. You could sell right now for ${cents(bid)}.`
+                ? `Following the price: you pay what Kalshi's sellers ask (${cents(ask)} now, more for a big order), up to ${SLIPPAGE}¢ more if it moves as you tap. You could sell right now for ${cents(bid)}.`
                 : `Fixed at ${cents(fixedLimit)}. The order only fills if the price is at or below that.`}
               {fixedLimit != null && (
                 <button className="ml-1 underline hover:text-mute" onClick={() => setFixedLimit(null)}>
@@ -280,7 +299,8 @@ export default function OrderPanel({
           <div className="mt-4 rounded-2xl border border-coral/40 bg-coral/[0.08] p-4">
             <div className="text-sm font-semibold text-white">This is a real-money order</div>
             <p className="mt-1 text-[13px] leading-relaxed text-slate-300">
-              {money(order.cost)} will be spent from your Kalshi account on {order.contracts} × {sideLabel(rung, side)}.
+              {money(order.cost)} will be spent from your Kalshi account on {order.contracts} × {sideLabel(rung, side)}
+              {plan && plan.levels > 1 ? `, at about ${avg!.toFixed(1)}¢ each (none above ${cents(limit)})` : ''}. If Kalshi runs out of sellers you get fewer, and you will be told.
             </p>
             <div className="mt-3 flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setReviewing(false)}>

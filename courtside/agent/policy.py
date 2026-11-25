@@ -45,6 +45,16 @@ def kalshi_fee(contracts: int, price_cents: float) -> float:
     return math.ceil(0.07 * contracts * p * (1 - p) * 100 - 1e-9) / 100.0
 
 
+SELL_RANGE = 0.15  # a sale walks down the bids this far below the best one (at least 3c), and no further
+
+
+def sell_floor(bid: float) -> int:
+    """The lowest price a sale accepts when the best bid runs out of buyers: deep enough to sell
+    the whole bet the way Kalshi's market sell does, never so deep that it dumps it."""
+    bid = int(round(bid))
+    return max(1, bid - max(3, round(bid * SELL_RANGE)))
+
+
 def size_order(stake: float, price_cents: int) -> tuple[int, float, float]:
     """Contracts affordable for `stake`, plus (cost incl. fees, fees)."""
     contracts = int(stake // (price_cents / 100.0))

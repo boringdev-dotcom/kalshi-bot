@@ -13,12 +13,12 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
-from ..agent.policy import WATCH_CONFIRM_S, kalshi_fee, watch_signal
+from ..agent.policy import WATCH_CONFIRM_S, kalshi_fee, sell_floor, watch_signal
 from ..agent.watch import BetWatcher, checked
 from ..config import Config
 from ..db import DB
 from ..domain import now_iso
-from ..kalshi.client import KalshiError
+from ..kalshi.client import DUST, KalshiError
 from .context import run_of_play
 from .domain import LEAGUE_BY_KEY, LEAGUES, Match, SMarket
 from .feed import SoccerFeed
@@ -128,12 +128,12 @@ class SoccerDesk:
             if not self.engine.kalshi.can_sign:
                 raise SoccerTradeError("Live trading needs Kalshi API keys on the server.")
             try:
-                fill = await self.engine.kalshi.place_order(ticker, "over" if side == "yes" else "under", "buy", contracts, price)
+                fill = await self.engine.kalshi.fill_order(ticker, "over" if side == "yes" else "under", "buy", contracts, price)
             except KalshiError as exc:
                 raise SoccerTradeError(str(exc)) from exc
             if fill["filled"] <= 0:
-                raise SoccerTradeError(f"Kalshi did not fill any contracts at {price}c.")
-            filled, px = fill["filled"], round(fill["price"])
+                raise SoccerTradeError(f"Nobody on Kalshi was selling at {price}c or less, so nothing was bought.")
+            filled, px = fill["filled"], round(fill["price"], 2)
             fees = fill["fees"] or kalshi_fee(filled, px)
         else:
             ask = market.ask(side)
@@ -152,7 +152,14 @@ class SoccerDesk:
             "context": self._context(match), "opened_at": now_iso(), "watch": bool(watch),
         }
         row["id"] = self.db.insert("soccer_positions", row)
-        return self._position(row)
+        short = round(contracts - filled, 2)
+        if short > DUST:
+            self.engine.hub.toast(
+                "warn", f"Only {filled:g} of {contracts:g} bought: {match.label} {row['label']}",
+                f"Kalshi ran out of sellers at {price}c or less. You hold {filled:g} at {px:.0f}c "
+                f"(${row['cost']:,.2f}); the other {short:g} were not bought and nothing was spent on them.",
+            )
+        return {**self._position(row), "asked": contracts}
 
     async def close(self, position_id: int, reason: str = "sold") -> dict[str, Any]:
         row = self.db.one("SELECT * FROM soccer_positions WHERE id=? AND status='open'", [position_id])
@@ -164,17 +171,28 @@ class SoccerDesk:
         if bid is None:
             raise SoccerTradeError("No bid to sell into right now.")
         if row["mode"] == "live":
+            floor = sell_floor(bid)
             try:
-                fill = await self.engine.kalshi.place_order(row["ticker"], "over" if row["side"] == "yes" else "under", "sell", row["contracts"], bid)
+                fill = await self.engine.kalshi.fill_order(row["ticker"], "over" if row["side"] == "yes" else "under", "sell", row["contracts"], floor)
             except KalshiError as exc:
                 raise SoccerTradeError(str(exc)) from exc
             if fill["filled"] <= 0:
-                raise SoccerTradeError(f"Kalshi did not fill the sell at {bid}c.")
-            px = round(fill["price"])
-            fees = fill["fees"] or kalshi_fee(fill["filled"], px)
+                raise SoccerTradeError(f"Nobody on Kalshi was buying at {floor}c or more, so nothing sold. All {row['contracts']:g} contracts are still yours.")
+            sold, px = fill["filled"], round(fill["price"], 2)
+            fees = fill["fees"] or kalshi_fee(sold, px)
         else:
-            px, fees = bid, kalshi_fee(row["contracts"], bid)
-        return self._finish(row, px, reason, fees)
+            sold, px, fees = row["contracts"], bid, kalshi_fee(row["contracts"], bid)
+        keep = round(row["contracts"] - sold, 2)
+        if keep > DUST:
+            row = self._split(row, sold)  # partly sold: the rest stays open (and watched, if it was)
+        trade = self._finish(row, px, reason, fees)
+        trade["left"] = keep if keep > DUST else 0
+        if keep > DUST:
+            self.engine.hub.toast(
+                "warn", f"Only {sold:g} of {sold + keep:g} sold: {row['match_label']} {row['label']}",
+                f"Kalshi ran out of buyers. {keep:g} contracts are still yours and still open in Courtside.",
+            )
+        return trade
 
     # ------------------------------------------------------- watching your bets
     def set_watch(self, position_id: int, on: bool) -> dict[str, Any]:
@@ -257,8 +275,9 @@ class SoccerDesk:
         except SoccerTradeError as exc:
             log.warning("soccer watch: could not sell %s: %s", row["ticker"], exc)
             return
-        self._watch_seen.pop(row["id"], None)
-        self.watcher.forget(row["id"])
+        if not trade.get("left"):
+            self._watch_seen.pop(row["id"], None)
+            self.watcher.forget(row["id"])
         log.info("soccer watch: sold %s %s at %sc (%s)", row["match_label"], row["label"], trade["exit_price"], why)
         self.engine.hub.toast("warn", f"Agent sold {row['match_label']}: {row['label']}",
                               f"{why} {trade['pnl']:+,.2f} at {trade['exit_price']}c.")
@@ -291,9 +310,9 @@ class SoccerDesk:
             if any(r["opened_at"] > cutoff for r in group):
                 continue
             count = held.get(ticker, 0.0)
-            on_kalshi = int(round(max(count, 0) if side == "yes" else max(-count, 0)))
-            missing = sum(r["contracts"] for r in group) - on_kalshi
-            if missing <= 0:
+            on_kalshi = round(max(count, 0) if side == "yes" else max(-count, 0), 2)
+            missing = round(sum(r["contracts"] for r in group) - on_kalshi, 2)
+            if missing <= DUST:
                 continue
             first_open = min(r["opened_at"] for r in group)
             sells = [f for f in await self.engine.kalshi.fills(ticker)
@@ -302,9 +321,9 @@ class SoccerDesk:
             if sold + 1e-9 < missing:
                 continue  # no sale on record: likely settled, so leave it to settlement
             for row in group:  # newest first, matching how the sells were most likely meant
-                if missing <= 0:
+                if missing <= DUST:
                     break
-                take = min(row["contracts"], missing)
+                take = round(min(row["contracts"], missing), 2)
                 px, fees = _fill_price(sells, side, take)
                 if take < row["contracts"]:
                     row = self._split(row, take)
@@ -314,14 +333,14 @@ class SoccerDesk:
             log.info("soccer: %s %s closed, sold on Kalshi at %sc", trade["match_label"], trade["label"], trade["exit_price"])
         return closed
 
-    def _split(self, row: dict[str, Any], take: int) -> dict[str, Any]:
+    def _split(self, row: dict[str, Any], take: float) -> dict[str, Any]:
         """Carve `take` contracts off an open position into a row of their own; returns that row."""
         share = take / row["contracts"]
         part = {k: v for k, v in row.items() if k != "id"}
         part.update(contracts=take, cost=round(row["cost"] * share, 2), fees=round(row["fees"] * share, 2))
         part["id"] = self.db.insert("soccer_positions", part)
         self.db.update("soccer_positions", row["id"], {
-            "contracts": row["contracts"] - take,
+            "contracts": round(row["contracts"] - take, 2),
             "cost": round(row["cost"] - part["cost"], 2),
             "fees": round(row["fees"] - part["fees"], 2),
         })

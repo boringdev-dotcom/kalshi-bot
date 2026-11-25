@@ -90,6 +90,8 @@ export interface SPosition {
   side: SSide
   label: string
   contracts: number
+  /** Set on a fresh order: how many were asked for, when Kalshi filled fewer. */
+  asked?: number
   entry_price: number
   mark_price: number
   cost: number
@@ -111,6 +113,8 @@ export interface STrade {
   match_label: string
   label: string
   contracts: number
+  /** Set on a sale: contracts that did not sell and are still open. */
+  left?: number
   entry_price: number
   exit_price: number
   cost: number

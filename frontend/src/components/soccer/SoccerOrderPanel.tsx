@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { Check, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ApiError } from '../../api'
+import { asksFor, count, planBuy, useBook } from '../../book'
 import { cents, money, pct } from '../../format'
 import { sizeOrder } from '../../lib'
 import { askOf, bidOf, chanceOf, labelOf, soccerApi, type SAccount, type SMarket, type SSide } from '../../soccer'
@@ -10,7 +11,7 @@ import { Button } from '../ui'
 import { useWatchNewBets, WatchSwitch } from '../Watch'
 
 const QUICK = [25, 100, 300]
-const SLIPPAGE = 2 // cents above the current price still accepted, so a moving price does not bounce the order
+const SLIPPAGE = 2 // cents above the last price the order needs, so a moving price does not bounce it
 
 export interface SPick {
   ticker: string
@@ -57,8 +58,10 @@ export default function SoccerOrderPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  const [partial, setPartial] = useState(false)
   const toast = useStore((s) => s.toast)
   const market = pick ? (markets.find((m) => m.ticker === pick.ticker) ?? null) : null
+  const book = useBook(market?.ticker ?? null)
 
   useEffect(() => {
     setReviewing(false)
@@ -71,10 +74,10 @@ export default function SoccerOrderPanel({
       <div className={bare ? 'p-6' : 'surface p-6'}>
         {done ? (
           <div className="flex flex-col items-center py-6 text-center">
-            <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-mint/15 text-mint">
+            <span className={clsx('mb-3 flex h-12 w-12 items-center justify-center rounded-full', partial ? 'bg-gold/15 text-gold' : 'bg-mint/15 text-mint')}>
               <Check size={22} />
             </span>
-            <div className="h-section">Order placed</div>
+            <div className="h-section">{partial ? 'Only part of your order filled' : 'Order placed'}</div>
             <p className="hint mt-1">{done}</p>
             <Button variant="outline" className="mt-5" onClick={() => setDone(null)}>
               Done
@@ -96,9 +99,13 @@ export default function SoccerOrderPanel({
   const ask = askOf(market, side)
   const bid = bidOf(market, side)
   const dollars = Number(amount) || 0
-  const order = ask != null ? sizeOrder(dollars, ask) : { contracts: 0, cost: 0, fees: 0 }
+  // Sized from Kalshi's book when it has loaded: a big order works through several prices.
+  const asks = book ? asksFor(book, side) : []
+  const plan = asks.length ? planBuy(dollars, asks) : null
+  const order = plan ?? (ask != null ? sizeOrder(dollars, ask) : { contracts: 0, cost: 0, fees: 0 })
+  const avg = plan?.avg ?? ask
   const profit = order.contracts - order.cost
-  const limit = ask != null ? Math.min(99, ask + SLIPPAGE) : null
+  const limit = plan?.worst != null ? Math.min(99, Math.ceil(plan.worst) + SLIPPAGE) : ask != null ? Math.min(99, ask + SLIPPAGE) : null
   const model = chanceOf(market, side)
   const cash = account?.cash ?? 0
 
@@ -120,9 +127,14 @@ export default function SoccerOrderPanel({
     setError(null)
     try {
       const pos = await soccerApi.order({ ticker: market.ticker, side, contracts: order.contracts, price: limit, watch })
-      const text = `${pos.contracts} of ${pos.label} at ${cents(pos.entry_price)}. You paid ${money(pos.cost)} and win ${money(pos.max_profit)} if it comes in.`
+      const short = pos.asked != null && pos.contracts < pos.asked - 0.005
+      const text = short
+        ? `Kalshi ran out of sellers at ${cents(limit)} or less, so you got ${count(pos.contracts)} of the ${count(pos.asked!)} contracts, at ${cents(pos.entry_price)} each. You paid ${money(pos.cost)}; nothing was spent on the rest.`
+        : `${count(pos.contracts)} of ${pos.label} at ${cents(pos.entry_price)}. You paid ${money(pos.cost)} and win ${money(pos.max_profit)} if it comes in.`
+      setPartial(short)
       setDone(text)
-      if (bare) toast({ level: 'success', title: 'Order placed', body: text }) // the phone sheet closes, so say it here
+      // the phone sheet closes, so say it here (a short fill is already announced by the server)
+      if (bare && !short) toast({ level: 'success', title: 'Order placed', body: text })
       onPick(null)
       onPlaced()
     } catch (e) {
@@ -199,11 +211,19 @@ export default function SoccerOrderPanel({
         </div>
 
         <div className="mt-5 border-t border-hair pt-3">
-          <Line label={order.contracts ? `You pay (${order.contracts} × ${cents(ask)}${order.fees ? ` + ${money(order.fees)} fee` : ''})` : 'You pay'} value={money(order.cost)} strong />
+          <Line label={order.contracts ? `You pay (${order.contracts} × ${plan && plan.levels > 1 ? `about ${avg!.toFixed(1)}¢` : cents(avg)}${order.fees ? ` + ${money(order.fees)} fee` : ''})` : 'You pay'} value={money(order.cost)} strong />
           <Line label="If you are right, you get" value={money(order.contracts)} />
           <Line label="Your profit if right" value={order.contracts ? `${money(profit, { sign: true })}  (${pct(order.cost ? profit / order.cost : 0)})` : '—'} tone="text-mint" />
           <Line label="If you are wrong, you lose" value={order.contracts ? money(order.cost) : '—'} tone="text-coral" />
         </div>
+
+        {plan && order.contracts > 0 && (plan.levels > 1 || plan.short) && (
+          <p className={clsx('mt-2 text-xs leading-relaxed', plan.short ? 'text-gold' : 'text-dim')}>
+            {plan.short
+              ? `Kalshi only has ${order.contracts} contracts on offer right now, so this buys ${order.contracts} for ${money(order.cost)}, not your full ${money(dollars)}.`
+              : `Not enough is offered at ${cents(ask)} alone, so the order also takes the next prices, up to ${cents(plan.worst)}.`}
+          </p>
+        )}
 
         <div className="mt-3 rounded-2xl bg-ink-800 px-4 py-3 text-[13px] leading-relaxed text-slate-300">
           The price says this happens about <span className="num font-semibold text-white">{ask != null ? `${ask}%` : '—'}</span> of the time. The goals model says{' '}
@@ -226,7 +246,8 @@ export default function SoccerOrderPanel({
           <div className="mt-4 rounded-2xl border border-coral/40 bg-coral/[0.08] p-4">
             <div className="text-sm font-semibold text-white">This is a real-money order</div>
             <p className="mt-1 text-[13px] leading-relaxed text-slate-300">
-              {money(order.cost)} will be spent from your Kalshi account on {order.contracts} × {labelOf(market, side)}.
+              {money(order.cost)} will be spent from your Kalshi account on {order.contracts} × {labelOf(market, side)}
+              {plan && plan.levels > 1 ? `, at about ${avg!.toFixed(1)}¢ each (none above ${cents(limit)})` : ''}. If Kalshi runs out of sellers you get fewer, and you will be told.
             </p>
             <div className="mt-3 flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setReviewing(false)}>

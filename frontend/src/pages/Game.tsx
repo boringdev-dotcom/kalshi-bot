@@ -13,8 +13,10 @@ import OrderPanel from '../components/game/OrderPanel'
 import Scoreboard from '../components/game/Scoreboard'
 import SpreadBar from '../components/game/SpreadBar'
 import TotalChart from '../components/TotalChart'
+import { SellPreview, soldToast } from '../components/SellPreview'
 import { WatchPill } from '../components/Watch'
 import { Button, Dialog, Empty, LiveDot, Segmented, Skeleton } from '../components/ui'
+import { count } from '../book'
 import { cents, mmss, money, pct, periodLabel, pnlColor, tradeLabel } from '../format'
 import { bidOf, fee, gameLine, impliedLine, impliedSpread, marginText, quarterNumber, spreadWinZone, useGameDetail, useMediaQuery, type Pick } from '../lib'
 import { useStore } from '../store'
@@ -163,7 +165,8 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
     try {
       const trade = await api.closePosition(selling.id)
       addTrade(trade, selling.id)
-      toast({ level: trade.pnl >= 0 ? 'success' : 'warn', title: `Sold ${tradeLabel(selling)}`, body: `${money(trade.pnl, { sign: true })} on the trade.` })
+      const note = soldToast(trade, tradeLabel(selling))
+      if (note) toast(note)
       setSelling(null)
     } catch (e) {
       toast({ level: 'error', title: 'Could not sell', body: e instanceof ApiError ? e.message : '' })
@@ -181,7 +184,7 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
             <div className="min-w-0 flex-1">
               <div className="break-words text-sm font-medium text-white">{tradeLabel(p)}</div>
               <div className="num mt-0.5 text-xs text-dim">
-                {p.contracts} at {cents(p.entry_price)} · {pct(p.p_win)} chance now · {p.opened_by === 'agent' ? 'Agent' : 'You'}
+                {count(p.contracts)} at {cents(p.entry_price)} · {pct(p.p_win)} chance now · {p.opened_by === 'agent' ? 'Agent' : 'You'}
               </div>
               {p.opened_by === 'user' && (
                 <div className="mt-1.5">
@@ -204,8 +207,9 @@ function Holdings({ positions, rungs }: { positions: Position[]; rungs: LadderRu
         {selling && (
           <div>
             <p className="hint">
-              You hold {selling.contracts} contracts bought at {cents(selling.entry_price)} for {money(selling.cost)}.
+              You hold {count(selling.contracts)} contracts bought at {cents(selling.entry_price)} for {money(selling.cost)}.
             </p>
+            {selling.mode === 'live' && <SellPreview ticker={selling.ticker} side={selling.side} contracts={selling.contracts} />}
             <div className="mt-4 space-y-2 text-sm">
               <div className="flex items-start justify-between gap-4">
                 <span className="text-mute">Sell now{bid != null ? ` at ${cents(bid)}` : ''}</span>

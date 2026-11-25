@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom'
 import GameAnalysis from '../../components/game/GameAnalysis'
 import SoccerOrderPanel, { type SPick } from '../../components/soccer/SoccerOrderPanel'
 import { Button, Empty, LiveDot, Segmented, Skeleton } from '../../components/ui'
+import { count } from '../../book'
 import { WatchPill } from '../../components/Watch'
 import { cents, money, pct, pnlColor, teamColor } from '../../format'
 import { useMediaQuery } from '../../lib'
@@ -251,7 +252,7 @@ function Positions({ positions, reload }: { positions: SPosition[]; reload: () =
             <div className="min-w-0 flex-1">
               <div className="break-words text-[14px] font-medium text-white">{p.label}</div>
               <div className="num text-xs text-dim">
-                {p.contracts} at {cents(p.entry_price)} · now {cents(p.mark_price)} · model {p.p_win != null ? pct(p.p_win) : '—'}
+                {count(p.contracts)} at {cents(p.entry_price)} · now {cents(p.mark_price)} · model {p.p_win != null ? pct(p.p_win) : '—'}
               </div>
               <div className="mt-1.5">
                 <WatchPill on={p.watch} note={p.watch_note} onChange={(on) => watch(p.id, on)} />
