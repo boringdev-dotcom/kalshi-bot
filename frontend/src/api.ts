@@ -15,6 +15,7 @@ import type {
   Trade,
   TrainResult,
 } from './types'
+import type { Book } from './book'
 
 /** The agent's favourite bets on one game or match (85-90% confidence, priced below it). */
 export interface FavPick {
@@ -110,6 +111,8 @@ export const api = {
   positions: () => req<Position[]>('/positions'),
   closePosition: (id: number) => req<Trade>(`/positions/${id}/close`, json('POST')),
   watchPosition: (id: number, on: boolean) => req<Position>(`/positions/${id}/watch`, json('POST', { on })),
+  /** Kalshi's order book for one market (any sport). */
+  book: (ticker: string) => req<Book>(`/book/${encodeURIComponent(ticker)}`),
   trades: (limit = 100) => req<Trade[]>(`/trades${qs({ limit })}`),
   decisions: (limit = 100, gameId?: string) => req<Decision[]>(`/decisions${qs({ limit, game_id: gameId })}`),
   placeOrder: (order: OrderRequest) => req<Position>('/orders', json('POST', order)),

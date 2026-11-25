@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
 import { api, ApiError, type AccountHistory } from '../api'
 import { Badge, Button, Dialog, Empty, Segmented, SimTag, Skeleton, Stat, Ticker } from '../components/ui'
+import { SellPreview, soldToast } from '../components/SellPreview'
 import { WatchPill } from '../components/Watch'
 import { cents, money, pct, pnlColor, relTime, segmentLabel, shortDate, tradeLabel } from '../format'
 import { soccerApi, usePoll, type SPosition } from '../soccer'
@@ -421,11 +422,8 @@ export default function Portfolio() {
     try {
       const trade = await api.closePosition(closing.id)
       addTrade(trade, closing.id)
-      toast({
-        level: trade.pnl >= 0 ? 'success' : 'warn',
-        title: `Sold ${tradeLabel(trade)}: ${money(trade.pnl, { sign: true })}`,
-        body: `${trade.contracts} sold at ${cents(trade.exit_price)} · ${trade.game_label}`,
-      })
+      const note = soldToast(trade, tradeLabel(trade))
+      if (note) toast({ ...note, body: `${note.body} · ${trade.game_label}` })
       setClosing(null)
     } catch (e) {
       toast({ level: 'error', title: 'Could not sell that position', body: e instanceof ApiError ? e.message : '' })
@@ -555,6 +553,7 @@ export default function Portfolio() {
                 ? 'This sends a real sell order to Kalshi at the current price.'
                 : 'This is a paper position, so nothing is sent to Kalshi.'}
             </p>
+            {closingLive.mode === 'live' && <SellPreview ticker={closingLive.ticker} side={closingLive.side} contracts={closingLive.contracts} />}
             <div className="mt-5 flex gap-2">
               <Button variant="ghost" size="md" className="flex-1" onClick={() => setClosing(null)} disabled={busy}>
                 Keep it

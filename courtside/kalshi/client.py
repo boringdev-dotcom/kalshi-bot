@@ -13,6 +13,13 @@ market can only spend from its own shard (NBA and the soccer leagues sit on
 different ones). The Kalshi app and site move cash between shards when you
 order; API orders do not, so `fund_shard` tops the market's shard up from the
 others before each buy.
+
+An immediate-or-cancel order only takes what rests at or better than its limit
+the moment it lands, so `fill_order` sends the limit as the worst price you
+accept (the order still trades best prices first) and goes back for any
+remainder a couple of times, the way Kalshi's app finishes a market order.
+Fills can be fractional (another trader's 78.57 contracts), so counts are
+kept to the hundredth.
 """
 
 from __future__ import annotations
@@ -35,6 +42,9 @@ READS_PER_SECOND = 8.0  # Kalshi turns away bursts of reads past about a dozen a
 NBA_TOTAL_SERIES = "KXNBATOTAL"
 NBA_SPREAD_SERIES = "KXNBASPREAD"  # full-game spreads; quarters have their own series below
 CENTICENTS_PER_DOLLAR = 10_000  # shard transfers are sized in hundredths of a cent
+FILL_TRIES = 3  # an order goes back for what is left this many times in all
+FILL_PAUSE_S = 1.5  # time for fresh offers to arrive before going back
+DUST = 0.005  # contracts left below this are nothing
 
 
 def quarter_series(q: int, kind: str) -> str:
@@ -86,6 +96,29 @@ def side_and_price(side: str, action: str, price_cents: int) -> tuple[str, str]:
         v2_side = "ask" if action == "buy" else "bid"
         yes_price = 100 - price_cents
     return v2_side, f"{yes_price / 100:.4f}"
+
+
+def offers(book: dict[str, list[tuple[float, float]]], side: str, action: str) -> list[tuple[float, float]]:
+    """What an order can trade against, best first, priced for `side` (over = YES, under = NO).
+
+    Kalshi's book lists only bids. A sell meets the bids for your side; a buy meets the other
+    side's bids, since buying YES at p is someone else buying NO at 100 - p.
+    """
+    mine, other = (book["yes"], book["no"]) if side == "over" else (book["no"], book["yes"])
+    if action == "sell":
+        return mine
+    return [(100 - p, n) for p, n in other]
+
+
+def walk(levels: list[tuple[float, float]], contracts: float) -> dict[str, Any]:
+    """Fill `contracts` from `levels` (best first): how many fit, their average price, the worst price touched."""
+    left, got, spent, worst = contracts, 0.0, 0.0, None
+    for price, size in levels:
+        if left <= DUST:
+            break
+        take = min(size, left)
+        got, spent, left, worst = got + take, spent + take * price, left - take, price
+    return {"contracts": round(got, 2), "avg": spent / got if got else None, "worst": worst}
 
 
 class KalshiClient:
@@ -183,6 +216,18 @@ class KalshiClient:
     async def market(self, ticker: str) -> dict[str, Any]:
         data = await self._request("GET", f"/markets/{ticker}", host=PUBLIC_HOST)
         return data.get("market") or data
+
+    async def orderbook(self, ticker: str) -> dict[str, list[tuple[float, float]]]:
+        """Resting bids for each side, best (highest) first: {"yes": [(cents, contracts)], "no": [...]}.
+
+        Read from the host orders go to, since that is the book an order meets."""
+        data = await self._request("GET", f"/markets/{ticker}/orderbook")
+        book = data.get("orderbook_fp") or {}
+        out: dict[str, list[tuple[float, float]]] = {}
+        for side in ("yes", "no"):
+            levels = [(round(float(p) * 100, 2), float(n)) for p, n in book.get(f"{side}_dollars") or []]
+            out[side] = sorted((lv for lv in levels if lv[1] > 0), reverse=True)
+        return out
 
     # -- signed portfolio ---------------------------------------------------
     async def balance(self) -> dict[str, float]:
@@ -300,17 +345,51 @@ class KalshiClient:
                 pass
         return moves
 
-    async def place_order(
-        self, ticker: str, side: str, action: str, contracts: int, price_cents: int
+    async def fill_order(
+        self, ticker: str, side: str, action: str, contracts: float, limit_cents: int,
+        *, tries: int = FILL_TRIES, pause: float = FILL_PAUSE_S,
     ) -> dict[str, Any]:
-        """Immediate-or-cancel limit order. Returns filled contracts and average price.
+        """Buy or sell `contracts`, at prices no worse than `limit_cents`, going back for any remainder.
+
+        Returns the total filled, its average price, the fees, how many were asked for and
+        how many are left unfilled (0 when it all went through).
+        """
+        left, got, spent, fees, ids = float(contracts), 0.0, 0.0, 0.0, []
+        for attempt in range(tries):
+            if attempt:
+                await asyncio.sleep(pause)
+            fill = await self.place_order(ticker, side, action, round(left, 2), limit_cents, fund=attempt == 0)
+            if fill["order_id"]:
+                ids.append(fill["order_id"])
+            if fill["filled"] > 0:
+                got += fill["filled"]
+                spent += fill["filled"] * fill["price"]
+                fees += fill["fees"]
+                left -= fill["filled"]
+            if left <= DUST:
+                break
+        got = round(got, 2)
+        return {
+            "order_id": ids[0] if ids else None,
+            "order_ids": ids,
+            "filled": got,
+            "price": spent / got if got else float(limit_cents),
+            "fees": round(fees, 2),
+            "asked": round(float(contracts), 2),
+            "left": round(max(left, 0.0), 2) if left > DUST else 0.0,
+        }
+
+    async def place_order(
+        self, ticker: str, side: str, action: str, contracts: float, price_cents: int, *, fund: bool = True
+    ) -> dict[str, Any]:
+        """One immediate-or-cancel limit order. Returns filled contracts and average price.
 
         A buy first makes sure the market's shard holds enough cash (see `fund_shard`).
 
         `price_cents` is the limit for the side being traded (e.g. 94 to buy the
-        under at 94c). The returned `price` is expressed the same way.
+        under at 94c, filling at 94c or better). The returned `price` is expressed the same way.
         """
-        if action == "buy":
+        if action == "buy" and fund:
             p = price_cents / 100.0
             fee = math.ceil(0.07 * contracts * p * (1 - p) * 100 - 1e-9) / 100.0
             await self.fund_shard(ticker, contracts * p + fee + 0.01)
@@ -336,7 +415,7 @@ class KalshiClient:
         fee_each = float(data.get("average_fee_paid") or 0)
         return {
             "order_id": data.get("order_id"),
-            "filled": int(filled),
+            "filled": round(filled, 2),
             "price": fill_cents,
             "fees": round(fee_each * filled, 2),
         }

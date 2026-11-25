@@ -26,7 +26,7 @@ from ..feeds.live import LiveFeed
 from ..feeds.patterns import PATTERN_LABELS, pattern_keys, pattern_texts
 from ..feeds.sim import SimFeed
 from ..history import adjusted_history
-from ..kalshi.client import KalshiClient, KalshiError
+from ..kalshi.client import DUST, KalshiClient, KalshiError
 from ..model.quarters import implied_margin, implied_quarter_total
 from ..model.totals import refresh_game
 from .learner import Learner
@@ -40,6 +40,7 @@ from .policy import (
     exit_signal,
     find_entries,
     kalshi_fee,
+    sell_floor,
     WATCH_CONFIRM_S,
     position_p_win,
     size_order,
@@ -574,16 +575,17 @@ class Engine:
         self.decide("skip", skip.headline, skip.reasoning, game=game, data=skip.data, source=source, confidence=0.6)
 
     # ----------------------------------------------------------------- orders
-    async def _buy(self, rung: Rung, side: str, contracts: int, limit: int, mode: str) -> tuple[int, int, float]:
-        """Returns (filled contracts, fill price in cents, fees in dollars)."""
+    async def _buy(self, rung: Rung, side: str, contracts: int, limit: int, mode: str) -> tuple[float, float, float]:
+        """Returns (filled contracts, average fill price in cents, fees in dollars). Live orders
+        work through every offer up to `limit`; fewer than asked can come back if Kalshi runs out."""
         if mode == "live":
             try:
-                fill = await self.kalshi.place_order(rung.ticker, side, "buy", contracts, limit)
+                fill = await self.kalshi.fill_order(rung.ticker, side, "buy", contracts, limit)
             except KalshiError as exc:
                 raise TradeError(str(exc)) from exc
             if fill["filled"] <= 0:
-                raise TradeError(f"Kalshi did not fill any contracts at {limit}c.")
-            price = round(fill["price"])
+                raise TradeError(f"Nobody on Kalshi was selling at {limit}c or less, so nothing was bought.")
+            price = round(fill["price"], 2)
             return fill["filled"], price, fill["fees"] or kalshi_fee(fill["filled"], price)
         ask = rung.ask(side)
         if ask is None:
@@ -592,21 +594,24 @@ class Engine:
             raise TradeError(f"The ask moved to {ask}c, above your {limit}c limit.")
         return contracts, ask, kalshi_fee(contracts, ask)
 
-    async def _sell(self, row: dict[str, Any], rung: Optional[Rung], limit: Optional[int]) -> tuple[int, int, float]:
+    async def _sell(self, row: dict[str, Any], rung: Optional[Rung], limit: Optional[int]) -> tuple[float, float, float]:
+        """Returns (contracts sold, average price in cents, fees). Live sales walk down the bids to
+        `sell_floor` and go back for any left; whatever still did not sell stays open."""
         bid = rung.bid(row["side"]) if rung else None
         if bid is None:
             raise TradeError("No bid to sell into right now.")
-        price = bid if limit is None else limit
         if row["mode"] == "live":
+            floor = limit if limit is not None else sell_floor(bid)
             try:
-                fill = await self.kalshi.place_order(row["ticker"], row["side"], "sell", row["contracts"], price)
+                fill = await self.kalshi.fill_order(row["ticker"], row["side"], "sell", row["contracts"], floor)
             except KalshiError as exc:
                 raise TradeError(str(exc)) from exc
             if fill["filled"] <= 0:
-                raise TradeError(f"Kalshi did not fill the sell at {price}c.")
-            px = round(fill["price"])
+                raise TradeError(f"Nobody on Kalshi was buying at {floor}c or more, so nothing sold. All {row['contracts']:g} contracts are still yours.")
+            px = round(fill["price"], 2)
             return fill["filled"], px, fill["fees"] or kalshi_fee(fill["filled"], px)
-        return row["contracts"], bid, kalshi_fee(row["contracts"], bid)
+        price = bid if limit is None else limit
+        return row["contracts"], price, kalshi_fee(row["contracts"], price)
 
     async def open_position(
         self,
@@ -639,6 +644,7 @@ class Engine:
             if needed > self.account()["cash"] + 1e-6:
                 raise TradeError(f"Not enough paper cash: need ${needed:,.2f}.")
         filled, price, fees = await self._buy(rung, side, contracts, limit, mode)
+        short = round(contracts - filled, 2)
         row_id = self.db.insert(
             "positions",
             {
@@ -671,13 +677,22 @@ class Engine:
         )
         self._acted_at = time.monotonic()
         position = next(p for p in self.positions_api() if p["id"] == row_id)
+        position["asked"] = contracts
         self.hub.emit("positions", self.positions_api())
-        self.hub.toast(
-            "success",
-            f"Bought {game.label} {rung.position_label(side)}",
-            f"{filled} contracts at {price}c · ${position['cost']:,.2f} to win ${position['max_profit']:,.2f}"
-            + (" · LIVE" if mode == "live" else ""),
-        )
+        if short > DUST:
+            self.hub.toast(
+                "warn",
+                f"Only {filled:g} of {contracts:g} bought: {game.label} {rung.position_label(side)}",
+                f"Kalshi ran out of sellers at {limit}c or less. You hold {filled:g} at {price:.0f}c "
+                f"(${position['cost']:,.2f}); the other {short:g} were not bought and nothing was spent on them.",
+            )
+        else:
+            self.hub.toast(
+                "success",
+                f"Bought {game.label} {rung.position_label(side)}",
+                f"{filled:g} contracts at {price:.0f}c · ${position['cost']:,.2f} to win ${position['max_profit']:,.2f}"
+                + (" · LIVE" if mode == "live" else ""),
+            )
         return position
 
     async def close_position(self, position_id: int, reason: str = "manual", limit: Optional[int] = None) -> dict[str, Any]:
@@ -687,15 +702,22 @@ class Engine:
         game = self.by_id.get(row["game_id"])
         rung = game.rung(row["ticker"]) if game else None
         filled, price, fees = await self._sell(row, rung, limit)
-        if filled < row["contracts"]:
-            # Partial fill: keep the remainder open and book the filled slice.
-            keep = row["contracts"] - filled
+        keep = round(row["contracts"] - filled, 2)
+        if keep > DUST:
+            # Partly sold: the rest stays open (and watched, if it was) and the sold slice is booked.
             share = filled / row["contracts"]
             self.db.update("positions", row["id"], {"contracts": keep, "cost": round(row["cost"] * (1 - share), 2), "fees": round(row["fees"] * (1 - share), 2)})
             sold = {k: v for k, v in row.items() if k != "id"}
             sold.update(contracts=filled, cost=round(row["cost"] * share, 2), fees=round(row["fees"] * share, 2))
             row = {**sold, "id": self.db.insert("positions", sold)}
-        return self._finish(row, price, reason, exit_fees=fees, game=game)
+        trade = self._finish(row, price, reason, exit_fees=fees, game=game)
+        trade["left"] = keep if keep > DUST else 0
+        if keep > DUST:
+            self.hub.toast(
+                "warn", f"Only {filled:g} of {filled + keep:g} sold: {row['game_label']} {self._label(row)}",
+                f"Kalshi ran out of buyers. {keep:g} contracts are still yours and still open in Courtside.",
+            )
+        return trade
 
     def _finish(
         self,

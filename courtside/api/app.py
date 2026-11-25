@@ -20,11 +20,13 @@ from ..agent.brain import Brain
 from .auth import COOKIE, Auth
 from ..agent.engine import Engine, TradeError
 from ..agent.playbook import STRATEGIES
+from ..agent.policy import sell_floor
 from ..agent.trainer import train
 from ..config import Config, get_config
 from ..db import DB
 from ..domain import SEGMENTS, rung_dict
 from ..events import Hub
+from ..kalshi.client import KalshiError
 from ..soccer.desk import SoccerDesk, SoccerTradeError
 
 log = logging.getLogger(__name__)
@@ -245,6 +247,21 @@ def create_app(db_path: Optional[str] = None, start_engine: bool = True, cfg: Op
         if game_id:
             return db.query("SELECT * FROM decisions WHERE game_id=? ORDER BY id DESC LIMIT ?", [game_id, limit])
         return db.query("SELECT * FROM decisions ORDER BY id DESC LIMIT ?", [limit])
+
+    @app.get("/api/book/{ticker}")
+    async def order_book(ticker: str) -> dict[str, Any]:
+        """Kalshi's resting bids on both sides of a market, best first, so an order form can show
+        what a buy or sale of any size would really fill at. `floor` is how low a sale of that
+        side would go (the desks sell with the same rule)."""
+        try:
+            book = await engine.kalshi.orderbook(ticker)
+        except KalshiError as exc:
+            raise HTTPException(502, str(exc))
+        return {
+            "yes": [[p, n] for p, n in book["yes"]],
+            "no": [[p, n] for p, n in book["no"]],
+            "floor": {side: sell_floor(book[side][0][0]) if book[side] else None for side in ("yes", "no")},
+        }
 
     @app.post("/api/orders")
     async def post_order(body: OrderBody) -> dict[str, Any]:
